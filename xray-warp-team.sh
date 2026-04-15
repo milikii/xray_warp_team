@@ -7,6 +7,7 @@ DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
 DEFAULT_FINGERPRINT="chrome"
+DEFAULT_CF_CERT_VALIDITY="5475"
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
@@ -20,9 +21,14 @@ TLS_CERT_FILE="${SSL_DIR}/cert.pem"
 TLS_KEY_FILE="${SSL_DIR}/key.pem"
 WARP_MDM_FILE="/var/lib/cloudflare-warp/mdm.xml"
 BACKUP_ROOT="/root/xray-warp-team-backups"
+NET_SYSCTL_CONF="/etc/sysctl.d/98-xray-warp-team-net.conf"
+NET_HELPER_PATH="/usr/local/sbin/xray-warp-team-net-optimize.sh"
+NET_SERVICE_NAME="xray-warp-team-net-optimize.service"
+NET_SERVICE_FILE="/etc/systemd/system/${NET_SERVICE_NAME}"
 
 NON_INTERACTIVE=0
 ENABLE_WARP=""
+ENABLE_NET_OPT=""
 CERT_MODE=""
 SERVER_IP=""
 REALITY_UUID=""
@@ -42,6 +48,9 @@ WARP_CLIENT_SECRET=""
 WARP_PROXY_PORT="${DEFAULT_WARP_PROXY_PORT}"
 CERT_SOURCE_FILE=""
 KEY_SOURCE_FILE=""
+CF_ZONE_ID=""
+CF_API_TOKEN=""
+CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
 
 log() {
   printf '[INFO] %s\n' "$*"
@@ -84,11 +93,16 @@ Install options:
   --xhttp-uuid VALUE          UUID for the XHTTP CDN node.
   --xhttp-domain VALUE        Orange-cloud domain for the XHTTP CDN node.
   --xhttp-path VALUE          XHTTP path, for example /cfup-example.
-  --cert-mode VALUE           self-signed or existing.
+  --cert-mode VALUE           self-signed, existing, or cf-origin-ca.
   --cert-file VALUE           Existing certificate file when --cert-mode existing.
   --key-file VALUE            Existing key file when --cert-mode existing.
+  --cf-zone-id VALUE          Cloudflare zone ID for cf-origin-ca mode.
+  --cf-api-token VALUE        Cloudflare API token for cf-origin-ca mode.
+  --cf-cert-validity VALUE    Cloudflare Origin CA validity days. Default: 5475
   --enable-warp               Enable selective WARP outbound.
   --disable-warp              Disable WARP outbound.
+  --enable-net-opt            Enable BBR/FQ/RPS network optimization.
+  --disable-net-opt           Disable network optimization.
   --warp-team VALUE           Cloudflare Zero Trust team name.
   --warp-client-id VALUE      Service token client ID.
   --warp-client-secret VALUE  Service token client secret.
@@ -100,6 +114,7 @@ Examples:
     --server-ip 203.0.113.10 \
     --xhttp-domain cdn.example.com \
     --cert-mode self-signed \
+    --enable-net-opt \
     --disable-warp
 EOF
 }
@@ -247,7 +262,7 @@ backup_path() {
 install_packages() {
   log "Installing required packages."
   apt-get update
-  apt-get install -y ca-certificates curl gnupg haproxy openssl unzip uuid-runtime jq
+  apt-get install -y ca-certificates curl gnupg haproxy iproute2 jq kmod openssl unzip uuid-runtime
 }
 
 install_xray() {
@@ -315,13 +330,13 @@ prepare_install_inputs() {
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN domain" ""
   prompt_with_default XHTTP_PATH "XHTTP path" "$(random_path)"
-  prompt_with_default CERT_MODE "TLS certificate mode (self-signed/existing)" "self-signed"
+  prompt_with_default CERT_MODE "TLS certificate mode (self-signed/existing/cf-origin-ca)" "self-signed"
 
   case "${CERT_MODE}" in
-    self-signed|existing)
+    self-signed|existing|cf-origin-ca)
       ;;
     *)
-      die "Unsupported cert mode: ${CERT_MODE}. Use self-signed or existing."
+      die "Unsupported cert mode: ${CERT_MODE}. Use self-signed, existing, or cf-origin-ca."
       ;;
   esac
 
@@ -329,6 +344,27 @@ prepare_install_inputs() {
     prompt_with_default CERT_SOURCE_FILE "Existing certificate file path" ""
     prompt_with_default KEY_SOURCE_FILE "Existing key file path" ""
   fi
+
+  if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
+    prompt_with_default CF_ZONE_ID "Cloudflare zone ID" ""
+    prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA validity days" "${DEFAULT_CF_CERT_VALIDITY}"
+    prompt_secret CF_API_TOKEN "Cloudflare API token"
+  fi
+
+  prompt_yes_no ENABLE_NET_OPT "Enable network optimization? [y/n]" "y"
+  ENABLE_NET_OPT="$(printf '%s' "${ENABLE_NET_OPT}" | tr 'A-Z' 'a-z')"
+
+  case "${ENABLE_NET_OPT}" in
+    y|yes)
+      ENABLE_NET_OPT="yes"
+      ;;
+    n|no)
+      ENABLE_NET_OPT="no"
+      ;;
+    *)
+      die "ENABLE_NET_OPT must be yes or no."
+      ;;
+  esac
 
   prompt_yes_no ENABLE_WARP "Enable selective WARP outbound? [y/n]" "y"
   ENABLE_WARP="$(printf '%s' "${ENABLE_WARP}" | tr 'A-Z' 'a-z')"
@@ -350,6 +386,86 @@ prepare_install_inputs() {
   esac
 }
 
+write_cf_origin_csr() {
+  local csr_file="${1}"
+  local openssl_cfg=""
+
+  openssl_cfg="$(mktemp)"
+  cat > "${openssl_cfg}" <<EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+CN = ${XHTTP_DOMAIN}
+
+[v3_req]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = ${XHTTP_DOMAIN}
+EOF
+
+  openssl req -new -sha256 \
+    -key "${TLS_KEY_FILE}" \
+    -out "${csr_file}" \
+    -config "${openssl_cfg}" >/dev/null 2>&1
+
+  rm -f "${openssl_cfg}"
+}
+
+request_cf_origin_ca_cert() {
+  local csr_file=""
+  local csr_json=""
+  local response=""
+  local cert_body=""
+  local error_text=""
+
+  [[ -n "${CF_ZONE_ID}" ]] || die "CF_ZONE_ID is required for cf-origin-ca mode."
+  [[ -n "${CF_API_TOKEN}" ]] || die "CF_API_TOKEN is required for cf-origin-ca mode."
+
+  csr_file="$(mktemp)"
+  openssl ecparam -name prime256v1 -genkey -noout -out "${TLS_KEY_FILE}"
+  chmod 0640 "${TLS_KEY_FILE}"
+  write_cf_origin_csr "${csr_file}"
+  csr_json="$(jq -Rs . < "${csr_file}")"
+
+  response="$(curl -fsSL https://api.cloudflare.com/client/v4/certificates \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" \
+    --data "{\"csr\":${csr_json},\"hostnames\":[\"${XHTTP_DOMAIN}\"],\"request_type\":\"origin-ecc\",\"requested_validity\":${CF_CERT_VALIDITY}}" \
+  )" || die "Failed to call Cloudflare Origin CA API."
+
+  cert_body="$(printf '%s' "${response}" | jq -r '.result.certificate // empty')"
+  if [[ -z "${cert_body}" ]]; then
+    error_text="$(printf '%s' "${response}" | jq -r '.errors[0].message // .messages[0].message // "unknown Cloudflare API error"')"
+    die "Cloudflare Origin CA API returned no certificate: ${error_text}"
+  fi
+
+  printf '%b\n' "${cert_body}" > "${TLS_CERT_FILE}"
+  chmod 0640 "${TLS_CERT_FILE}"
+  rm -f "${csr_file}"
+}
+
+set_cloudflare_ssl_mode_strict() {
+  local response=""
+  local success=""
+
+  [[ -n "${CF_ZONE_ID}" ]] || return
+  [[ -n "${CF_API_TOKEN}" ]] || return
+
+  response="$(curl -fsSL -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/settings/ssl" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" \
+    --data '{"value":"strict"}' 2>/dev/null || true)"
+
+  success="$(printf '%s' "${response}" | jq -r '.success // empty' 2>/dev/null || true)"
+  if [[ "${success}" != "true" ]]; then
+    warn "Could not automatically set Cloudflare SSL/TLS mode to strict. Check the zone setting manually."
+  fi
+}
+
 write_tls_assets() {
   local tls_config=""
 
@@ -363,6 +479,8 @@ write_tls_assets() {
 
     install -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
     install -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
+  elif [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
+    request_cf_origin_ca_cert
   else
     tls_config="$(mktemp)"
     cat > "${tls_config}" <<EOF
@@ -390,6 +508,171 @@ EOF
   fi
 
   chown root:xray "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
+
+  if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
+    set_cloudflare_ssl_mode_strict
+  fi
+}
+
+available_cc() {
+  if [[ -r /proc/sys/net/ipv4/tcp_available_congestion_control ]]; then
+    cat /proc/sys/net/ipv4/tcp_available_congestion_control
+  else
+    sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null || true
+  fi
+}
+
+supports_default_qdisc() {
+  sysctl -a 2>/dev/null | grep -q '^net.core.default_qdisc ='
+}
+
+write_net_sysctl_conf() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  {
+    cat <<'EOF'
+# Generated by xray-warp-team.sh
+# Safe baseline for proxy workloads and long-lived TCP sessions.
+
+EOF
+    if supports_default_qdisc; then
+      printf '%s\n' 'net.core.default_qdisc = fq'
+    fi
+    cat <<'EOF'
+net.ipv4.tcp_congestion_control = bbr
+
+net.core.rmem_default = 262144
+net.core.wmem_default = 262144
+net.core.rmem_max = 16777216
+net.core.wmem_max = 16777216
+net.core.optmem_max = 1048576
+net.core.somaxconn = 32768
+
+net.ipv4.ip_local_port_range = 10240 65535
+net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_max_syn_backlog = 8192
+net.ipv4.tcp_max_tw_buckets = 16384
+net.ipv4.tcp_rmem = 4096 262144 16777216
+net.ipv4.tcp_wmem = 4096 65536 16777216
+net.ipv4.tcp_slow_start_after_idle = 0
+net.ipv4.tcp_keepalive_time = 600
+net.ipv4.tcp_keepalive_intvl = 30
+net.ipv4.tcp_keepalive_probes = 5
+
+net.ipv4.udp_rmem_min = 8192
+net.ipv4.udp_wmem_min = 8192
+EOF
+  } > "${tmp_file}"
+
+  backup_path "${NET_SYSCTL_CONF}"
+  install -m 0644 "${tmp_file}" "${NET_SYSCTL_CONF}"
+  rm -f "${tmp_file}"
+}
+
+write_net_helper_script() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<'EOF'
+#!/bin/sh
+set -eu
+
+iface="${1:-${IFACE:-$(ip -o -4 route show to default | awk '{print $5; exit}')}}"
+[ -n "$iface" ] || exit 0
+[ -d "/sys/class/net/$iface" ] || exit 0
+
+cpus="$(nproc 2>/dev/null || echo 1)"
+if [ "$cpus" -le 1 ]; then
+    mask="1"
+else
+    mask="$(printf '%x' "$(( (1 << cpus) - 1 ))")"
+fi
+
+rx_queues="$(find "/sys/class/net/$iface/queues" -maxdepth 1 -type d -name 'rx-*' | wc -l)"
+[ "$rx_queues" -ge 1 ] || rx_queues=1
+
+global_entries=32768
+per_queue=$((global_entries / rx_queues))
+[ "$per_queue" -ge 4096 ] || per_queue=4096
+
+modprobe sch_fq >/dev/null 2>&1 || true
+tc qdisc replace dev "$iface" root fq >/dev/null 2>&1 || true
+
+if [ -w /proc/sys/net/core/rps_sock_flow_entries ]; then
+    printf '%s' "$global_entries" > /proc/sys/net/core/rps_sock_flow_entries
+fi
+
+for f in /sys/class/net/"$iface"/queues/rx-*/rps_cpus; do
+    [ -w "$f" ] || continue
+    printf '%s' "$mask" > "$f"
+done
+
+for f in /sys/class/net/"$iface"/queues/rx-*/rps_flow_cnt; do
+    [ -w "$f" ] || continue
+    printf '%s' "$per_queue" > "$f"
+done
+
+for f in /sys/class/net/"$iface"/queues/tx-*/xps_rxqs; do
+    [ -w "$f" ] || continue
+    printf '%s' 1 > "$f"
+done
+EOF
+
+  backup_path "${NET_HELPER_PATH}"
+  install -m 0755 "${tmp_file}" "${NET_HELPER_PATH}"
+  rm -f "${tmp_file}"
+}
+
+write_net_service() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+[Unit]
+Description=Apply Xray WARP Team network optimizations
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${NET_HELPER_PATH}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  backup_path "${NET_SERVICE_FILE}"
+  install -m 0644 "${tmp_file}" "${NET_SERVICE_FILE}"
+  rm -f "${tmp_file}"
+}
+
+install_network_optimization() {
+  local cc=""
+
+  [[ "${ENABLE_NET_OPT}" == "yes" ]] || return
+
+  cc="$(available_cc)"
+  if ! printf ' %s ' "${cc}" | grep -q ' bbr '; then
+    modprobe tcp_bbr >/dev/null 2>&1 || true
+    modprobe sch_fq >/dev/null 2>&1 || true
+    cc="$(available_cc)"
+  fi
+
+  if ! printf ' %s ' "${cc}" | grep -q ' bbr '; then
+    warn "Kernel does not expose BBR support. Skipping network optimization."
+    ENABLE_NET_OPT="skipped"
+    return
+  fi
+
+  write_net_sysctl_conf
+  write_net_helper_script
+  write_net_service
+  sysctl --system >/dev/null
+  systemctl daemon-reload
+  systemctl enable --now "${NET_SERVICE_NAME}" >/dev/null
 }
 
 write_xray_config() {
@@ -803,6 +1086,7 @@ XHTTP_PATH='${XHTTP_PATH}'
 TLS_ALPN='${TLS_ALPN}'
 FINGERPRINT='${FINGERPRINT}'
 ENABLE_WARP='${ENABLE_WARP}'
+ENABLE_NET_OPT='${ENABLE_NET_OPT}'
 WARP_PROXY_PORT='${WARP_PROXY_PORT}'
 CERT_MODE='${CERT_MODE}'
 EOF
@@ -864,6 +1148,11 @@ vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?encryption=none&security=tls&sni=${XHT
 ## WARP
 - Enabled: ${ENABLE_WARP}
 - Local SOCKS5 port: ${WARP_PROXY_PORT}
+
+## Network optimization
+- Enabled: ${ENABLE_NET_OPT}
+- Sysctl file: ${NET_SYSCTL_CONF}
+- Service: ${NET_SERVICE_NAME}
 EOF
 }
 
@@ -874,13 +1163,16 @@ show_links() {
 }
 
 status_cmd() {
-  systemctl --no-pager --full status xray haproxy warp-svc 2>/dev/null || true
+  systemctl --no-pager --full status xray haproxy warp-svc "${NET_SERVICE_NAME}" 2>/dev/null || true
 }
 
 restart_cmd() {
   systemctl restart xray haproxy
   if systemctl list-unit-files --type=service --no-pager | grep -q '^warp-svc\.service'; then
     systemctl restart warp-svc || true
+  fi
+  if systemctl list-unit-files --type=service --no-pager | grep -Fq "${NET_SERVICE_NAME}"; then
+    systemctl restart "${NET_SERVICE_NAME}" || true
   fi
   log "Services restarted."
 }
@@ -960,11 +1252,29 @@ parse_install_args() {
         KEY_SOURCE_FILE="${2}"
         shift
         ;;
+      --cf-zone-id)
+        CF_ZONE_ID="${2}"
+        shift
+        ;;
+      --cf-api-token)
+        CF_API_TOKEN="${2}"
+        shift
+        ;;
+      --cf-cert-validity)
+        CF_CERT_VALIDITY="${2}"
+        shift
+        ;;
       --enable-warp)
         ENABLE_WARP="yes"
         ;;
       --disable-warp)
         ENABLE_WARP="no"
+        ;;
+      --enable-net-opt)
+        ENABLE_NET_OPT="yes"
+        ;;
+      --disable-net-opt)
+        ENABLE_NET_OPT="no"
         ;;
       --warp-team)
         WARP_TEAM_NAME="${2}"
@@ -1011,6 +1321,7 @@ install_cmd() {
   write_xray_config
   write_haproxy_config
   write_xray_service
+  install_network_optimization
   install_warp
   validate_configs
   restart_services
