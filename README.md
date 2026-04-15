@@ -36,6 +36,14 @@ bash xray-warp-team.sh
 bash xray-warp-team.sh install
 ```
 
+常用维护命令：
+
+```bash
+bash xray-warp-team.sh upgrade
+bash xray-warp-team.sh change-uuid
+bash xray-warp-team.sh uninstall --yes
+```
+
 ## 非交互示例
 
 ```bash
@@ -113,6 +121,21 @@ bash xray-warp-team.sh install \
 ```bash
 bash xray-warp-team.sh show-links
 ```
+
+也可以直接做后续维护：
+
+- `bash xray-warp-team.sh upgrade`
+  更新 Xray-core 二进制和 `geoip/geosite` 资源。
+- `bash xray-warp-team.sh change-uuid`
+  重新生成 `REALITY` 和 `XHTTP` 两个 UUID，并自动重写配置和输出链接。
+- `bash xray-warp-team.sh change-uuid --reality-only`
+  只轮换 REALITY UUID。
+- `bash xray-warp-team.sh change-uuid --xhttp-only`
+  只轮换 XHTTP UUID。
+- `bash xray-warp-team.sh uninstall --yes`
+  停掉服务并删除脚本托管的文件，但默认保留已安装的系统包。
+
+`change-uuid` 依赖脚本之前生成的状态文件和当前配置，适合这套脚本安装出来的节点。
 
 ## Cloudflare 侧还需要做的事
 

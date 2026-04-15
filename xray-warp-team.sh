@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="0.1.0"
+SCRIPT_VERSION="0.2.0"
 DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
@@ -73,11 +73,14 @@ need_root() {
 
 usage() {
   cat <<'EOF'
-xray-warp-team.sh v0.1.0
+xray-warp-team.sh v0.2.0
 
 Usage:
   bash xray-warp-team.sh
   bash xray-warp-team.sh install [options]
+  bash xray-warp-team.sh upgrade
+  bash xray-warp-team.sh change-uuid [options]
+  bash xray-warp-team.sh uninstall [--yes]
   bash xray-warp-team.sh show-links
   bash xray-warp-team.sh status
   bash xray-warp-team.sh restart
@@ -108,8 +111,20 @@ Install options:
   --warp-client-secret VALUE  Service token client secret.
   --warp-proxy-port VALUE     Local SOCKS5 port used by WARP. Default: 40000
 
+Change-uuid options:
+  --reality-uuid VALUE        Set a custom REALITY UUID instead of generating one.
+  --xhttp-uuid VALUE          Set a custom XHTTP UUID instead of generating one.
+  --reality-only              Rotate only the REALITY UUID.
+  --xhttp-only                Rotate only the XHTTP UUID.
+
+Uninstall options:
+  --yes                       Skip confirmation prompt.
+
 Examples:
   bash xray-warp-team.sh
+  bash xray-warp-team.sh upgrade
+  bash xray-warp-team.sh change-uuid
+  bash xray-warp-team.sh uninstall --yes
   bash xray-warp-team.sh install --non-interactive \
     --server-ip 203.0.113.10 \
     --xhttp-domain cdn.example.com \
@@ -257,6 +272,74 @@ backup_path() {
   target="${BACKUP_DIR}${path}"
   mkdir -p "$(dirname "${target}")"
   cp -a "${path}" "${target}"
+}
+
+start_backup_session() {
+  BACKUP_DIR="${BACKUP_ROOT}/$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "${BACKUP_DIR}"
+}
+
+config_jq_read() {
+  local filter="${1}"
+
+  [[ -f "${XRAY_CONFIG_FILE}" ]] || return 0
+  jq -r "${filter} // empty" "${XRAY_CONFIG_FILE}" 2>/dev/null || true
+}
+
+output_field_value() {
+  local field_name="${1}"
+
+  [[ -f "${OUTPUT_FILE}" ]] || return 0
+  sed -n "s/^- ${field_name}: //p" "${OUTPUT_FILE}" | head -n 1
+}
+
+haproxy_sni_for_backend() {
+  local backend_name="${1}"
+
+  [[ -f "${HAPROXY_CONFIG}" ]] || return 0
+  sed -n "s/.*use_backend ${backend_name} if { req\\.ssl_sni -i \\([^ }][^ }]*\\) }.*/\\1/p" "${HAPROXY_CONFIG}" | head -n 1
+}
+
+load_existing_state() {
+  if [[ -f "${STATE_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    . "${STATE_FILE}"
+  fi
+}
+
+load_current_install_context() {
+  load_existing_state
+
+  [[ -f "${XRAY_CONFIG_FILE}" ]] || die "Current Xray config not found: ${XRAY_CONFIG_FILE}"
+
+  REALITY_UUID="${REALITY_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .settings.clients[0].id')}"
+  REALITY_SNI="${REALITY_SNI:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.serverNames[0]')}"
+  REALITY_TARGET="${REALITY_TARGET:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.target')}"
+  REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.shortIds[0]')}"
+  REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.privateKey')}"
+  XHTTP_UUID="${XHTTP_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')}"
+  XHTTP_PATH="${XHTTP_PATH:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')}"
+  TLS_ALPN="${TLS_ALPN:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.tlsSettings.alpn[0]')}"
+  XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(haproxy_sni_for_backend 'be_xhttp_cdn')}"
+  ENABLE_WARP="${ENABLE_WARP:-$(if config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag' | grep -q 'WARP'; then printf 'yes'; else printf 'no'; fi)}"
+  WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')}"
+  SERVER_IP="${SERVER_IP:-$(output_field_value 'Address')}"
+  REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value 'Public key')}"
+  FINGERPRINT="${FINGERPRINT:-$(output_field_value 'Fingerprint')}"
+  SERVER_IP="${SERVER_IP:-$(guess_server_ip)}"
+  FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
+  CERT_MODE="${CERT_MODE:-existing}"
+  ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
+  WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+
+  [[ -n "${REALITY_UUID}" ]] || die "Could not determine REALITY UUID from current install."
+  [[ -n "${REALITY_SNI}" ]] || die "Could not determine REALITY SNI from current install."
+  [[ -n "${REALITY_TARGET}" ]] || die "Could not determine REALITY target from current install."
+  [[ -n "${REALITY_SHORT_ID}" ]] || die "Could not determine REALITY short ID from current install."
+  [[ -n "${REALITY_PRIVATE_KEY}" ]] || die "Could not determine REALITY private key from current install."
+  [[ -n "${XHTTP_UUID}" ]] || die "Could not determine XHTTP UUID from current install."
+  [[ -n "${XHTTP_DOMAIN}" ]] || die "Could not determine XHTTP domain from current install."
+  [[ -n "${XHTTP_PATH}" ]] || die "Could not determine XHTTP path from current install."
 }
 
 install_packages() {
@@ -1047,6 +1130,31 @@ EOF
   systemctl restart warp-svc
 }
 
+service_exists() {
+  local unit_name="${1}"
+
+  systemctl list-unit-files --type=service --no-pager 2>/dev/null | awk '{print $1}' | grep -Fxq "${unit_name}"
+}
+
+stop_and_disable_service_if_present() {
+  local unit_name="${1}"
+
+  if service_exists "${unit_name}"; then
+    systemctl disable --now "${unit_name}" >/dev/null 2>&1 || systemctl stop "${unit_name}" >/dev/null 2>&1 || true
+  fi
+}
+
+remove_managed_paths() {
+  local path=""
+
+  for path in "$@"; do
+    if [[ -e "${path}" || -L "${path}" ]]; then
+      backup_path "${path}"
+      rm -rf "${path}"
+    fi
+  done
+}
+
 validate_configs() {
   log "Validating Xray config."
   "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}"
@@ -1067,6 +1175,27 @@ restart_services() {
   fi
 }
 
+upgrade_cmd() {
+  local current_version=""
+
+  need_root
+  ensure_debian_family
+  [[ -x "${XRAY_BIN}" ]] || die "Current Xray binary not found: ${XRAY_BIN}"
+
+  start_backup_session
+  backup_path "${XRAY_BIN}"
+  backup_path "${XRAY_ASSET_DIR}"
+
+  install_xray
+  validate_configs
+  systemctl restart xray
+
+  current_version="$("${XRAY_BIN}" version 2>/dev/null | head -n 1 || true)"
+  log "Upgrade finished."
+  log "Backup directory: ${BACKUP_DIR}"
+  [[ -n "${current_version}" ]] && log "Current version: ${current_version}"
+}
+
 path_to_uri_component() {
   printf '%s' "${1}" | sed 's/\//%2F/g'
 }
@@ -1079,6 +1208,7 @@ REALITY_UUID='${REALITY_UUID}'
 REALITY_SNI='${REALITY_SNI}'
 REALITY_TARGET='${REALITY_TARGET}'
 REALITY_SHORT_ID='${REALITY_SHORT_ID}'
+REALITY_PRIVATE_KEY='${REALITY_PRIVATE_KEY}'
 REALITY_PUBLIC_KEY='${REALITY_PUBLIC_KEY}'
 XHTTP_UUID='${XHTTP_UUID}'
 XHTTP_DOMAIN='${XHTTP_DOMAIN}'
@@ -1089,6 +1219,8 @@ ENABLE_WARP='${ENABLE_WARP}'
 ENABLE_NET_OPT='${ENABLE_NET_OPT}'
 WARP_PROXY_PORT='${WARP_PROXY_PORT}'
 CERT_MODE='${CERT_MODE}'
+CF_ZONE_ID='${CF_ZONE_ID}'
+CF_CERT_VALIDITY='${CF_CERT_VALIDITY}'
 EOF
   chmod 0600 "${STATE_FILE}"
 }
@@ -1156,6 +1288,66 @@ vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?encryption=none&security=tls&sni=${XHT
 EOF
 }
 
+change_uuid_cmd() {
+  local rotate_reality=1
+  local rotate_xhttp=1
+  local new_reality_uuid=""
+  local new_xhttp_uuid=""
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --reality-uuid)
+        new_reality_uuid="${2}"
+        shift
+        ;;
+      --xhttp-uuid)
+        new_xhttp_uuid="${2}"
+        shift
+        ;;
+      --reality-only)
+        rotate_xhttp=0
+        ;;
+      --xhttp-only)
+        rotate_reality=0
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown change-uuid option: ${1}"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${rotate_reality}" -eq 0 && "${rotate_xhttp}" -eq 0 ]]; then
+    die "Nothing to change. Use default behavior, --reality-only, or --xhttp-only."
+  fi
+
+  need_root
+  start_backup_session
+  load_current_install_context
+
+  if [[ "${rotate_reality}" -eq 1 ]]; then
+    REALITY_UUID="${new_reality_uuid:-$(random_uuid)}"
+  fi
+
+  if [[ "${rotate_xhttp}" -eq 1 ]]; then
+    XHTTP_UUID="${new_xhttp_uuid:-$(random_uuid)}"
+  fi
+
+  write_xray_config
+  validate_configs
+  systemctl restart xray
+  write_state_file
+  write_output_file
+
+  log "UUID rotation finished."
+  log "Backup directory: ${BACKUP_DIR}"
+  show_links
+}
+
 show_links() {
   [[ -f "${STATE_FILE}" ]] || die "State file not found: ${STATE_FILE}"
   [[ -f "${OUTPUT_FILE}" ]] || die "Output file not found: ${OUTPUT_FILE}"
@@ -1167,14 +1359,79 @@ status_cmd() {
 }
 
 restart_cmd() {
-  systemctl restart xray haproxy
-  if systemctl list-unit-files --type=service --no-pager | grep -q '^warp-svc\.service'; then
+  if service_exists "xray.service"; then
+    systemctl restart xray
+  fi
+  if service_exists "haproxy.service"; then
+    systemctl restart haproxy
+  fi
+  if service_exists "warp-svc.service"; then
     systemctl restart warp-svc || true
   fi
-  if systemctl list-unit-files --type=service --no-pager | grep -Fq "${NET_SERVICE_NAME}"; then
+  if service_exists "${NET_SERVICE_NAME}"; then
     systemctl restart "${NET_SERVICE_NAME}" || true
   fi
   log "Services restarted."
+}
+
+uninstall_cmd() {
+  local assume_yes=0
+  local answer=""
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --yes|-y)
+        assume_yes=1
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown uninstall option: ${1}"
+        ;;
+    esac
+    shift
+  done
+
+  need_root
+  start_backup_session
+
+  if [[ "${assume_yes}" -ne 1 ]]; then
+    read -r -p "This will stop services and remove managed files, but keep installed packages. Continue? [y/N]: " answer
+    answer="$(printf '%s' "${answer}" | tr 'A-Z' 'a-z')"
+    if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
+      die "Uninstall cancelled."
+    fi
+  fi
+
+  stop_and_disable_service_if_present "xray.service"
+  stop_and_disable_service_if_present "haproxy.service"
+  stop_and_disable_service_if_present "warp-svc.service"
+  stop_and_disable_service_if_present "${NET_SERVICE_NAME}"
+
+  remove_managed_paths \
+    "${XRAY_BIN}" \
+    "${XRAY_CONFIG_DIR}" \
+    "${XRAY_ASSET_DIR}" \
+    "${XRAY_SERVICE_FILE}" \
+    "${HAPROXY_CONFIG}" \
+    "${SSL_DIR}" \
+    "${WARP_MDM_FILE}" \
+    "${NET_SYSCTL_CONF}" \
+    "${NET_HELPER_PATH}" \
+    "${NET_SERVICE_FILE}" \
+    "${OUTPUT_FILE}" \
+    "/var/log/xray" \
+    "/var/lib/xray"
+
+  systemctl daemon-reload
+  systemctl reset-failed xray.service haproxy.service warp-svc.service "${NET_SERVICE_NAME}" >/dev/null 2>&1 || true
+  sysctl --system >/dev/null 2>&1 || true
+
+  log "Managed files removed."
+  log "Backup directory: ${BACKUP_DIR}"
+  log "Installed packages were kept in place."
 }
 
 main_menu() {
@@ -1188,6 +1445,9 @@ Xray WARP Team
   2. Show node links
   3. Show service status
   4. Restart services
+  5. Upgrade Xray core
+  6. Rotate node UUIDs
+  7. Uninstall managed files
   0. Exit
 EOF
     read -r -p "Select: " choice
@@ -1196,6 +1456,9 @@ EOF
       2) show_links ;;
       3) status_cmd ;;
       4) restart_cmd ;;
+      5) upgrade_cmd ;;
+      6) change_uuid_cmd ;;
+      7) uninstall_cmd ;;
       0) exit 0 ;;
       *) warn "Unknown selection: ${choice}" ;;
     esac
@@ -1308,8 +1571,7 @@ install_cmd() {
   need_root
   ensure_debian_family
 
-  BACKUP_DIR="${BACKUP_ROOT}/$(date +%Y%m%d-%H%M%S)"
-  mkdir -p "${BACKUP_DIR}"
+  start_backup_session
 
   parse_install_args "$@"
   prepare_install_inputs
@@ -1347,6 +1609,18 @@ main() {
     install)
       shift || true
       install_cmd "$@"
+      ;;
+    upgrade)
+      shift || true
+      upgrade_cmd "$@"
+      ;;
+    change-uuid)
+      shift || true
+      change_uuid_cmd "$@"
+      ;;
+    uninstall)
+      shift || true
+      uninstall_cmd "$@"
       ;;
     show-links)
       show_links
