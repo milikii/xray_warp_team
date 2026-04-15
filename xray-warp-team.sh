@@ -61,6 +61,22 @@ CF_DNS_TOKEN=""
 CF_DNS_ACCOUNT_ID=""
 CF_DNS_ZONE_ID=""
 
+if [[ -t 1 ]]; then
+  C_RESET=$'\033[0m'
+  C_BOLD=$'\033[1m'
+  C_GREEN=$'\033[32m'
+  C_YELLOW=$'\033[33m'
+  C_RED=$'\033[31m'
+  C_CYAN=$'\033[36m'
+else
+  C_RESET=""
+  C_BOLD=""
+  C_GREEN=""
+  C_YELLOW=""
+  C_RED=""
+  C_CYAN=""
+fi
+
 log() {
   printf '[INFO] %s\n' "$*"
 }
@@ -91,7 +107,7 @@ Usage:
   bash xray-warp-team.sh change-uuid [options]
   bash xray-warp-team.sh uninstall [--yes]
   bash xray-warp-team.sh show-links
-  bash xray-warp-team.sh status
+  bash xray-warp-team.sh status [--raw]
   bash xray-warp-team.sh restart
   bash xray-warp-team.sh help
 
@@ -134,6 +150,9 @@ Change-uuid options:
 Uninstall options:
   --yes                       Skip confirmation prompt.
 
+Status options:
+  --raw                       Show raw systemctl output instead of the panel.
+
 Examples:
   bash xray-warp-team.sh
   bash xray-warp-team.sh upgrade
@@ -152,6 +171,9 @@ guess_server_ip() {
   local guessed=""
 
   guessed="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+  if [[ -z "${guessed}" ]]; then
+    guessed="$(ip -o -4 addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')"
+  fi
   printf '%s' "${guessed}"
 }
 
@@ -240,6 +262,240 @@ prompt_yes_no() {
   printf -v "${var_name}" '%s' "${answer}"
 }
 
+style_text() {
+  local style="${1}"
+  local text="${2}"
+  printf '%b%s%b' "${style}" "${text}" "${C_RESET}"
+}
+
+divider() {
+  printf '%s\n' '--------------------------------------------------------------------'
+}
+
+panel_row() {
+  printf '  %-18s %s\n' "${1}" "${2}"
+}
+
+short_value() {
+  local value="${1}"
+  local head="${2:-8}"
+  local tail="${3:-6}"
+  local len=0
+
+  len="${#value}"
+  if [[ "${len}" -le $((head + tail + 3)) ]]; then
+    printf '%s' "${value}"
+  else
+    printf '%s...%s' "${value:0:head}" "${value: -tail}"
+  fi
+}
+
+service_active_state() {
+  local unit_name="${1}"
+  local state=""
+
+  if ! service_exists "${unit_name}"; then
+    printf 'not-installed'
+    return
+  fi
+
+  case "${unit_name}" in
+    xray.service)
+      if pgrep -x xray >/dev/null 2>&1; then
+        printf 'active'
+        return
+      fi
+      ;;
+    haproxy.service)
+      if pgrep -x haproxy >/dev/null 2>&1; then
+        printf 'active'
+        return
+      fi
+      ;;
+    warp-svc.service)
+      if pgrep -f 'warp-svc|warp-service' >/dev/null 2>&1; then
+        printf 'active'
+        return
+      fi
+      ;;
+  esac
+
+  state="$(systemctl is-active "${unit_name}" 2>/dev/null || true)"
+  if [[ -n "${state}" ]]; then
+    printf '%s' "${state}"
+  else
+    printf 'installed'
+  fi
+}
+
+service_enable_state() {
+  local unit_name="${1}"
+  local path=""
+
+  if ! service_exists "${unit_name}"; then
+    printf 'not-installed'
+    return
+  fi
+
+  for path in /etc/systemd/system/*.wants/"${unit_name}" /etc/systemd/system/"${unit_name}"; do
+    if [[ -e "${path}" || -L "${path}" ]]; then
+      printf 'enabled'
+      return
+    fi
+  done
+
+  printf 'installed'
+}
+
+service_badge() {
+  local state="${1}"
+
+  case "${state}" in
+    active)
+      style_text "${C_GREEN}" "running"
+      ;;
+    inactive|failed|activating|deactivating)
+      style_text "${C_RED}" "${state}"
+      ;;
+    not-installed)
+      style_text "${C_YELLOW}" "not-installed"
+      ;;
+    *)
+      style_text "${C_YELLOW}" "${state}"
+      ;;
+  esac
+}
+
+bool_badge() {
+  case "${1}" in
+    yes|enabled|true)
+      style_text "${C_GREEN}" "enabled"
+      ;;
+    skipped)
+      style_text "${C_YELLOW}" "skipped"
+      ;;
+    no|disabled|false)
+      style_text "${C_YELLOW}" "disabled"
+      ;;
+    *)
+      style_text "${C_YELLOW}" "${1:-unknown}"
+      ;;
+  esac
+}
+
+pretty_cert_mode() {
+  case "${CERT_MODE:-unknown}" in
+    self-signed)
+      printf 'self-signed'
+      ;;
+    existing)
+      printf 'existing'
+      ;;
+    cf-origin-ca)
+      printf 'cloudflare-origin-ca'
+      ;;
+    acme-dns-cf)
+      printf 'acme-dns-cf'
+      ;;
+    *)
+      printf '%s' "${CERT_MODE:-unknown}"
+      ;;
+  esac
+}
+
+xray_version_line() {
+  if [[ -x "${XRAY_BIN}" ]]; then
+    "${XRAY_BIN}" version 2>/dev/null | head -n 1 || true
+  fi
+}
+
+load_dashboard_context() {
+  load_existing_state
+
+  if [[ ! -f "${XRAY_CONFIG_FILE}" ]]; then
+    return
+  fi
+
+  REALITY_UUID="${REALITY_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .settings.clients[0].id')}"
+  REALITY_SNI="${REALITY_SNI:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.serverNames[0]')}"
+  REALITY_TARGET="${REALITY_TARGET:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.target')}"
+  REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.shortIds[0]')}"
+  XHTTP_UUID="${XHTTP_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')}"
+  XHTTP_PATH="${XHTTP_PATH:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')}"
+  XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(haproxy_sni_for_backend 'be_xhttp_cdn')}"
+  SERVER_IP="${SERVER_IP:-$(output_field_value 'Address')}"
+  REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value 'Public key')}"
+  FINGERPRINT="${FINGERPRINT:-$(output_field_value 'Fingerprint')}"
+  ENABLE_WARP="${ENABLE_WARP:-$(if config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag' | grep -q 'WARP'; then printf 'yes'; else printf 'no'; fi)}"
+  WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')}"
+  CERT_MODE="${CERT_MODE:-existing}"
+  ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
+  ACME_CA="${ACME_CA:-${DEFAULT_ACME_CA}}"
+  SERVER_IP="${SERVER_IP:-$(guess_server_ip)}"
+  FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
+  WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+}
+
+show_dashboard() {
+  local xray_state=""
+  local haproxy_state=""
+  local warp_state=""
+  local net_state=""
+  local xray_enabled=""
+  local haproxy_enabled=""
+  local warp_enabled=""
+  local net_enabled=""
+  local version_line=""
+
+  load_dashboard_context
+
+  xray_state="$(service_active_state 'xray.service')"
+  haproxy_state="$(service_active_state 'haproxy.service')"
+  warp_state="$(service_active_state 'warp-svc.service')"
+  net_state="$(service_active_state "${NET_SERVICE_NAME}")"
+  xray_enabled="$(service_enable_state 'xray.service')"
+  haproxy_enabled="$(service_enable_state 'haproxy.service')"
+  warp_enabled="$(service_enable_state 'warp-svc.service')"
+  net_enabled="$(service_enable_state "${NET_SERVICE_NAME}")"
+  version_line="$(xray_version_line)"
+
+  divider
+  printf '%b%s%b\n' "${C_BOLD}${C_CYAN}" "Xray WARP Team Panel" "${C_RESET}"
+  divider
+  panel_row "Script version" "${SCRIPT_VERSION}"
+  panel_row "Updated at" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+
+  if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
+    panel_row "Install status" "$(style_text "${C_GREEN}" "managed")"
+    [[ -n "${version_line}" ]] && panel_row "Xray core" "${version_line}"
+    panel_row "Cert mode" "$(pretty_cert_mode)"
+    panel_row "REALITY" "${SERVER_IP:-unknown}:443  sni=${REALITY_SNI:-unknown}"
+    panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-unknown}:443  path=${XHTTP_PATH:-unknown}"
+    panel_row "REALITY UUID" "$(short_value "${REALITY_UUID:-unknown}")"
+    panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-unknown}")"
+    panel_row "REALITY key" "$(short_value "${REALITY_PUBLIC_KEY:-unknown}" 10 8)"
+    panel_row "Links file" "${OUTPUT_FILE}"
+  else
+    panel_row "Install status" "$(style_text "${C_YELLOW}" "not-installed")"
+  fi
+
+  divider
+  printf '%b%s%b\n' "${C_BOLD}" "Services" "${C_RESET}"
+  panel_row "xray" "$(service_badge "${xray_state}") (${xray_enabled})"
+  panel_row "haproxy" "$(service_badge "${haproxy_state}") (${haproxy_enabled})"
+  panel_row "warp-svc" "$(service_badge "${warp_state}") (${warp_enabled})"
+  panel_row "net-opt" "$(service_badge "${net_state}") (${net_enabled})"
+
+  divider
+  printf '%b%s%b\n' "${C_BOLD}" "Features" "${C_RESET}"
+  panel_row "WARP route" "$(bool_badge "${ENABLE_WARP:-no}")  port=${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+  panel_row "Net tuning" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
+  if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
+    panel_row "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
+  fi
+  divider
+}
+
 ensure_debian_family() {
   if [[ ! -f /etc/os-release ]]; then
     die "Unsupported system: /etc/os-release not found."
@@ -293,11 +549,121 @@ start_backup_session() {
   mkdir -p "${BACKUP_DIR}"
 }
 
+config_fallback_string_in_tag() {
+  local tag="${1}"
+  local key="${2}"
+
+  awk -v tag="${tag}" -v key="${key}" '
+    index($0, "\"tag\": \"" tag "\"") {inside=1}
+    inside && $0 ~ /"tag":/ && index($0, "\"tag\": \"" tag "\"") == 0 {exit}
+    inside && index($0, "\"" key "\"") {
+      line=$0
+      if (line ~ /:[[:space:]]*"/) {
+        sub(/.*:[[:space:]]*"/, "", line)
+        sub(/".*/, "", line)
+        print line
+        exit
+      }
+      if (line ~ /:[[:space:]]*[0-9]+/) {
+        sub(/.*:[[:space:]]*/, "", line)
+        sub(/,.*/, "", line)
+        print line
+        exit
+      }
+    }
+  ' "${XRAY_CONFIG_FILE}" 2>/dev/null || true
+}
+
+config_fallback_first_array_value_in_tag() {
+  local tag="${1}"
+  local key="${2}"
+
+  awk -v tag="${tag}" -v key="${key}" '
+    index($0, "\"tag\": \"" tag "\"") {inside=1}
+    inside && $0 ~ /"tag":/ && index($0, "\"tag\": \"" tag "\"") == 0 {exit}
+    inside && index($0, "\"" key "\"") {want=1; next}
+    want {
+      line=$0
+      if (line ~ /"/) {
+        sub(/^[^"]*"/, "", line)
+        sub(/".*/, "", line)
+        print line
+        exit
+      }
+      if ($0 ~ /\]/) {
+        exit
+      }
+    }
+  ' "${XRAY_CONFIG_FILE}" 2>/dev/null || true
+}
+
+config_fallback_has_outbound_tag() {
+  local tag="${1}"
+
+  grep -q "\"tag\": \"${tag}\"" "${XRAY_CONFIG_FILE}" 2>/dev/null
+}
+
+config_fallback_outbound_port() {
+  local tag="${1}"
+
+  awk -v tag="${tag}" '
+    index($0, "\"tag\": \"" tag "\"") {inside=1}
+    inside && $0 ~ /"tag":/ && index($0, "\"tag\": \"" tag "\"") == 0 {exit}
+    inside && index($0, "\"port\"") {
+      line=$0
+      if (line ~ /:[[:space:]]*[0-9]+/) {
+        sub(/.*:[[:space:]]*/, "", line)
+        sub(/,.*/, "", line)
+        print line
+        exit
+      }
+    }
+  ' "${XRAY_CONFIG_FILE}" 2>/dev/null || true
+}
+
 config_jq_read() {
   local filter="${1}"
 
   [[ -f "${XRAY_CONFIG_FILE}" ]] || return 0
-  jq -r "${filter} // empty" "${XRAY_CONFIG_FILE}" 2>/dev/null || true
+  if command -v jq >/dev/null 2>&1; then
+    jq -r "${filter} // empty" "${XRAY_CONFIG_FILE}" 2>/dev/null || true
+    return
+  fi
+
+  case "${filter}" in
+    '.inbounds[] | select(.tag=="reality-vision") | .settings.clients[0].id')
+      config_fallback_string_in_tag "reality-vision" "id"
+      ;;
+    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.serverNames[0]')
+      config_fallback_first_array_value_in_tag "reality-vision" "serverNames"
+      ;;
+    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.target')
+      config_fallback_string_in_tag "reality-vision" "target"
+      ;;
+    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.shortIds[0]')
+      config_fallback_first_array_value_in_tag "reality-vision" "shortIds"
+      ;;
+    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.privateKey')
+      config_fallback_string_in_tag "reality-vision" "privateKey"
+      ;;
+    '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')
+      config_fallback_string_in_tag "xhttp-cdn" "id"
+      ;;
+    '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')
+      config_fallback_string_in_tag "xhttp-cdn" "path"
+      ;;
+    '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.tlsSettings.alpn[0]')
+      config_fallback_first_array_value_in_tag "xhttp-cdn" "alpn"
+      ;;
+    '.outbounds[] | select(.tag=="WARP") | .tag')
+      if config_fallback_has_outbound_tag "WARP"; then
+        printf 'WARP'
+      fi
+      ;;
+    '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')
+      config_fallback_outbound_port "WARP"
+      ;;
+  esac
 }
 
 output_field_value() {
@@ -1223,8 +1589,15 @@ EOF
 
 service_exists() {
   local unit_name="${1}"
+  local path=""
 
-  systemctl list-unit-files --type=service --no-pager 2>/dev/null | awk '{print $1}' | grep -Fxq "${unit_name}"
+  for path in /etc/systemd/system/"${unit_name}" /lib/systemd/system/"${unit_name}" /usr/lib/systemd/system/"${unit_name}"; do
+    if [[ -f "${path}" || -L "${path}" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 stop_and_disable_service_if_present() {
@@ -1449,8 +1822,35 @@ show_links() {
   cat "${OUTPUT_FILE}"
 }
 
-status_cmd() {
+status_raw_cmd() {
   systemctl --no-pager --full status xray haproxy warp-svc "${NET_SERVICE_NAME}" 2>/dev/null || true
+}
+
+status_cmd() {
+  local raw=0
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --raw)
+        raw=1
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown status option: ${1}"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${raw}" -eq 1 ]]; then
+    status_raw_cmd
+    return
+  fi
+
+  show_dashboard
 }
 
 restart_cmd() {
@@ -1539,16 +1939,20 @@ main_menu() {
   local choice=""
 
   while true; do
+    if [[ -t 1 ]]; then
+      clear >/dev/null 2>&1 || true
+    fi
+    show_dashboard
     cat <<'EOF'
-
-Xray WARP Team
   1. Install or reinstall
   2. Show node links
-  3. Show service status
+  3. Refresh status panel
   4. Restart services
   5. Upgrade Xray core
   6. Rotate node UUIDs
   7. Uninstall managed files
+  8. Raw service details
+  9. Help
   0. Exit
 EOF
     read -r -p "Select: " choice
@@ -1560,9 +1964,15 @@ EOF
       5) upgrade_cmd ;;
       6) change_uuid_cmd ;;
       7) uninstall_cmd ;;
+      8) status_raw_cmd ;;
+      9) usage ;;
       0) exit 0 ;;
       *) warn "Unknown selection: ${choice}" ;;
     esac
+    if [[ "${choice}" != "0" ]]; then
+      printf '\n'
+      read -r -p "Press Enter to continue..." _
+    fi
   done
 }
 
@@ -1747,7 +2157,8 @@ main() {
       show_links
       ;;
     status)
-      status_cmd
+      shift || true
+      status_cmd "$@"
       ;;
     restart)
       restart_cmd

@@ -41,6 +41,8 @@ bash xray-warp-team.sh install
 常用维护命令：
 
 ```bash
+bash xray-warp-team.sh status
+bash xray-warp-team.sh status --raw
 bash xray-warp-team.sh upgrade
 bash xray-warp-team.sh change-uuid
 bash xray-warp-team.sh uninstall --yes
