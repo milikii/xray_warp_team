@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="0.2.0"
+SCRIPT_VERSION="0.3.0"
 DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
@@ -98,13 +98,16 @@ need_root() {
 
 usage() {
   cat <<'EOF'
-xray-warp-team.sh v0.2.0
+xray-warp-team.sh v0.3.0
 
 Usage:
   bash xray-warp-team.sh
   bash xray-warp-team.sh install [options]
   bash xray-warp-team.sh upgrade
   bash xray-warp-team.sh change-uuid [options]
+  bash xray-warp-team.sh change-sni [options]
+  bash xray-warp-team.sh change-path [options]
+  bash xray-warp-team.sh change-cert-mode [options]
   bash xray-warp-team.sh uninstall [--yes]
   bash xray-warp-team.sh show-links
   bash xray-warp-team.sh status [--raw]
@@ -147,6 +150,30 @@ Change-uuid options:
   --reality-only              Rotate only the REALITY UUID.
   --xhttp-only                Rotate only the XHTTP UUID.
 
+Change-sni options:
+  --non-interactive           Run without prompts.
+  --reality-sni VALUE         New REALITY visible SNI.
+  --reality-target VALUE      New REALITY target in host:port form.
+
+Change-path options:
+  --non-interactive           Run without prompts.
+  --xhttp-path VALUE          New XHTTP path.
+
+Change-cert-mode options:
+  --non-interactive           Run without prompts.
+  --cert-mode VALUE           New cert mode: self-signed, existing, cf-origin-ca, acme-dns-cf.
+  --xhttp-domain VALUE        New XHTTP CDN domain. Optional.
+  --cert-file VALUE           Existing certificate file when using existing mode.
+  --key-file VALUE            Existing key file when using existing mode.
+  --cf-zone-id VALUE          Cloudflare zone ID for cf-origin-ca mode.
+  --cf-api-token VALUE        Cloudflare API token for cf-origin-ca mode.
+  --cf-cert-validity VALUE    Cloudflare Origin CA validity days.
+  --acme-email VALUE          Email used by acme.sh account registration.
+  --acme-ca VALUE             ACME CA name passed to acme.sh.
+  --cf-dns-token VALUE        Cloudflare DNS API token for acme dns_cf mode.
+  --cf-dns-account-id VALUE   Cloudflare account ID for acme dns_cf mode. Optional.
+  --cf-dns-zone-id VALUE      Cloudflare zone ID for acme dns_cf mode. Optional.
+
 Uninstall options:
   --yes                       Skip confirmation prompt.
 
@@ -157,6 +184,9 @@ Examples:
   bash xray-warp-team.sh
   bash xray-warp-team.sh upgrade
   bash xray-warp-team.sh change-uuid
+  bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
+  bash xray-warp-team.sh change-path --xhttp-path /cfup-new
+  bash xray-warp-team.sh change-cert-mode --cert-mode self-signed
   bash xray-warp-team.sh uninstall --yes
   bash xray-warp-team.sh install --non-interactive \
     --server-ip 203.0.113.10 \
@@ -858,6 +888,70 @@ prepare_install_inputs() {
       ;;
     *)
       die "ENABLE_WARP must be yes or no."
+      ;;
+  esac
+}
+
+default_reality_target_for_sni() {
+  local sni="${1}"
+  printf '%s:443' "${sni}"
+}
+
+ensure_xhttp_path_format() {
+  [[ -n "${XHTTP_PATH}" ]] || die "XHTTP path cannot be empty."
+  [[ "${XHTTP_PATH}" == /* ]] || die "XHTTP path must start with '/'."
+}
+
+prompt_cert_mode_inputs() {
+  case "${CERT_MODE}" in
+    self-signed)
+      CERT_SOURCE_FILE=""
+      KEY_SOURCE_FILE=""
+      CF_ZONE_ID=""
+      CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
+      ACME_EMAIL=""
+      ACME_CA="${DEFAULT_ACME_CA}"
+      CF_DNS_ACCOUNT_ID=""
+      CF_DNS_ZONE_ID=""
+      ;;
+    existing)
+      prompt_with_default CERT_SOURCE_FILE "Existing certificate file path" "${CERT_SOURCE_FILE:-}"
+      prompt_with_default KEY_SOURCE_FILE "Existing key file path" "${KEY_SOURCE_FILE:-}"
+      CF_ZONE_ID=""
+      CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
+      ACME_EMAIL=""
+      ACME_CA="${DEFAULT_ACME_CA}"
+      CF_DNS_ACCOUNT_ID=""
+      CF_DNS_ZONE_ID=""
+      ;;
+    cf-origin-ca)
+      CERT_SOURCE_FILE=""
+      KEY_SOURCE_FILE=""
+      prompt_with_default CF_ZONE_ID "Cloudflare zone ID" "${CF_ZONE_ID:-}"
+      prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA validity days" "${CF_CERT_VALIDITY:-${DEFAULT_CF_CERT_VALIDITY}}"
+      prompt_secret CF_API_TOKEN "Cloudflare API token"
+      ACME_EMAIL=""
+      ACME_CA="${DEFAULT_ACME_CA}"
+      CF_DNS_ACCOUNT_ID=""
+      CF_DNS_ZONE_ID=""
+      ;;
+    acme-dns-cf)
+      CERT_SOURCE_FILE=""
+      KEY_SOURCE_FILE=""
+      prompt_with_default ACME_EMAIL "acme.sh account email" "${ACME_EMAIL:-}"
+      prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
+      prompt_secret CF_DNS_TOKEN "Cloudflare DNS API token"
+      if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
+        read -r -p "Cloudflare account ID (optional): " CF_DNS_ACCOUNT_ID
+      fi
+      if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
+        read -r -p "Cloudflare zone ID for DNS API (optional): " CF_DNS_ZONE_ID
+      fi
+      CF_ZONE_ID=""
+      CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
+      ;;
+    *)
+      die "Unsupported cert mode: ${CERT_MODE}"
       ;;
   esac
 }
@@ -1639,6 +1733,41 @@ restart_services() {
   fi
 }
 
+restart_core_services() {
+  systemctl restart xray
+  systemctl restart haproxy
+}
+
+cleanup_previous_acme_cert() {
+  local old_cert_mode="${1:-}"
+  local old_xhttp_domain="${2:-}"
+
+  if [[ "${old_cert_mode}" == "acme-dns-cf" && -x "${ACME_SH_BIN}" && -n "${old_xhttp_domain}" ]]; then
+    if [[ "${CERT_MODE}" != "acme-dns-cf" || "${XHTTP_DOMAIN}" != "${old_xhttp_domain}" ]]; then
+      "${ACME_SH_BIN}" --remove -d "${old_xhttp_domain}" --ecc >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+apply_managed_update() {
+  write_tls_assets
+  write_xray_config
+  write_haproxy_config
+  validate_configs
+  restart_core_services
+  write_state_file
+  write_output_file
+}
+
+apply_managed_runtime_update() {
+  write_xray_config
+  write_haproxy_config
+  validate_configs
+  restart_core_services
+  write_state_file
+  write_output_file
+}
+
 upgrade_cmd() {
   local current_version=""
 
@@ -1816,6 +1945,211 @@ change_uuid_cmd() {
   show_links
 }
 
+change_sni_cmd() {
+  local old_reality_sni=""
+  local old_reality_target=""
+  local target_default=""
+  local sni_overridden=0
+  local target_overridden=0
+
+  need_root
+  start_backup_session
+  load_current_install_context
+
+  old_reality_sni="${REALITY_SNI}"
+  old_reality_target="${REALITY_TARGET}"
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --non-interactive)
+        NON_INTERACTIVE=1
+        ;;
+      --reality-sni)
+        REALITY_SNI="${2}"
+        sni_overridden=1
+        shift
+        ;;
+      --reality-target)
+        REALITY_TARGET="${2}"
+        target_overridden=1
+        shift
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown change-sni option: ${1}"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${sni_overridden}" -eq 0 ]]; then
+    REALITY_SNI=""
+    prompt_with_default REALITY_SNI "New REALITY visible SNI" "${old_reality_sni}"
+  fi
+
+  if [[ "${target_overridden}" -eq 0 ]]; then
+    REALITY_TARGET=""
+    if [[ "${old_reality_target}" == "$(default_reality_target_for_sni "${old_reality_sni}")" ]]; then
+      target_default="$(default_reality_target_for_sni "${REALITY_SNI}")"
+    else
+      target_default="${old_reality_target}"
+    fi
+    prompt_with_default REALITY_TARGET "New REALITY target host:port" "${target_default}"
+  fi
+
+  apply_managed_runtime_update
+  log "REALITY SNI updated."
+  log "Backup directory: ${BACKUP_DIR}"
+  show_links
+}
+
+change_path_cmd() {
+  local path_overridden=0
+
+  need_root
+  start_backup_session
+  load_current_install_context
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --non-interactive)
+        NON_INTERACTIVE=1
+        ;;
+      --xhttp-path)
+        XHTTP_PATH="${2}"
+        path_overridden=1
+        shift
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown change-path option: ${1}"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${path_overridden}" -eq 0 ]]; then
+    XHTTP_PATH=""
+    prompt_with_default XHTTP_PATH "New XHTTP path" "$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')"
+  fi
+  ensure_xhttp_path_format
+
+  apply_managed_runtime_update
+  log "XHTTP path updated."
+  log "Backup directory: ${BACKUP_DIR}"
+  show_links
+}
+
+change_cert_mode_cmd() {
+  local old_cert_mode=""
+  local old_xhttp_domain=""
+  local mode_overridden=0
+  local domain_overridden=0
+
+  need_root
+  start_backup_session
+  load_current_install_context
+
+  old_cert_mode="${CERT_MODE}"
+  old_xhttp_domain="${XHTTP_DOMAIN}"
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --non-interactive)
+        NON_INTERACTIVE=1
+        ;;
+      --cert-mode)
+        CERT_MODE="${2}"
+        mode_overridden=1
+        shift
+        ;;
+      --xhttp-domain)
+        XHTTP_DOMAIN="${2}"
+        domain_overridden=1
+        shift
+        ;;
+      --cert-file)
+        CERT_SOURCE_FILE="${2}"
+        shift
+        ;;
+      --key-file)
+        KEY_SOURCE_FILE="${2}"
+        shift
+        ;;
+      --cf-zone-id)
+        CF_ZONE_ID="${2}"
+        shift
+        ;;
+      --cf-api-token)
+        CF_API_TOKEN="${2}"
+        shift
+        ;;
+      --cf-cert-validity)
+        CF_CERT_VALIDITY="${2}"
+        shift
+        ;;
+      --acme-email)
+        ACME_EMAIL="${2}"
+        shift
+        ;;
+      --acme-ca)
+        ACME_CA="${2}"
+        shift
+        ;;
+      --cf-dns-token)
+        CF_DNS_TOKEN="${2}"
+        shift
+        ;;
+      --cf-dns-account-id)
+        CF_DNS_ACCOUNT_ID="${2}"
+        shift
+        ;;
+      --cf-dns-zone-id)
+        CF_DNS_ZONE_ID="${2}"
+        shift
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown change-cert-mode option: ${1}"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${mode_overridden}" -eq 0 ]]; then
+    CERT_MODE=""
+    prompt_with_default CERT_MODE "New cert mode (self-signed/existing/cf-origin-ca/acme-dns-cf)" "${old_cert_mode}"
+  fi
+  case "${CERT_MODE}" in
+    self-signed|existing|cf-origin-ca|acme-dns-cf)
+      ;;
+    *)
+      die "Unsupported cert mode: ${CERT_MODE}"
+      ;;
+  esac
+
+  if [[ "${domain_overridden}" -eq 0 ]]; then
+    XHTTP_DOMAIN=""
+    prompt_with_default XHTTP_DOMAIN "XHTTP CDN domain" "${old_xhttp_domain}"
+  fi
+  prompt_cert_mode_inputs
+  apply_managed_update
+  cleanup_previous_acme_cert "${old_cert_mode}" "${old_xhttp_domain}"
+
+  log "Certificate mode updated."
+  log "Backup directory: ${BACKUP_DIR}"
+  show_links
+}
+
 show_links() {
   [[ -f "${STATE_FILE}" ]] || die "State file not found: ${STATE_FILE}"
   [[ -f "${OUTPUT_FILE}" ]] || die "Output file not found: ${OUTPUT_FILE}"
@@ -1950,9 +2284,12 @@ main_menu() {
   4. Restart services
   5. Upgrade Xray core
   6. Rotate node UUIDs
-  7. Uninstall managed files
-  8. Raw service details
-  9. Help
+  7. Change REALITY SNI
+  8. Change XHTTP path
+  9. Change cert mode / CDN domain
+  10. Uninstall managed files
+  11. Raw service details
+  12. Help
   0. Exit
 EOF
     read -r -p "Select: " choice
@@ -1963,9 +2300,12 @@ EOF
       4) restart_cmd ;;
       5) upgrade_cmd ;;
       6) change_uuid_cmd ;;
-      7) uninstall_cmd ;;
-      8) status_raw_cmd ;;
-      9) usage ;;
+      7) change_sni_cmd ;;
+      8) change_path_cmd ;;
+      9) change_cert_mode_cmd ;;
+      10) uninstall_cmd ;;
+      11) status_raw_cmd ;;
+      12) usage ;;
       0) exit 0 ;;
       *) warn "Unknown selection: ${choice}" ;;
     esac
@@ -2148,6 +2488,18 @@ main() {
     change-uuid)
       shift || true
       change_uuid_cmd "$@"
+      ;;
+    change-sni)
+      shift || true
+      change_sni_cmd "$@"
+      ;;
+    change-path)
+      shift || true
+      change_path_cmd "$@"
+      ;;
+    change-cert-mode)
+      shift || true
+      change_cert_mode_cmd "$@"
       ;;
     uninstall)
       shift || true

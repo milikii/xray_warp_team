@@ -45,6 +45,9 @@ bash xray-warp-team.sh status
 bash xray-warp-team.sh status --raw
 bash xray-warp-team.sh upgrade
 bash xray-warp-team.sh change-uuid
+bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
+bash xray-warp-team.sh change-path --xhttp-path /cfup-new
+bash xray-warp-team.sh change-cert-mode --cert-mode self-signed
 bash xray-warp-team.sh uninstall --yes
 ```
 
@@ -178,10 +181,25 @@ bash xray-warp-team.sh show-links
   只轮换 REALITY UUID。
 - `bash xray-warp-team.sh change-uuid --xhttp-only`
   只轮换 XHTTP UUID。
+- `bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu`
+  修改 REALITY 的可见 SNI；如果原来的 target 跟着旧 SNI，脚本会默认一起改成新 SNI 的 `:443`。
+- `bash xray-warp-team.sh change-path --xhttp-path /cfup-new`
+  修改 XHTTP 的路径。
+- `bash xray-warp-team.sh change-cert-mode --cert-mode acme-dns-cf --xhttp-domain cdn.example.com`
+  切换证书模式，也可以顺手改 XHTTP CDN 域名。
 - `bash xray-warp-team.sh uninstall --yes`
   停掉服务并删除脚本托管的文件，但默认保留已安装的系统包。
 
 `change-uuid` 依赖脚本之前生成的状态文件和当前配置，适合这套脚本安装出来的节点。
+
+`change-cert-mode` 如果切到：
+
+- `existing`
+  需要同时提供新的 `--cert-file` 和 `--key-file`。
+- `cf-origin-ca`
+  需要提供 `--cf-zone-id` 和 `--cf-api-token`。
+- `acme-dns-cf`
+  需要提供 `--acme-email` 和 `--cf-dns-token`。
 
 ## Cloudflare 侧还需要做的事
 
