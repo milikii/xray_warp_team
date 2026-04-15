@@ -8,6 +8,7 @@ DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
 DEFAULT_FINGERPRINT="chrome"
 DEFAULT_CF_CERT_VALIDITY="5475"
+DEFAULT_ACME_CA="letsencrypt"
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
@@ -25,6 +26,9 @@ NET_SYSCTL_CONF="/etc/sysctl.d/98-xray-warp-team-net.conf"
 NET_HELPER_PATH="/usr/local/sbin/xray-warp-team-net-optimize.sh"
 NET_SERVICE_NAME="xray-warp-team-net-optimize.service"
 NET_SERVICE_FILE="/etc/systemd/system/${NET_SERVICE_NAME}"
+ACME_HOME="/root/.acme.sh"
+ACME_SH_BIN="${ACME_HOME}/acme.sh"
+ACME_RELOAD_HELPER="/usr/local/sbin/xray-warp-team-cert-reload.sh"
 
 NON_INTERACTIVE=0
 ENABLE_WARP=""
@@ -51,6 +55,11 @@ KEY_SOURCE_FILE=""
 CF_ZONE_ID=""
 CF_API_TOKEN=""
 CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
+ACME_EMAIL=""
+ACME_CA="${DEFAULT_ACME_CA}"
+CF_DNS_TOKEN=""
+CF_DNS_ACCOUNT_ID=""
+CF_DNS_ZONE_ID=""
 
 log() {
   printf '[INFO] %s\n' "$*"
@@ -96,12 +105,17 @@ Install options:
   --xhttp-uuid VALUE          UUID for the XHTTP CDN node.
   --xhttp-domain VALUE        Orange-cloud domain for the XHTTP CDN node.
   --xhttp-path VALUE          XHTTP path, for example /cfup-example.
-  --cert-mode VALUE           self-signed, existing, or cf-origin-ca.
+  --cert-mode VALUE           self-signed, existing, cf-origin-ca, or acme-dns-cf.
   --cert-file VALUE           Existing certificate file when --cert-mode existing.
   --key-file VALUE            Existing key file when --cert-mode existing.
   --cf-zone-id VALUE          Cloudflare zone ID for cf-origin-ca mode.
   --cf-api-token VALUE        Cloudflare API token for cf-origin-ca mode.
   --cf-cert-validity VALUE    Cloudflare Origin CA validity days. Default: 5475
+  --acme-email VALUE          Email used by acme.sh account registration.
+  --acme-ca VALUE             ACME CA name passed to acme.sh. Default: letsencrypt
+  --cf-dns-token VALUE        Cloudflare DNS API token for acme dns_cf mode.
+  --cf-dns-account-id VALUE   Cloudflare account ID for acme dns_cf mode. Optional.
+  --cf-dns-zone-id VALUE      Cloudflare zone ID for acme dns_cf mode. Optional.
   --enable-warp               Enable selective WARP outbound.
   --disable-warp              Disable WARP outbound.
   --enable-net-opt            Enable BBR/FQ/RPS network optimization.
@@ -329,6 +343,7 @@ load_current_install_context() {
   SERVER_IP="${SERVER_IP:-$(guess_server_ip)}"
   FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   CERT_MODE="${CERT_MODE:-existing}"
+  ACME_CA="${ACME_CA:-${DEFAULT_ACME_CA}}"
   ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
 
@@ -413,13 +428,13 @@ prepare_install_inputs() {
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN domain" ""
   prompt_with_default XHTTP_PATH "XHTTP path" "$(random_path)"
-  prompt_with_default CERT_MODE "TLS certificate mode (self-signed/existing/cf-origin-ca)" "self-signed"
+  prompt_with_default CERT_MODE "TLS certificate mode (self-signed/existing/cf-origin-ca/acme-dns-cf)" "self-signed"
 
   case "${CERT_MODE}" in
-    self-signed|existing|cf-origin-ca)
+    self-signed|existing|cf-origin-ca|acme-dns-cf)
       ;;
     *)
-      die "Unsupported cert mode: ${CERT_MODE}. Use self-signed, existing, or cf-origin-ca."
+      die "Unsupported cert mode: ${CERT_MODE}. Use self-signed, existing, cf-origin-ca, or acme-dns-cf."
       ;;
   esac
 
@@ -432,6 +447,18 @@ prepare_install_inputs() {
     prompt_with_default CF_ZONE_ID "Cloudflare zone ID" ""
     prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA validity days" "${DEFAULT_CF_CERT_VALIDITY}"
     prompt_secret CF_API_TOKEN "Cloudflare API token"
+  fi
+
+  if [[ "${CERT_MODE}" == "acme-dns-cf" ]]; then
+    prompt_with_default ACME_EMAIL "acme.sh account email" ""
+    prompt_with_default ACME_CA "ACME CA" "${DEFAULT_ACME_CA}"
+    prompt_secret CF_DNS_TOKEN "Cloudflare DNS API token"
+    if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
+      read -r -p "Cloudflare account ID (optional): " CF_DNS_ACCOUNT_ID
+    fi
+    if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
+      read -r -p "Cloudflare zone ID for DNS API (optional): " CF_DNS_ZONE_ID
+    fi
   fi
 
   prompt_yes_no ENABLE_NET_OPT "Enable network optimization? [y/n]" "y"
@@ -549,6 +576,68 @@ set_cloudflare_ssl_mode_strict() {
   fi
 }
 
+write_acme_reload_helper() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if [[ -f "${TLS_CERT_FILE}" && -f "${TLS_KEY_FILE}" ]]; then
+  chown root:xray "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" 2>/dev/null || true
+  chmod 0640 "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" 2>/dev/null || true
+fi
+
+systemctl restart xray >/dev/null 2>&1 || true
+systemctl restart haproxy >/dev/null 2>&1 || true
+EOF
+
+  backup_path "${ACME_RELOAD_HELPER}"
+  install -m 0755 "${tmp_file}" "${ACME_RELOAD_HELPER}"
+  rm -f "${tmp_file}"
+}
+
+install_acme_sh() {
+  local tmp_file=""
+
+  if [[ -x "${ACME_SH_BIN}" ]]; then
+    return
+  fi
+
+  [[ -n "${ACME_EMAIL}" ]] || die "ACME_EMAIL is required for acme-dns-cf mode."
+  tmp_file="$(mktemp)"
+  curl -fsSL https://get.acme.sh -o "${tmp_file}"
+  sh "${tmp_file}" email="${ACME_EMAIL}" >/dev/null
+  rm -f "${tmp_file}"
+  [[ -x "${ACME_SH_BIN}" ]] || die "acme.sh installation failed."
+}
+
+issue_acme_cf_cert() {
+  [[ -n "${ACME_EMAIL}" ]] || die "ACME_EMAIL is required for acme-dns-cf mode."
+  [[ -n "${CF_DNS_TOKEN}" ]] || die "CF_DNS_TOKEN is required for acme-dns-cf mode."
+
+  install_acme_sh
+  write_acme_reload_helper
+
+  unset CF_Account_ID CF_Zone_ID
+  export CF_Token="${CF_DNS_TOKEN}"
+  if [[ -n "${CF_DNS_ACCOUNT_ID}" ]]; then
+    export CF_Account_ID="${CF_DNS_ACCOUNT_ID}"
+  fi
+  if [[ -n "${CF_DNS_ZONE_ID}" ]]; then
+    export CF_Zone_ID="${CF_DNS_ZONE_ID}"
+  fi
+
+  "${ACME_SH_BIN}" --register-account -m "${ACME_EMAIL}" --server "${ACME_CA}" >/dev/null 2>&1 || true
+  "${ACME_SH_BIN}" --issue --dns dns_cf -d "${XHTTP_DOMAIN}" --server "${ACME_CA}" --keylength ec-256
+  "${ACME_SH_BIN}" --install-cert -d "${XHTTP_DOMAIN}" \
+    --ecc \
+    --key-file "${TLS_KEY_FILE}" \
+    --fullchain-file "${TLS_CERT_FILE}" \
+    --reloadcmd "${ACME_RELOAD_HELPER}"
+}
+
 write_tls_assets() {
   local tls_config=""
 
@@ -564,6 +653,8 @@ write_tls_assets() {
     install -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
   elif [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
     request_cf_origin_ca_cert
+  elif [[ "${CERT_MODE}" == "acme-dns-cf" ]]; then
+    issue_acme_cf_cert
   else
     tls_config="$(mktemp)"
     cat > "${tls_config}" <<EOF
@@ -1221,6 +1312,10 @@ WARP_PROXY_PORT='${WARP_PROXY_PORT}'
 CERT_MODE='${CERT_MODE}'
 CF_ZONE_ID='${CF_ZONE_ID}'
 CF_CERT_VALIDITY='${CF_CERT_VALIDITY}'
+ACME_EMAIL='${ACME_EMAIL}'
+ACME_CA='${ACME_CA}'
+CF_DNS_ACCOUNT_ID='${CF_DNS_ACCOUNT_ID}'
+CF_DNS_ZONE_ID='${CF_DNS_ZONE_ID}'
 EOF
   chmod 0600 "${STATE_FILE}"
 }
@@ -1396,6 +1491,7 @@ uninstall_cmd() {
 
   need_root
   start_backup_session
+  load_existing_state
 
   if [[ "${assume_yes}" -ne 1 ]]; then
     read -r -p "This will stop services and remove managed files, but keep installed packages. Continue? [y/N]: " answer
@@ -1410,6 +1506,10 @@ uninstall_cmd() {
   stop_and_disable_service_if_present "warp-svc.service"
   stop_and_disable_service_if_present "${NET_SERVICE_NAME}"
 
+  if [[ "${CERT_MODE:-}" == "acme-dns-cf" && -x "${ACME_SH_BIN}" && -n "${XHTTP_DOMAIN:-}" ]]; then
+    "${ACME_SH_BIN}" --remove -d "${XHTTP_DOMAIN}" --ecc >/dev/null 2>&1 || true
+  fi
+
   remove_managed_paths \
     "${XRAY_BIN}" \
     "${XRAY_CONFIG_DIR}" \
@@ -1421,6 +1521,7 @@ uninstall_cmd() {
     "${NET_SYSCTL_CONF}" \
     "${NET_HELPER_PATH}" \
     "${NET_SERVICE_FILE}" \
+    "${ACME_RELOAD_HELPER}" \
     "${OUTPUT_FILE}" \
     "/var/log/xray" \
     "/var/lib/xray"
@@ -1525,6 +1626,26 @@ parse_install_args() {
         ;;
       --cf-cert-validity)
         CF_CERT_VALIDITY="${2}"
+        shift
+        ;;
+      --acme-email)
+        ACME_EMAIL="${2}"
+        shift
+        ;;
+      --acme-ca)
+        ACME_CA="${2}"
+        shift
+        ;;
+      --cf-dns-token)
+        CF_DNS_TOKEN="${2}"
+        shift
+        ;;
+      --cf-dns-account-id)
+        CF_DNS_ACCOUNT_ID="${2}"
+        shift
+        ;;
+      --cf-dns-zone-id)
+        CF_DNS_ZONE_ID="${2}"
         shift
         ;;
       --enable-warp)
