@@ -39,6 +39,17 @@ bash xray-warp-team.sh
 bash xray-warp-team.sh install
 ```
 
+安装完成后，脚本会把自己落到 `/usr/local/sbin/xray-warp-team`。
+之后维护时可以直接运行：
+
+```bash
+xray-warp-team status
+xray-warp-team show-links
+xray-warp-team change-sni --reality-sni www.stanford.edu
+xray-warp-team change-path --xhttp-path /cfup-new
+xray-warp-team change-uuid --xhttp-only
+```
+
 常用维护命令：
 
 ```bash
@@ -59,6 +70,7 @@ bash xray-warp-team.sh install --non-interactive \
   --server-ip 203.0.113.10 \
   --reality-sni www.scu.edu \
   --reality-target www.scu.edu:443 \
+  --reality-private-key your_existing_reality_private_key \
   --xhttp-domain cdn.example.com \
   --xhttp-path /cfup-demo \
   --cert-mode self-signed \

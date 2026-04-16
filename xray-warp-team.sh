@@ -16,6 +16,7 @@ XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_ASSET_DIR="/usr/local/share/xray"
 XRAY_SERVICE_FILE="/etc/systemd/system/xray.service"
+SELF_COMMAND_PATH="/usr/local/sbin/xray-warp-team"
 HAPROXY_CONFIG="/etc/haproxy/haproxy.cfg"
 STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
 OUTPUT_FILE="/root/xray-warp-team-output.md"
@@ -125,6 +126,7 @@ Install options:
   --reality-sni VALUE         Visible SNI for REALITY and HAProxy routing.
   --reality-target VALUE      REALITY target in host:port form.
   --reality-short-id VALUE    Short ID for REALITY.
+  --reality-private-key VALUE Preserve an existing REALITY private key.
   --xhttp-uuid VALUE          UUID for the XHTTP CDN node.
   --xhttp-domain VALUE        Orange-cloud domain for the XHTTP CDN node.
   --xhttp-path VALUE          XHTTP path, for example /cfup-example.
@@ -809,6 +811,13 @@ generate_reality_keys_if_needed() {
   local key_output=""
 
   if [[ -n "${REALITY_PRIVATE_KEY}" && -n "${REALITY_PUBLIC_KEY}" ]]; then
+    return
+  fi
+
+  if [[ -n "${REALITY_PRIVATE_KEY}" && -z "${REALITY_PUBLIC_KEY}" ]]; then
+    key_output="$("${XRAY_BIN}" x25519 -i "${REALITY_PRIVATE_KEY}")"
+    REALITY_PUBLIC_KEY="$(printf '%s\n' "${key_output}" | awk -F': ' '/Password \(PublicKey\)|Public key/ {print $2; exit}')"
+    [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "Failed to derive REALITY public key from the provided private key."
     return
   fi
 
@@ -1747,6 +1756,16 @@ restart_core_services() {
   systemctl restart haproxy
 }
 
+install_self_command() {
+  local source_path="${BASH_SOURCE[0]:-$0}"
+
+  if [[ -f "${source_path}" ]]; then
+    install -m 0755 "${source_path}" "${SELF_COMMAND_PATH}"
+  else
+    warn "Could not persist the management command because the script path is unavailable."
+  fi
+}
+
 cleanup_previous_acme_cert() {
   local old_cert_mode="${1:-}"
   local old_xhttp_domain="${2:-}"
@@ -2286,6 +2305,7 @@ uninstall_cmd() {
   fi
 
   remove_managed_paths \
+    "${SELF_COMMAND_PATH}" \
     "${XRAY_BIN}" \
     "${XRAY_CONFIG_DIR}" \
     "${XRAY_ASSET_DIR}" \
@@ -2381,6 +2401,10 @@ parse_install_args() {
         ;;
       --reality-short-id)
         REALITY_SHORT_ID="${2}"
+        shift
+        ;;
+      --reality-private-key)
+        REALITY_PRIVATE_KEY="${2}"
         shift
         ;;
       --xhttp-uuid)
@@ -2488,6 +2512,7 @@ install_cmd() {
   parse_install_args "$@"
   prepare_install_inputs
   install_packages
+  install_self_command
   install_xray
   ensure_xray_user
   generate_reality_keys_if_needed
@@ -2504,6 +2529,7 @@ install_cmd() {
 
   log "Deployment finished."
   log "Backup directory: ${BACKUP_DIR}"
+  log "Management command: ${SELF_COMMAND_PATH}"
   log "Node links saved to: ${OUTPUT_FILE}"
   show_links
 }
