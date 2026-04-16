@@ -47,7 +47,7 @@ xray-warp-team status
 xray-warp-team show-links
 xray-warp-team change-label-prefix --node-label-prefix HKG
 xray-warp-team change-sni --reality-sni www.stanford.edu
-xray-warp-team change-path --xhttp-path /cfup-new
+xray-warp-team change-path --xhttp-path /assets/v3
 xray-warp-team change-uuid --xhttp-only
 ```
 
@@ -59,7 +59,7 @@ bash xray-warp-team.sh status --raw
 bash xray-warp-team.sh upgrade
 bash xray-warp-team.sh change-uuid
 bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
-bash xray-warp-team.sh change-path --xhttp-path /cfup-new
+bash xray-warp-team.sh change-path --xhttp-path /assets/v3
 bash xray-warp-team.sh change-cert-mode --cert-mode self-signed
 bash xray-warp-team.sh uninstall --yes
 ```
@@ -74,7 +74,7 @@ bash xray-warp-team.sh install --non-interactive \
   --reality-target www.scu.edu:443 \
   --reality-private-key your_existing_reality_private_key \
   --xhttp-domain cdn.example.com \
-  --xhttp-path /cfup-demo \
+  --xhttp-path /assets/v3 \
   --cert-mode self-signed \
   --enable-net-opt \
   --warp-team your-team \
@@ -92,7 +92,7 @@ bash xray-warp-team.sh install --non-interactive \
   --reality-sni www.scu.edu \
   --reality-target www.scu.edu:443 \
   --xhttp-domain cdn.example.com \
-  --xhttp-path /cfup-demo \
+  --xhttp-path /assets/v3 \
   --cert-mode acme-dns-cf \
   --acme-email you@example.com \
   --cf-dns-token your_cloudflare_dns_token \
@@ -107,7 +107,10 @@ bash xray-warp-team.sh install --non-interactive \
 - `self-signed`
   适合先快速起机。Cloudflare SSL/TLS 模式设为 `Full`。
 - `existing`
-  使用你已经准备好的证书和私钥文件。比如 Cloudflare Origin CA 或 Let's Encrypt。Cloudflare SSL/TLS 模式可设为 `Full (strict)`。
+  使用你已经准备好的证书和私钥。比如 Cloudflare Origin CA 或 Let's Encrypt。Cloudflare SSL/TLS 模式可设为 `Full (strict)`。
+  支持两种输入方式：
+  1. 直接给本机已有文件路径
+  2. 直接粘贴 PEM 内容，由脚本写入目标文件
 - `cf-origin-ca`
   脚本在 VPS 上本地生成私钥和 CSR，再调用 Cloudflare Origin CA API 自动签发证书并落到 Xray 使用的位置。脚本会尝试把该 zone 的 SSL/TLS 模式切到 `Full (strict)`。
 - `acme-dns-cf`
@@ -120,6 +123,24 @@ bash xray-warp-team.sh install \
   --cert-mode existing \
   --cert-file /root/cert.pem \
   --key-file /root/key.pem
+```
+
+如果你平时把 Cloudflare 证书放在本机：
+
+```bash
+bash xray-warp-team.sh install \
+  --cert-mode existing \
+  --cert-file /etc/ssl/cloudflare/cert.pem \
+  --key-file /etc/ssl/cloudflare/key.pem
+```
+
+如果你想直接把 PEM 内容交给脚本写入：
+
+```bash
+bash xray-warp-team.sh install \
+  --cert-mode existing \
+  --cert-pem "$(cat /etc/ssl/cloudflare/cert.pem)" \
+  --key-pem "$(cat /etc/ssl/cloudflare/key.pem)"
 ```
 
 `cf-origin-ca` 示例：
@@ -195,7 +216,7 @@ bash xray-warp-team.sh show-links
   只轮换 XHTTP UUID。
 - `bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu`
   修改 REALITY 的可见 SNI；如果原来的 target 跟着旧 SNI，脚本会默认一起改成新 SNI 的 `:443`。
-- `bash xray-warp-team.sh change-path --xhttp-path /cfup-new`
+- `bash xray-warp-team.sh change-path --xhttp-path /assets/v3`
   修改 XHTTP 的路径。
 - `bash xray-warp-team.sh change-label-prefix --node-label-prefix HKG`
   修改导出节点名称前缀，例如生成 `HKG-REALITY` 和 `HKG-XHTTP-CDN`。

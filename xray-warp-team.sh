@@ -56,6 +56,8 @@ WARP_CLIENT_SECRET=""
 WARP_PROXY_PORT="${DEFAULT_WARP_PROXY_PORT}"
 CERT_SOURCE_FILE=""
 KEY_SOURCE_FILE=""
+CERT_SOURCE_PEM=""
+KEY_SOURCE_PEM=""
 CF_ZONE_ID=""
 CF_API_TOKEN=""
 CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
@@ -136,6 +138,8 @@ xray-warp-team.sh v0.4.1
   --cert-mode VALUE           证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
   --cert-file VALUE           当证书模式为 existing 时使用的证书文件。
   --key-file VALUE            当证书模式为 existing 时使用的私钥文件。
+  --cert-pem VALUE            当证书模式为 existing 时直接传入证书 PEM 内容。
+  --key-pem VALUE             当证书模式为 existing 时直接传入私钥 PEM 内容。
   --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
   --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
   --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期，默认 5475 天。
@@ -178,6 +182,8 @@ xray-warp-team.sh v0.4.1
   --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
   --cert-file VALUE           existing 模式使用的证书文件。
   --key-file VALUE            existing 模式使用的私钥文件。
+  --cert-pem VALUE            existing 模式直接传入证书 PEM 内容。
+  --key-pem VALUE             existing 模式直接传入私钥 PEM 内容。
   --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
   --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
   --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期。
@@ -237,7 +243,15 @@ random_hex() {
 }
 
 random_path() {
-  printf '/cfup-%s' "$(random_hex 6)"
+  local candidates=(
+    "/assets/v3"
+    "/static/app"
+    "/images/webp"
+    "/fonts/inter"
+    "/media/cache"
+  )
+
+  printf '%s' "${candidates[$((RANDOM % ${#candidates[@]}))]}"
 }
 
 normalize_node_label_prefix() {
@@ -310,6 +324,37 @@ prompt_secret() {
   printf -v "${var_name}" '%s' "${current_value}"
 }
 
+prompt_multiline_value() {
+  local var_name="${1}"
+  local prompt_text="${2}"
+  local current_value=""
+  local line=""
+
+  current_value="${!var_name:-}"
+  if [[ -n "${current_value}" ]]; then
+    return
+  fi
+
+  if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    die "缺少必填多行内容：${var_name}。"
+  fi
+
+  printf '%s\n' "${prompt_text}"
+  printf '%s\n' "请直接粘贴内容，结束后单独输入一行 EOF。"
+
+  current_value=""
+  while IFS= read -r line; do
+    if [[ "${line}" == "EOF" ]]; then
+      break
+    fi
+    current_value+="${line}"$'\n'
+  done
+
+  current_value="${current_value%$'\n'}"
+  [[ -n "${current_value}" ]] || die "${var_name} 内容不能为空。"
+  printf -v "${var_name}" '%s' "${current_value}"
+}
+
 prompt_yes_no() {
   local var_name="${1}"
   local prompt_text="${2}"
@@ -328,6 +373,45 @@ prompt_yes_no() {
   read -r -p "${prompt_text} [${default_value}]: " answer
   answer="${answer:-${default_value}}"
   printf -v "${var_name}" '%s' "${answer}"
+}
+
+prepare_existing_cert_inputs() {
+  local input_mode=""
+
+  if [[ -n "${CERT_SOURCE_FILE}" || -n "${KEY_SOURCE_FILE}" ]]; then
+    [[ -n "${CERT_SOURCE_FILE}" && -n "${KEY_SOURCE_FILE}" ]] || die "existing 模式下，证书文件路径和私钥文件路径必须同时提供。"
+    CERT_SOURCE_PEM=""
+    KEY_SOURCE_PEM=""
+    return
+  fi
+
+  if [[ -n "${CERT_SOURCE_PEM}" || -n "${KEY_SOURCE_PEM}" ]]; then
+    [[ -n "${CERT_SOURCE_PEM}" && -n "${KEY_SOURCE_PEM}" ]] || die "existing 模式下，证书 PEM 内容和私钥 PEM 内容必须同时提供。"
+    CERT_SOURCE_FILE=""
+    KEY_SOURCE_FILE=""
+    return
+  fi
+
+  if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    die "existing 模式下，请提供 --cert-file/--key-file，或 --cert-pem/--key-pem。"
+  fi
+
+  read -r -p "证书输入方式 [path/pem] [path]: " input_mode
+  input_mode="${input_mode:-path}"
+
+  case "${input_mode}" in
+    path)
+      prompt_with_default CERT_SOURCE_FILE "现有证书文件路径" ""
+      prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" ""
+      ;;
+    pem)
+      prompt_multiline_value CERT_SOURCE_PEM "请输入证书 PEM 内容"
+      prompt_multiline_value KEY_SOURCE_PEM "请输入私钥 PEM 内容"
+      ;;
+    *)
+      die "证书输入方式只能是 path 或 pem。"
+      ;;
+  esac
 }
 
 style_text() {
@@ -911,8 +995,7 @@ prepare_install_inputs() {
   esac
 
   if [[ "${CERT_MODE}" == "existing" ]]; then
-    prompt_with_default CERT_SOURCE_FILE "现有证书文件路径" ""
-    prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" ""
+    prepare_existing_cert_inputs
   fi
 
   if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
@@ -993,8 +1076,7 @@ prompt_cert_mode_inputs() {
       CF_DNS_ZONE_ID=""
       ;;
     existing)
-      prompt_with_default CERT_SOURCE_FILE "现有证书文件路径" "${CERT_SOURCE_FILE:-}"
-      prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" "${KEY_SOURCE_FILE:-}"
+      prepare_existing_cert_inputs
       CF_ZONE_ID=""
       CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
       ACME_EMAIL=""
@@ -1176,6 +1258,20 @@ issue_acme_cf_cert() {
     --reloadcmd "${ACME_RELOAD_HELPER}"
 }
 
+validate_tls_assets() {
+  local cert_pub_hash=""
+  local key_pub_hash=""
+
+  openssl x509 -in "${TLS_CERT_FILE}" -noout >/dev/null 2>&1 || die "写入后的证书内容无效：${TLS_CERT_FILE}"
+  openssl pkey -in "${TLS_KEY_FILE}" -noout >/dev/null 2>&1 || die "写入后的私钥内容无效：${TLS_KEY_FILE}"
+
+  cert_pub_hash="$(openssl x509 -in "${TLS_CERT_FILE}" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
+  key_pub_hash="$(openssl pkey -in "${TLS_KEY_FILE}" -pubout -outform DER 2>/dev/null | sha256sum | awk '{print $1}')"
+
+  [[ -n "${cert_pub_hash}" && -n "${key_pub_hash}" ]] || die "无法校验证书与私钥是否匹配。"
+  [[ "${cert_pub_hash}" == "${key_pub_hash}" ]] || die "证书与私钥不匹配，请检查输入内容。"
+}
+
 write_tls_assets() {
   local tls_config=""
 
@@ -1184,11 +1280,20 @@ write_tls_assets() {
   backup_path "${TLS_KEY_FILE}"
 
   if [[ "${CERT_MODE}" == "existing" ]]; then
-    [[ -f "${CERT_SOURCE_FILE}" ]] || die "找不到证书文件：${CERT_SOURCE_FILE}"
-    [[ -f "${KEY_SOURCE_FILE}" ]] || die "找不到私钥文件：${KEY_SOURCE_FILE}"
+    if [[ -n "${CERT_SOURCE_FILE}" || -n "${KEY_SOURCE_FILE}" ]]; then
+      [[ -f "${CERT_SOURCE_FILE}" ]] || die "找不到证书文件：${CERT_SOURCE_FILE}"
+      [[ -f "${KEY_SOURCE_FILE}" ]] || die "找不到私钥文件：${KEY_SOURCE_FILE}"
 
-    install -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
-    install -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
+      install -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
+      install -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
+    else
+      [[ -n "${CERT_SOURCE_PEM}" ]] || die "existing 模式下缺少证书 PEM 内容。"
+      [[ -n "${KEY_SOURCE_PEM}" ]] || die "existing 模式下缺少私钥 PEM 内容。"
+
+      printf '%s\n' "${CERT_SOURCE_PEM}" > "${TLS_CERT_FILE}"
+      printf '%s\n' "${KEY_SOURCE_PEM}" > "${TLS_KEY_FILE}"
+      chmod 0640 "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
+    fi
   elif [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
     request_cf_origin_ca_cert
   elif [[ "${CERT_MODE}" == "acme-dns-cf" ]]; then
@@ -1220,6 +1325,7 @@ EOF
   fi
 
   chown root:xray "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
+  validate_tls_assets
 
   if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
     set_cloudflare_ssl_mode_strict
@@ -2251,6 +2357,14 @@ change_cert_mode_cmd() {
         KEY_SOURCE_FILE="${2}"
         shift
         ;;
+      --cert-pem)
+        CERT_SOURCE_PEM="${2}"
+        shift
+        ;;
+      --key-pem)
+        KEY_SOURCE_PEM="${2}"
+        shift
+        ;;
       --cf-zone-id)
         CF_ZONE_ID="${2}"
         shift
@@ -2544,6 +2658,14 @@ parse_install_args() {
         ;;
       --key-file)
         KEY_SOURCE_FILE="${2}"
+        shift
+        ;;
+      --cert-pem)
+        CERT_SOURCE_PEM="${2}"
+        shift
+        ;;
+      --key-pem)
+        KEY_SOURCE_PEM="${2}"
         shift
         ;;
       --cf-zone-id)
