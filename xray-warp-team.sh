@@ -221,12 +221,89 @@ EOF
 
 guess_server_ip() {
   local guessed=""
+  local fallback=""
 
   guessed="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
-  if [[ -z "${guessed}" ]]; then
-    guessed="$(ip -o -4 addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')"
+
+  if is_public_ipv4 "${guessed}"; then
+    printf '%s' "${guessed}"
+    return
   fi
-  printf '%s' "${guessed}"
+
+  fallback="${guessed}"
+  guessed="$(fetch_public_ipv4)"
+  if is_public_ipv4 "${guessed}"; then
+    printf '%s' "${guessed}"
+    return
+  fi
+
+  if [[ -z "${fallback}" ]]; then
+    fallback="$(ip -o -4 addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')"
+  fi
+  printf '%s' "${fallback}"
+}
+
+is_ipv4() {
+  local ip="${1:-}"
+
+  [[ -n "${ip}" ]] || return 1
+  awk -F'.' '
+    NF != 4 { exit 1 }
+    {
+      for (i = 1; i <= 4; i++) {
+        if ($i !~ /^[0-9]+$/) exit 1
+        if ($i < 0 || $i > 255) exit 1
+      }
+    }
+    END { exit 0 }
+  ' <<<"${ip}" >/dev/null 2>&1
+}
+
+is_private_ipv4() {
+  local ip="${1:-}"
+
+  is_ipv4 "${ip}" || return 1
+
+  case "${ip}" in
+    10.*|127.*|0.*|192.168.*|169.254.*)
+      return 0
+      ;;
+    172.1[6-9].*|172.2[0-9].*|172.3[0-1].*)
+      return 0
+      ;;
+    100.6[4-9].*|100.[7-9][0-9].*|100.1[0-1][0-9].*|100.12[0-7].*)
+      return 0
+      ;;
+  esac
+
+  return 1
+}
+
+is_public_ipv4() {
+  local ip="${1:-}"
+
+  is_ipv4 "${ip}" || return 1
+  is_private_ipv4 "${ip}" && return 1
+  return 0
+}
+
+fetch_public_ipv4() {
+  local url=""
+  local ip=""
+
+  for url in \
+    "https://api.ipify.org" \
+    "https://ifconfig.me/ip" \
+    "https://ipv4.icanhazip.com"
+  do
+    ip="$(curl -4fsSL --max-time 4 "${url}" 2>/dev/null | tr -d '\r\n')"
+    if is_public_ipv4 "${ip}"; then
+      printf '%s' "${ip}"
+      return
+    fi
+  done
+
+  return 1
 }
 
 random_uuid() {
