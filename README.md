@@ -48,6 +48,7 @@ xray-warp-team show-links
 xray-warp-team change-label-prefix --node-label-prefix HKG
 xray-warp-team change-sni --reality-sni www.stanford.edu
 xray-warp-team change-path --xhttp-path /assets/v3
+xray-warp-team change-warp --disable-warp
 xray-warp-team change-uuid --xhttp-only
 ```
 
@@ -60,6 +61,7 @@ bash xray-warp-team.sh upgrade
 bash xray-warp-team.sh change-uuid
 bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
 bash xray-warp-team.sh change-path --xhttp-path /assets/v3
+bash xray-warp-team.sh change-warp --disable-warp
 bash xray-warp-team.sh change-cert-mode --cert-mode self-signed
 bash xray-warp-team.sh uninstall --yes
 ```
@@ -220,6 +222,8 @@ bash xray-warp-team.sh show-links
   修改 XHTTP 的路径。
 - `bash xray-warp-team.sh change-label-prefix --node-label-prefix HKG`
   修改导出节点名称前缀，例如生成 `HKG-REALITY` 和 `HKG-XHTTP-CDN`。
+- `bash xray-warp-team.sh change-warp --disable-warp`
+  关闭 WARP 分流；如需重新启用，可用 `--enable-warp`。
 - `bash xray-warp-team.sh change-cert-mode --cert-mode acme-dns-cf --xhttp-domain cdn.example.com`
   切换证书模式，也可以顺手改 XHTTP CDN 域名。
 - `bash xray-warp-team.sh uninstall --yes`

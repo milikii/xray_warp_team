@@ -116,6 +116,7 @@ xray-warp-team.sh v0.4.1
   bash xray-warp-team.sh change-sni [参数]
   bash xray-warp-team.sh change-path [参数]
   bash xray-warp-team.sh change-label-prefix [参数]
+  bash xray-warp-team.sh change-warp [参数]
   bash xray-warp-team.sh change-cert-mode [参数]
   bash xray-warp-team.sh uninstall [--yes]
   bash xray-warp-team.sh show-links
@@ -176,6 +177,15 @@ xray-warp-team.sh v0.4.1
   --non-interactive           非交互运行。
   --node-label-prefix VALUE   新的导出节点名前缀。
 
+变更 WARP 参数:
+  --non-interactive           非交互运行。
+  --enable-warp               启用 WARP 分流。
+  --disable-warp              禁用 WARP 分流。
+  --warp-team VALUE           Cloudflare Zero Trust 团队名。
+  --warp-client-id VALUE      服务令牌 Client ID。
+  --warp-client-secret VALUE  服务令牌 Client Secret。
+  --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口。
+
 变更证书模式参数:
   --non-interactive           非交互运行。
   --cert-mode VALUE           新证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
@@ -204,8 +214,9 @@ xray-warp-team.sh v0.4.1
   bash xray-warp-team.sh upgrade
   bash xray-warp-team.sh change-uuid
   bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
-  bash xray-warp-team.sh change-path --xhttp-path /cfup-new
+  bash xray-warp-team.sh change-path --xhttp-path /assets/v3
   bash xray-warp-team.sh change-label-prefix --node-label-prefix HKG
+  bash xray-warp-team.sh change-warp --disable-warp
   bash xray-warp-team.sh change-cert-mode --cert-mode self-signed
   bash xray-warp-team.sh uninstall --yes
   bash xray-warp-team.sh install --non-interactive \
@@ -928,6 +939,39 @@ output_field_value() {
   sed -n "s/^- ${field_name}: //p" "${OUTPUT_FILE}" | head -n 1
 }
 
+warp_mdm_value() {
+  local key_name="${1}"
+
+  [[ -f "${WARP_MDM_FILE}" ]] || return 0
+
+  awk -v key_name="${key_name}" '
+    $0 ~ "<key>" key_name "</key>" {
+      getline
+      line=$0
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+      if (line ~ /^<string>/) {
+        sub(/^<string>/, "", line)
+        sub(/<\/string>$/, "", line)
+        print line
+        exit
+      }
+      if (line ~ /^<integer>/) {
+        sub(/^<integer>/, "", line)
+        sub(/<\/integer>$/, "", line)
+        print line
+        exit
+      }
+    }
+  ' "${WARP_MDM_FILE}" 2>/dev/null || true
+}
+
+load_warp_mdm_context() {
+  WARP_TEAM_NAME="${WARP_TEAM_NAME:-$(warp_mdm_value 'organization')}"
+  WARP_CLIENT_ID="${WARP_CLIENT_ID:-$(warp_mdm_value 'auth_client_id')}"
+  WARP_CLIENT_SECRET="${WARP_CLIENT_SECRET:-$(warp_mdm_value 'auth_client_secret')}"
+  WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(warp_mdm_value 'proxy_port')}"
+}
+
 haproxy_sni_for_backend() {
   local backend_name="${1}"
 
@@ -940,6 +984,7 @@ load_existing_state() {
     # shellcheck disable=SC1090
     . "${STATE_FILE}"
   fi
+  load_warp_mdm_context
 }
 
 load_current_install_context() {
@@ -2102,6 +2147,9 @@ FINGERPRINT='${FINGERPRINT}'
 ENABLE_WARP='${ENABLE_WARP}'
 ENABLE_NET_OPT='${ENABLE_NET_OPT}'
 WARP_PROXY_PORT='${WARP_PROXY_PORT}'
+WARP_TEAM_NAME='${WARP_TEAM_NAME}'
+WARP_CLIENT_ID='${WARP_CLIENT_ID}'
+WARP_CLIENT_SECRET='${WARP_CLIENT_SECRET}'
 CERT_MODE='${CERT_MODE}'
 CF_ZONE_ID='${CF_ZONE_ID}'
 CF_CERT_VALIDITY='${CF_CERT_VALIDITY}'
@@ -2398,6 +2446,99 @@ change_label_prefix_cmd() {
   show_links
 }
 
+change_warp_cmd() {
+  local target_mode=""
+
+  need_root
+  ensure_debian_family
+  start_backup_session
+  load_current_install_context
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --non-interactive)
+        NON_INTERACTIVE=1
+        ;;
+      --enable-warp)
+        target_mode="enable"
+        ;;
+      --disable-warp)
+        target_mode="disable"
+        ;;
+      --warp-team)
+        WARP_TEAM_NAME="${2}"
+        shift
+        ;;
+      --warp-client-id)
+        WARP_CLIENT_ID="${2}"
+        shift
+        ;;
+      --warp-client-secret)
+        WARP_CLIENT_SECRET="${2}"
+        shift
+        ;;
+      --warp-proxy-port)
+        WARP_PROXY_PORT="${2}"
+        shift
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "未知的 change-warp 参数：${1}"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ -z "${target_mode}" ]]; then
+    if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+      die "change-warp 在非交互模式下必须显式传入 --enable-warp 或 --disable-warp。"
+    fi
+
+    read -r -p "请选择 WARP 操作 [enable/disable] [${ENABLE_WARP:-yes}]: " target_mode
+    target_mode="${target_mode:-${ENABLE_WARP:-yes}}"
+    case "${target_mode}" in
+      yes|enable|enabled)
+        target_mode="enable"
+        ;;
+      no|disable|disabled)
+        target_mode="disable"
+        ;;
+      *)
+        die "WARP 操作只能是 enable 或 disable。"
+        ;;
+    esac
+  fi
+
+  case "${target_mode}" in
+    enable)
+      ENABLE_WARP="yes"
+      prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust 团队名" "${WARP_TEAM_NAME:-}"
+      prompt_with_default WARP_CLIENT_ID "Cloudflare 服务令牌 Client ID" "${WARP_CLIENT_ID:-}"
+      prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
+      prompt_with_default WARP_PROXY_PORT "本地 WARP SOCKS5 端口" "${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+
+      install_warp
+      apply_managed_runtime_update
+      log "WARP 分流已启用。"
+      ;;
+    disable)
+      ENABLE_WARP="no"
+      apply_managed_runtime_update
+      stop_and_disable_service_if_present "warp-svc.service"
+      log "WARP 分流已禁用。"
+      ;;
+    *)
+      die "WARP 操作只能是 enable 或 disable。"
+      ;;
+  esac
+
+  log "备份目录：${BACKUP_DIR}"
+  show_links
+}
+
 change_cert_mode_cmd() {
   local old_cert_mode=""
   local old_xhttp_domain=""
@@ -2648,10 +2789,11 @@ main_menu() {
   7. 修改 REALITY SNI
   8. 修改 XHTTP 路径
   9. 修改节点名前缀
-  10. 修改证书模式 / CDN 域名
-  11. 卸载托管文件
-  12. 查看原始服务详情
-  13. 帮助
+  10. 开关 WARP 分流
+  11. 修改证书模式 / CDN 域名
+  12. 卸载托管文件
+  13. 查看原始服务详情
+  14. 帮助
   0. 退出
 EOF
     read -r -p "请选择: " choice
@@ -2665,10 +2807,11 @@ EOF
       7) change_sni_cmd ;;
       8) change_path_cmd ;;
       9) change_label_prefix_cmd ;;
-      10) change_cert_mode_cmd ;;
-      11) uninstall_cmd ;;
-      12) status_raw_cmd ;;
-      13) usage ;;
+      10) change_warp_cmd ;;
+      11) change_cert_mode_cmd ;;
+      12) uninstall_cmd ;;
+      13) status_raw_cmd ;;
+      14) usage ;;
       0) exit 0 ;;
       *) warn "未知的菜单项：${choice}" ;;
     esac
@@ -2881,6 +3024,10 @@ main() {
     change-label-prefix)
       shift || true
       change_label_prefix_cmd "$@"
+      ;;
+    change-warp)
+      shift || true
+      change_warp_cmd "$@"
       ;;
     change-cert-mode)
       shift || true
