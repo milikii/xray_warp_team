@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="0.4.0"
+SCRIPT_VERSION="0.4.1"
 DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
@@ -31,8 +31,6 @@ NET_SERVICE_FILE="/etc/systemd/system/${NET_SERVICE_NAME}"
 ACME_HOME="/root/.acme.sh"
 ACME_SH_BIN="${ACME_HOME}/acme.sh"
 ACME_RELOAD_HELPER="/usr/local/sbin/xray-warp-team-cert-reload.sh"
-REALITY_CLIENT_FILE="/root/xray-reality-client.json"
-XHTTP_ECH_CLIENT_FILE="/root/xray-xhttp-cdn-ech-client.json"
 
 NON_INTERACTIVE=0
 ENABLE_WARP=""
@@ -104,7 +102,7 @@ need_root() {
 
 usage() {
   cat <<'EOF'
-xray-warp-team.sh v0.4.0
+xray-warp-team.sh v0.4.1
 
 Usage:
   bash xray-warp-team.sh
@@ -199,7 +197,9 @@ Examples:
     --xhttp-domain cdn.example.com \
     --cert-mode self-signed \
     --enable-net-opt \
-    --disable-warp
+    --warp-team your-team \
+    --warp-client-id xxxxxxxxx.access \
+    --warp-client-secret xxxxxxxxx
 EOF
 }
 
@@ -1747,95 +1747,6 @@ restart_core_services() {
   systemctl restart haproxy
 }
 
-write_client_example_files() {
-  cat > "${REALITY_CLIENT_FILE}" <<EOF
-{
-  "log": {
-    "loglevel": "warning"
-  },
-  "outbounds": [
-    {
-      "protocol": "vless",
-      "settings": {
-        "vnext": [
-          {
-            "address": "${SERVER_IP}",
-            "port": 443,
-            "users": [
-              {
-                "id": "${REALITY_UUID}",
-                "encryption": "none",
-                "flow": "xtls-rprx-vision"
-              }
-            ]
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "raw",
-        "security": "reality",
-        "realitySettings": {
-          "serverName": "${REALITY_SNI}",
-          "fingerprint": "${FINGERPRINT}",
-          "publicKey": "${REALITY_PUBLIC_KEY}",
-          "shortId": "${REALITY_SHORT_ID}",
-          "spiderX": "/"
-        }
-      }
-    }
-  ]
-}
-EOF
-
-  cat > "${XHTTP_ECH_CLIENT_FILE}" <<EOF
-{
-  "log": {
-    "loglevel": "warning"
-  },
-  "outbounds": [
-    {
-      "protocol": "vless",
-      "settings": {
-        "vnext": [
-          {
-            "address": "${XHTTP_DOMAIN}",
-            "port": 443,
-            "users": [
-              {
-                "id": "${XHTTP_UUID}",
-                "encryption": "none"
-              }
-            ]
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "xhttp",
-        "security": "tls",
-        "tlsSettings": {
-          "serverName": "${XHTTP_DOMAIN}",
-          "fingerprint": "${FINGERPRINT}",
-          "alpn": [
-            "${TLS_ALPN}",
-            "http/1.1"
-          ],
-          "echConfigList": "${XHTTP_ECH_CONFIG_LIST}",
-          "echForceQuery": "${XHTTP_ECH_FORCE_QUERY}"
-        },
-        "xhttpSettings": {
-          "host": "${XHTTP_DOMAIN}",
-          "path": "${XHTTP_PATH}",
-          "mode": "stream-one"
-        }
-      }
-    }
-  ]
-}
-EOF
-
-  chmod 0600 "${REALITY_CLIENT_FILE}" "${XHTTP_ECH_CLIENT_FILE}"
-}
-
 cleanup_previous_acme_cert() {
   local old_cert_mode="${1:-}"
   local old_xhttp_domain="${2:-}"
@@ -1855,7 +1766,6 @@ apply_managed_update() {
   restart_core_services
   write_state_file
   write_output_file
-  write_client_example_files
 }
 
 apply_managed_runtime_update() {
@@ -1865,7 +1775,6 @@ apply_managed_runtime_update() {
   restart_core_services
   write_state_file
   write_output_file
-  write_client_example_files
 }
 
 upgrade_cmd() {
@@ -1889,8 +1798,27 @@ upgrade_cmd() {
   [[ -n "${current_version}" ]] && log "Current version: ${current_version}"
 }
 
+uri_encode() {
+  local input="${1}"
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -rn --arg v "${input}" '$v|@uri'
+    return
+  fi
+
+  printf '%s' "${input}" \
+    | sed \
+      -e 's/%/%25/g' \
+      -e 's/:/%3A/g' \
+      -e 's/\//%2F/g' \
+      -e 's/+/%2B/g' \
+      -e 's/=/%3D/g' \
+      -e 's/?/%3F/g' \
+      -e 's/&/%26/g'
+}
+
 path_to_uri_component() {
-  printf '%s' "${1}" | sed 's/\//%2F/g'
+  uri_encode "${1}"
 }
 
 write_state_file() {
@@ -1926,9 +1854,11 @@ EOF
 
 write_output_file() {
   local xhttp_path_component=""
+  local xhttp_ech_component=""
   local cf_ssl_mode="Full (strict)"
 
   xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
+  xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
 
   if [[ "${CERT_MODE}" == "self-signed" ]]; then
     cf_ssl_mode="Full"
@@ -1962,9 +1892,11 @@ vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&s
 - Path: ${XHTTP_PATH}
 - Mode: stream-one
 - Fingerprint: ${FINGERPRINT}
+- ECH query: ${XHTTP_ECH_CONFIG_LIST}
+- ECH mode: ${XHTTP_ECH_FORCE_QUERY}
 
 URI:
-vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?encryption=none&security=tls&sni=${XHTTP_DOMAIN}&alpn=${TLS_ALPN}&fp=${FINGERPRINT}&type=xhttp&host=${XHTTP_DOMAIN}&path=${xhttp_path_component}&mode=stream-one#XHTTP-CDN
+vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#XHTTP-CDN
 
 ## Cloudflare DNS
 - Point ${XHTTP_DOMAIN} to this server IP.
@@ -1975,8 +1907,7 @@ vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?encryption=none&security=tls&sni=${XHT
 - Xray config: ${XRAY_CONFIG_FILE}
 - HAProxy config: ${HAPROXY_CONFIG}
 - Installer state: ${STATE_FILE}
-- REALITY client json: ${REALITY_CLIENT_FILE}
-- XHTTP ECH client json: ${XHTTP_ECH_CLIENT_FILE}
+- Links output: ${OUTPUT_FILE}
 
 ## WARP
 - Enabled: ${ENABLE_WARP}
@@ -1986,7 +1917,7 @@ vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?encryption=none&security=tls&sni=${XHT
 - Enabled: yes
 - DoH / ECH query: ${XHTTP_ECH_CONFIG_LIST}
 - Force query mode: ${XHTTP_ECH_FORCE_QUERY}
-- Note: standard VLESS URI does not carry ECH; use the JSON file above for Xray clients.
+- Note: generated XHTTP share link includes `ech=` for clients that support it. `none` remains the safer default than `full`.
 
 ## Network optimization
 - Enabled: ${ENABLE_NET_OPT}

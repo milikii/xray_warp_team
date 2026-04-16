@@ -7,8 +7,8 @@
 - `HAProxy :443` 基于 SNI 分流
 - 可选 `Cloudflare Origin CA API` 自动签发并导入证书
 - 可选 `acme.sh + Cloudflare DNS API` 公有证书模式
-- 默认生成 `XHTTP + CDN + ECH` 的 Xray 客户端 JSON 片段
-- 可选 `Cloudflare WARP` 选择性出站
+- 默认输出 `REALITY` 与 `XHTTP + CDN` 两条分享链接
+- 默认启用 `Cloudflare WARP Team` 选择性出站
 - 可选 `BBR + fq + RPS/XPS` 网络优化
 
 当前仓库主入口是 `xray-warp-team.sh`。
@@ -20,7 +20,7 @@
 - XHTTP 节点需要一个 Cloudflare 域名
 - 如果使用 `cf-origin-ca`，需要 Cloudflare API token 和 zone id
 - 如果使用 `acme-dns-cf`，需要 Cloudflare DNS API token 和 acme 邮箱
-- 如果启用 WARP，需要 Cloudflare Zero Trust 的 `team name`、`client id`、`client secret`
+- 默认流程会启用 WARP，需要 Cloudflare Zero Trust 的 `team name`、`client id`、`client secret`
 
 ## 快速使用
 
@@ -63,24 +63,12 @@ bash xray-warp-team.sh install --non-interactive \
   --xhttp-path /cfup-demo \
   --cert-mode self-signed \
   --enable-net-opt \
-  --disable-warp
-```
-
-如果启用 WARP：
-
-```bash
-bash xray-warp-team.sh install --non-interactive \
-  --server-ip 203.0.113.10 \
-  --reality-sni www.scu.edu \
-  --reality-target www.scu.edu:443 \
-  --xhttp-domain cdn.example.com \
-  --xhttp-path /cfup-demo \
-  --cert-mode self-signed \
-  --enable-warp \
   --warp-team your-team \
   --warp-client-id xxxxxxxxx.access \
   --warp-client-secret xxxxxxxxx
 ```
+
+如果你明确不需要 WARP，再额外加上 `--disable-warp`。
 
 如果使用 `acme-dns-cf`：
 
@@ -94,8 +82,10 @@ bash xray-warp-team.sh install --non-interactive \
   --cert-mode acme-dns-cf \
   --acme-email you@example.com \
   --cf-dns-token your_cloudflare_dns_token \
-  --enable-net-opt \
-  --disable-warp
+  --warp-team your-team \
+  --warp-client-id xxxxxxxxx.access \
+  --warp-client-secret xxxxxxxxx \
+  --enable-net-opt
 ```
 
 ## 证书模式
@@ -165,8 +155,6 @@ bash xray-warp-team.sh install \
 - 写入 HAProxy 配置到 `/etc/haproxy/haproxy.cfg`
 - 写入节点元数据到 `/usr/local/etc/xray/node-meta.env`
 - 写入总结文件到 `/root/xray-warp-team-output.md`
-- 额外生成 `REALITY` 客户端 JSON：`/root/xray-reality-client.json`
-- 额外生成 `XHTTP + CDN + ECH` 客户端 JSON：`/root/xray-xhttp-cdn-ech-client.json`
 
 你后续可以用下面命令再次查看节点：
 
@@ -176,8 +164,9 @@ bash xray-warp-team.sh show-links
 
 注意：
 
-- 标准 `VLESS URI` 不能完整表达 `ECH` 参数。
-- 所以如果你要在 `Xray` 客户端里用 `XHTTP + CDN + ECH`，优先使用脚本生成的 `/root/xray-xhttp-cdn-ech-client.json`。
+- 脚本只导出分享链接，不再额外生成客户端 JSON。
+- `XHTTP` 链接会直接带上 `ech=` 查询地址，适合 `v2rayNG / v2rayN` 这类支持该参数的客户端。
+- `echForceQuery` 默认仍为 `none`，因为 `full` 在中国网络下更容易因为 DoH 或 HTTPS 记录获取失败而直接断开。
 
 也可以直接做后续维护：
 
@@ -200,7 +189,7 @@ bash xray-warp-team.sh show-links
 
 `change-uuid` 依赖脚本之前生成的状态文件和当前配置，适合这套脚本安装出来的节点。
 
-脚本当前对 `XHTTP CDN` 默认按 `ECH` 思路导出客户端配置，使用：
+脚本当前对 `XHTTP CDN` 默认按 `ECH` 思路导出分享链接，使用：
 
 - `echConfigList = https://1.1.1.1/dns-query`
 - `echForceQuery = none`
@@ -211,6 +200,8 @@ bash xray-warp-team.sh show-links
   没拿到有效 ECH Config 时会直接失败。
 - `echForceQuery = none`
   查询失败时会回退，不会因为 ECH 查询失败直接断开。
+
+默认情况下，安装流程也会启用 `WARP Team` 选择性出站；如果你明确不需要，才额外传 `--disable-warp`。
 
 `change-cert-mode` 如果切到：
 
