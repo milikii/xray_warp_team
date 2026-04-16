@@ -342,6 +342,28 @@ random_path() {
   printf '%s' "${candidates[$((RANDOM % ${#candidates[@]}))]}"
 }
 
+normalize_cert_mode() {
+  local input="${1:-}"
+
+  case "${input}" in
+    self-signed|自签名|selfsigned)
+      printf 'self-signed'
+      ;;
+    existing|现有证书|已有证书|现有)
+      printf 'existing'
+      ;;
+    cf-origin-ca|cloudflare-origin-ca|cloudflare-origin|cf-origin|origin-ca|cfca|cloudflare-originca|cloudflare-ca|cf-origin-ca证书|cf-origin-ca模式)
+      printf 'cf-origin-ca'
+      ;;
+    acme-dns-cf|acme|acme-dns|acme-cf|acme证书)
+      printf 'acme-dns-cf'
+      ;;
+    *)
+      printf '%s' "${input}"
+      ;;
+  esac
+}
+
 normalize_node_label_prefix() {
   local input="${1:-}"
   local cleaned=""
@@ -465,6 +487,7 @@ prompt_yes_no() {
 
 prepare_existing_cert_inputs() {
   local input_mode=""
+  local first_input=""
 
   if [[ -n "${CERT_SOURCE_FILE}" || -n "${KEY_SOURCE_FILE}" ]]; then
     [[ -n "${CERT_SOURCE_FILE}" && -n "${KEY_SOURCE_FILE}" ]] || die "existing 模式下，证书文件路径和私钥文件路径必须同时提供。"
@@ -484,11 +507,11 @@ prepare_existing_cert_inputs() {
     die "existing 模式下，请提供 --cert-file/--key-file，或 --cert-pem/--key-pem。"
   fi
 
-  read -r -p "证书输入方式 [path/pem] [path]: " input_mode
-  input_mode="${input_mode:-path}"
+  read -r -p "证书输入方式 [path/pem] [path]，也可以直接输入证书文件路径: " first_input
+  input_mode="${first_input:-path}"
 
   case "${input_mode}" in
-    path)
+    path|'')
       prompt_with_default CERT_SOURCE_FILE "现有证书文件路径" ""
       prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" ""
       ;;
@@ -497,7 +520,12 @@ prepare_existing_cert_inputs() {
       prompt_multiline_value KEY_SOURCE_PEM "请输入私钥 PEM 内容"
       ;;
     *)
-      die "证书输入方式只能是 path 或 pem。"
+      if [[ -f "${input_mode}" || "${input_mode}" == /* || "${input_mode}" == ./* || "${input_mode}" == ../* ]]; then
+        CERT_SOURCE_FILE="${input_mode}"
+        prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" ""
+      else
+        die "证书输入方式只能是 path、pem，或者直接输入证书文件路径。"
+      fi
       ;;
   esac
 }
@@ -1079,14 +1107,32 @@ generate_reality_keys_if_needed() {
 
   if [[ -n "${REALITY_PRIVATE_KEY}" && -z "${REALITY_PUBLIC_KEY}" ]]; then
     key_output="$("${XRAY_BIN}" x25519 -i "${REALITY_PRIVATE_KEY}")"
-    REALITY_PUBLIC_KEY="$(printf '%s\n' "${key_output}" | awk -F': ' '/Password \(PublicKey\)|Public key/ {print $2; exit}')"
+    REALITY_PUBLIC_KEY="$(printf '%s\n' "${key_output}" | awk '
+      /^(Password \(PublicKey\)|Public key|PublicKey):/ {
+        sub(/^[^:]+:[[:space:]]*/, "", $0)
+        print
+        exit
+      }
+    ')"
     [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "无法从提供的 REALITY 私钥推导公钥。"
     return
   fi
 
   key_output="$("${XRAY_BIN}" x25519)"
-  REALITY_PRIVATE_KEY="$(printf '%s\n' "${key_output}" | awk -F': ' '/Private key/ {print $2}')"
-  REALITY_PUBLIC_KEY="$(printf '%s\n' "${key_output}" | awk -F': ' '/Public key/ {print $2}')"
+  REALITY_PRIVATE_KEY="$(printf '%s\n' "${key_output}" | awk '
+    /^(Private key|PrivateKey):/ {
+      sub(/^[^:]+:[[:space:]]*/, "", $0)
+      print
+      exit
+    }
+  ')"
+  REALITY_PUBLIC_KEY="$(printf '%s\n' "${key_output}" | awk '
+    /^(Password \(PublicKey\)|Public key|PublicKey):/ {
+      sub(/^[^:]+:[[:space:]]*/, "", $0)
+      print
+      exit
+    }
+  ')"
 
   [[ -n "${REALITY_PRIVATE_KEY}" ]] || die "生成 REALITY 私钥失败。"
   [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "生成 REALITY 公钥失败。"
@@ -1106,13 +1152,14 @@ prepare_install_inputs() {
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" ""
   prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
-  prompt_with_default CERT_MODE "TLS 证书模式 (self-signed/existing/cf-origin-ca/acme-dns-cf)" "self-signed"
+  prompt_with_default CERT_MODE "TLS 证书模式（自签名/self-signed，现有证书/existing，Cloudflare Origin CA/cf-origin-ca，ACME DNS/acme-dns-cf）" "self-signed"
+  CERT_MODE="$(normalize_cert_mode "${CERT_MODE}")"
 
   case "${CERT_MODE}" in
     self-signed|existing|cf-origin-ca|acme-dns-cf)
       ;;
     *)
-      die "不支持的证书模式：${CERT_MODE}。可用值：self-signed、existing、cf-origin-ca、acme-dns-cf。"
+      die "不支持的证书模式：${CERT_MODE}。可用值：自签名/self-signed、现有证书/existing、Cloudflare Origin CA/cf-origin-ca、ACME DNS/acme-dns-cf。"
       ;;
   esac
 
