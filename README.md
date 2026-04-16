@@ -203,7 +203,14 @@ bash xray-warp-team.sh show-links
 脚本当前对 `XHTTP CDN` 默认按 `ECH` 思路导出客户端配置，使用：
 
 - `echConfigList = https://1.1.1.1/dns-query`
+- `echForceQuery = none`
+
+这是按官方文档取的更稳默认值：
+
 - `echForceQuery = full`
+  没拿到有效 ECH Config 时会直接失败。
+- `echForceQuery = none`
+  查询失败时会回退，不会因为 ECH 查询失败直接断开。
 
 `change-cert-mode` 如果切到：
 
