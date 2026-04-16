@@ -2,13 +2,15 @@
 
 set -Eeuo pipefail
 
-SCRIPT_VERSION="0.3.0"
+SCRIPT_VERSION="0.4.0"
 DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
 DEFAULT_FINGERPRINT="chrome"
 DEFAULT_CF_CERT_VALIDITY="5475"
 DEFAULT_ACME_CA="letsencrypt"
+DEFAULT_XHTTP_ECH_CONFIG_LIST="https://1.1.1.1/dns-query"
+DEFAULT_XHTTP_ECH_FORCE_QUERY="full"
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
@@ -29,6 +31,8 @@ NET_SERVICE_FILE="/etc/systemd/system/${NET_SERVICE_NAME}"
 ACME_HOME="/root/.acme.sh"
 ACME_SH_BIN="${ACME_HOME}/acme.sh"
 ACME_RELOAD_HELPER="/usr/local/sbin/xray-warp-team-cert-reload.sh"
+REALITY_CLIENT_FILE="/root/xray-reality-client.json"
+XHTTP_ECH_CLIENT_FILE="/root/xray-xhttp-cdn-ech-client.json"
 
 NON_INTERACTIVE=0
 ENABLE_WARP=""
@@ -60,6 +64,8 @@ ACME_CA="${DEFAULT_ACME_CA}"
 CF_DNS_TOKEN=""
 CF_DNS_ACCOUNT_ID=""
 CF_DNS_ZONE_ID=""
+XHTTP_ECH_CONFIG_LIST="${DEFAULT_XHTTP_ECH_CONFIG_LIST}"
+XHTTP_ECH_FORCE_QUERY="${DEFAULT_XHTTP_ECH_FORCE_QUERY}"
 
 if [[ -t 1 ]]; then
   C_RESET=$'\033[0m'
@@ -98,7 +104,7 @@ need_root() {
 
 usage() {
   cat <<'EOF'
-xray-warp-team.sh v0.3.0
+xray-warp-team.sh v0.4.0
 
 Usage:
   bash xray-warp-team.sh
@@ -520,6 +526,7 @@ show_dashboard() {
   printf '%b%s%b\n' "${C_BOLD}" "Features" "${C_RESET}"
   panel_row "WARP route" "$(bool_badge "${ENABLE_WARP:-no}")  port=${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
   panel_row "Net tuning" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
+  panel_row "XHTTP ECH" "$(bool_badge "yes")  doh=${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}"
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
     panel_row "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
   fi
@@ -740,6 +747,8 @@ load_current_install_context() {
   FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   CERT_MODE="${CERT_MODE:-existing}"
   ACME_CA="${ACME_CA:-${DEFAULT_ACME_CA}}"
+  XHTTP_ECH_CONFIG_LIST="${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}"
+  XHTTP_ECH_FORCE_QUERY="${XHTTP_ECH_FORCE_QUERY:-${DEFAULT_XHTTP_ECH_FORCE_QUERY}}"
   ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
 
@@ -1738,6 +1747,95 @@ restart_core_services() {
   systemctl restart haproxy
 }
 
+write_client_example_files() {
+  cat > "${REALITY_CLIENT_FILE}" <<EOF
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${SERVER_IP}",
+            "port": 443,
+            "users": [
+              {
+                "id": "${REALITY_UUID}",
+                "encryption": "none",
+                "flow": "xtls-rprx-vision"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "raw",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "${REALITY_SNI}",
+          "fingerprint": "${FINGERPRINT}",
+          "publicKey": "${REALITY_PUBLIC_KEY}",
+          "shortId": "${REALITY_SHORT_ID}",
+          "spiderX": "/"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+  cat > "${XHTTP_ECH_CLIENT_FILE}" <<EOF
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "outbounds": [
+    {
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "${XHTTP_DOMAIN}",
+            "port": 443,
+            "users": [
+              {
+                "id": "${XHTTP_UUID}",
+                "encryption": "none"
+              }
+            ]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": {
+          "serverName": "${XHTTP_DOMAIN}",
+          "fingerprint": "${FINGERPRINT}",
+          "alpn": [
+            "${TLS_ALPN}",
+            "http/1.1"
+          ],
+          "echConfigList": "${XHTTP_ECH_CONFIG_LIST}",
+          "echForceQuery": "${XHTTP_ECH_FORCE_QUERY}"
+        },
+        "xhttpSettings": {
+          "host": "${XHTTP_DOMAIN}",
+          "path": "${XHTTP_PATH}",
+          "mode": "stream-one"
+        }
+      }
+    }
+  ]
+}
+EOF
+
+  chmod 0600 "${REALITY_CLIENT_FILE}" "${XHTTP_ECH_CLIENT_FILE}"
+}
+
 cleanup_previous_acme_cert() {
   local old_cert_mode="${1:-}"
   local old_xhttp_domain="${2:-}"
@@ -1757,6 +1855,7 @@ apply_managed_update() {
   restart_core_services
   write_state_file
   write_output_file
+  write_client_example_files
 }
 
 apply_managed_runtime_update() {
@@ -1766,6 +1865,7 @@ apply_managed_runtime_update() {
   restart_core_services
   write_state_file
   write_output_file
+  write_client_example_files
 }
 
 upgrade_cmd() {
@@ -1818,6 +1918,8 @@ ACME_EMAIL='${ACME_EMAIL}'
 ACME_CA='${ACME_CA}'
 CF_DNS_ACCOUNT_ID='${CF_DNS_ACCOUNT_ID}'
 CF_DNS_ZONE_ID='${CF_DNS_ZONE_ID}'
+XHTTP_ECH_CONFIG_LIST='${XHTTP_ECH_CONFIG_LIST}'
+XHTTP_ECH_FORCE_QUERY='${XHTTP_ECH_FORCE_QUERY}'
 EOF
   chmod 0600 "${STATE_FILE}"
 }
@@ -1873,10 +1975,18 @@ vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?encryption=none&security=tls&sni=${XHT
 - Xray config: ${XRAY_CONFIG_FILE}
 - HAProxy config: ${HAPROXY_CONFIG}
 - Installer state: ${STATE_FILE}
+- REALITY client json: ${REALITY_CLIENT_FILE}
+- XHTTP ECH client json: ${XHTTP_ECH_CLIENT_FILE}
 
 ## WARP
 - Enabled: ${ENABLE_WARP}
 - Local SOCKS5 port: ${WARP_PROXY_PORT}
+
+## XHTTP ECH
+- Enabled: yes
+- DoH / ECH query: ${XHTTP_ECH_CONFIG_LIST}
+- Force query mode: ${XHTTP_ECH_FORCE_QUERY}
+- Note: standard VLESS URI does not carry ECH; use the JSON file above for Xray clients.
 
 ## Network optimization
 - Enabled: ${ENABLE_NET_OPT}

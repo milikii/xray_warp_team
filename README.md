@@ -7,6 +7,7 @@
 - `HAProxy :443` 基于 SNI 分流
 - 可选 `Cloudflare Origin CA API` 自动签发并导入证书
 - 可选 `acme.sh + Cloudflare DNS API` 公有证书模式
+- 默认生成 `XHTTP + CDN + ECH` 的 Xray 客户端 JSON 片段
 - 可选 `Cloudflare WARP` 选择性出站
 - 可选 `BBR + fq + RPS/XPS` 网络优化
 
@@ -164,12 +165,19 @@ bash xray-warp-team.sh install \
 - 写入 HAProxy 配置到 `/etc/haproxy/haproxy.cfg`
 - 写入节点元数据到 `/usr/local/etc/xray/node-meta.env`
 - 写入总结文件到 `/root/xray-warp-team-output.md`
+- 额外生成 `REALITY` 客户端 JSON：`/root/xray-reality-client.json`
+- 额外生成 `XHTTP + CDN + ECH` 客户端 JSON：`/root/xray-xhttp-cdn-ech-client.json`
 
 你后续可以用下面命令再次查看节点：
 
 ```bash
 bash xray-warp-team.sh show-links
 ```
+
+注意：
+
+- 标准 `VLESS URI` 不能完整表达 `ECH` 参数。
+- 所以如果你要在 `Xray` 客户端里用 `XHTTP + CDN + ECH`，优先使用脚本生成的 `/root/xray-xhttp-cdn-ech-client.json`。
 
 也可以直接做后续维护：
 
@@ -191,6 +199,11 @@ bash xray-warp-team.sh show-links
   停掉服务并删除脚本托管的文件，但默认保留已安装的系统包。
 
 `change-uuid` 依赖脚本之前生成的状态文件和当前配置，适合这套脚本安装出来的节点。
+
+脚本当前对 `XHTTP CDN` 默认按 `ECH` 思路导出客户端配置，使用：
+
+- `echConfigList = https://1.1.1.1/dns-query`
+- `echForceQuery = full`
 
 `change-cert-mode` 如果切到：
 
