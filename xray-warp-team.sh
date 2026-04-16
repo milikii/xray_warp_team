@@ -84,21 +84,21 @@ else
 fi
 
 log() {
-  printf '[INFO] %s\n' "$*"
+  printf '[信息] %s\n' "$*"
 }
 
 warn() {
-  printf '[WARN] %s\n' "$*" >&2
+  printf '[警告] %s\n' "$*" >&2
 }
 
 die() {
-  printf '[ERROR] %s\n' "$*" >&2
+  printf '[错误] %s\n' "$*" >&2
   exit 1
 }
 
 need_root() {
   if [[ "${EUID}" -ne 0 ]]; then
-    die "Please run this script as root."
+    die "请使用 root 用户运行此脚本。"
   fi
 }
 
@@ -106,94 +106,94 @@ usage() {
   cat <<'EOF'
 xray-warp-team.sh v0.4.1
 
-Usage:
+用法:
   bash xray-warp-team.sh
-  bash xray-warp-team.sh install [options]
+  bash xray-warp-team.sh install [参数]
   bash xray-warp-team.sh upgrade
-  bash xray-warp-team.sh change-uuid [options]
-  bash xray-warp-team.sh change-sni [options]
-  bash xray-warp-team.sh change-path [options]
-  bash xray-warp-team.sh change-label-prefix [options]
-  bash xray-warp-team.sh change-cert-mode [options]
+  bash xray-warp-team.sh change-uuid [参数]
+  bash xray-warp-team.sh change-sni [参数]
+  bash xray-warp-team.sh change-path [参数]
+  bash xray-warp-team.sh change-label-prefix [参数]
+  bash xray-warp-team.sh change-cert-mode [参数]
   bash xray-warp-team.sh uninstall [--yes]
   bash xray-warp-team.sh show-links
   bash xray-warp-team.sh status [--raw]
   bash xray-warp-team.sh restart
   bash xray-warp-team.sh help
 
-Install options:
-  --non-interactive           Run without prompts. Missing required values will fail.
-  --server-ip VALUE           Public IP or hostname for the direct REALITY node.
-  --node-label-prefix VALUE   Shared prefix for exported node names, for example HKG or SJC.
-  --reality-uuid VALUE        UUID for the REALITY node.
-  --reality-sni VALUE         Visible SNI for REALITY and HAProxy routing.
-  --reality-target VALUE      REALITY target in host:port form.
-  --reality-short-id VALUE    Short ID for REALITY.
-  --reality-private-key VALUE Preserve an existing REALITY private key.
-  --xhttp-uuid VALUE          UUID for the XHTTP CDN node.
-  --xhttp-domain VALUE        Orange-cloud domain for the XHTTP CDN node.
-  --xhttp-path VALUE          XHTTP path, for example /cfup-example.
-  --cert-mode VALUE           self-signed, existing, cf-origin-ca, or acme-dns-cf.
-  --cert-file VALUE           Existing certificate file when --cert-mode existing.
-  --key-file VALUE            Existing key file when --cert-mode existing.
-  --cf-zone-id VALUE          Cloudflare zone ID for cf-origin-ca mode.
-  --cf-api-token VALUE        Cloudflare API token for cf-origin-ca mode.
-  --cf-cert-validity VALUE    Cloudflare Origin CA validity days. Default: 5475
-  --acme-email VALUE          Email used by acme.sh account registration.
-  --acme-ca VALUE             ACME CA name passed to acme.sh. Default: letsencrypt
-  --cf-dns-token VALUE        Cloudflare DNS API token for acme dns_cf mode.
-  --cf-dns-account-id VALUE   Cloudflare account ID for acme dns_cf mode. Optional.
-  --cf-dns-zone-id VALUE      Cloudflare zone ID for acme dns_cf mode. Optional.
-  --enable-warp               Enable selective WARP outbound.
-  --disable-warp              Disable WARP outbound.
-  --enable-net-opt            Enable BBR/FQ/RPS network optimization.
-  --disable-net-opt           Disable network optimization.
-  --warp-team VALUE           Cloudflare Zero Trust team name.
-  --warp-client-id VALUE      Service token client ID.
-  --warp-client-secret VALUE  Service token client secret.
-  --warp-proxy-port VALUE     Local SOCKS5 port used by WARP. Default: 40000
+安装参数:
+  --non-interactive           非交互运行；缺少必要参数时直接失败。
+  --server-ip VALUE           REALITY 直连节点的公网 IP 或域名。
+  --node-label-prefix VALUE   导出节点名称前缀，例如 HKG 或 SJC。
+  --reality-uuid VALUE        指定 REALITY 节点 UUID。
+  --reality-sni VALUE         REALITY 可见 SNI，同时用于 HAProxy 分流。
+  --reality-target VALUE      REALITY 目标地址，格式为 host:port。
+  --reality-short-id VALUE    REALITY 短 ID。
+  --reality-private-key VALUE 复用现有 REALITY 私钥。
+  --xhttp-uuid VALUE          指定 XHTTP CDN 节点 UUID。
+  --xhttp-domain VALUE        XHTTP CDN 使用的橙云域名。
+  --xhttp-path VALUE          XHTTP 路径，例如 /cfup-example。
+  --cert-mode VALUE           证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
+  --cert-file VALUE           当证书模式为 existing 时使用的证书文件。
+  --key-file VALUE            当证书模式为 existing 时使用的私钥文件。
+  --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
+  --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
+  --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期，默认 5475 天。
+  --acme-email VALUE          acme.sh 注册邮箱。
+  --acme-ca VALUE             acme.sh 使用的 CA，默认 letsencrypt。
+  --cf-dns-token VALUE        acme dns_cf 模式使用的 Cloudflare DNS API 令牌。
+  --cf-dns-account-id VALUE   acme dns_cf 模式使用的 Cloudflare Account ID，可选。
+  --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
+  --enable-warp               启用选择性 WARP 出站。
+  --disable-warp              禁用 WARP 出站。
+  --enable-net-opt            启用 BBR/FQ/RPS 网络优化。
+  --disable-net-opt           禁用网络优化。
+  --warp-team VALUE           Cloudflare Zero Trust 团队名。
+  --warp-client-id VALUE      服务令牌 Client ID。
+  --warp-client-secret VALUE  服务令牌 Client Secret。
+  --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口，默认 40000。
 
-Change-uuid options:
-  --reality-uuid VALUE        Set a custom REALITY UUID instead of generating one.
-  --xhttp-uuid VALUE          Set a custom XHTTP UUID instead of generating one.
-  --reality-only              Rotate only the REALITY UUID.
-  --xhttp-only                Rotate only the XHTTP UUID.
+变更 UUID 参数:
+  --reality-uuid VALUE        指定新的 REALITY UUID，而不是自动生成。
+  --xhttp-uuid VALUE          指定新的 XHTTP UUID，而不是自动生成。
+  --reality-only              只轮换 REALITY UUID。
+  --xhttp-only                只轮换 XHTTP UUID。
 
-Change-sni options:
-  --non-interactive           Run without prompts.
-  --reality-sni VALUE         New REALITY visible SNI.
-  --reality-target VALUE      New REALITY target in host:port form.
+变更 SNI 参数:
+  --non-interactive           非交互运行。
+  --reality-sni VALUE         新的 REALITY 可见 SNI。
+  --reality-target VALUE      新的 REALITY 目标地址，格式为 host:port。
 
-Change-path options:
-  --non-interactive           Run without prompts.
-  --xhttp-path VALUE          New XHTTP path.
+变更路径参数:
+  --non-interactive           非交互运行。
+  --xhttp-path VALUE          新的 XHTTP 路径。
 
-Change-label-prefix options:
-  --non-interactive           Run without prompts.
-  --node-label-prefix VALUE   New prefix used in exported node names.
+变更节点名前缀参数:
+  --non-interactive           非交互运行。
+  --node-label-prefix VALUE   新的导出节点名前缀。
 
-Change-cert-mode options:
-  --non-interactive           Run without prompts.
-  --cert-mode VALUE           New cert mode: self-signed, existing, cf-origin-ca, acme-dns-cf.
-  --xhttp-domain VALUE        New XHTTP CDN domain. Optional.
-  --cert-file VALUE           Existing certificate file when using existing mode.
-  --key-file VALUE            Existing key file when using existing mode.
-  --cf-zone-id VALUE          Cloudflare zone ID for cf-origin-ca mode.
-  --cf-api-token VALUE        Cloudflare API token for cf-origin-ca mode.
-  --cf-cert-validity VALUE    Cloudflare Origin CA validity days.
-  --acme-email VALUE          Email used by acme.sh account registration.
-  --acme-ca VALUE             ACME CA name passed to acme.sh.
-  --cf-dns-token VALUE        Cloudflare DNS API token for acme dns_cf mode.
-  --cf-dns-account-id VALUE   Cloudflare account ID for acme dns_cf mode. Optional.
-  --cf-dns-zone-id VALUE      Cloudflare zone ID for acme dns_cf mode. Optional.
+变更证书模式参数:
+  --non-interactive           非交互运行。
+  --cert-mode VALUE           新证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
+  --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
+  --cert-file VALUE           existing 模式使用的证书文件。
+  --key-file VALUE            existing 模式使用的私钥文件。
+  --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
+  --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
+  --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期。
+  --acme-email VALUE          acme.sh 注册邮箱。
+  --acme-ca VALUE             acme.sh 使用的 CA。
+  --cf-dns-token VALUE        acme dns_cf 模式使用的 Cloudflare DNS API 令牌。
+  --cf-dns-account-id VALUE   acme dns_cf 模式使用的 Cloudflare Account ID，可选。
+  --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
 
-Uninstall options:
-  --yes                       Skip confirmation prompt.
+卸载参数:
+  --yes                       跳过确认提示。
 
-Status options:
-  --raw                       Show raw systemctl output instead of the panel.
+状态参数:
+  --raw                       显示原始 systemctl 输出，而不是面板。
 
-Examples:
+示例:
   bash xray-warp-team.sh
   bash xray-warp-team.sh upgrade
   bash xray-warp-team.sh change-uuid
@@ -278,7 +278,7 @@ prompt_with_default() {
       printf -v "${var_name}" '%s' "${default_value}"
       return
     fi
-    die "Missing required value for ${var_name}."
+    die "缺少必填参数：${var_name}。"
   fi
 
   if [[ -n "${default_value}" ]]; then
@@ -302,7 +302,7 @@ prompt_secret() {
   fi
 
   if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
-    die "Missing required secret value for ${var_name}."
+    die "缺少必填密钥参数：${var_name}。"
   fi
 
   read -r -s -p "${prompt_text}: " current_value
@@ -420,13 +420,18 @@ service_badge() {
 
   case "${state}" in
     active)
-      style_text "${C_GREEN}" "running"
+      style_text "${C_GREEN}" "运行中"
       ;;
     inactive|failed|activating|deactivating)
-      style_text "${C_RED}" "${state}"
+      case "${state}" in
+        inactive) style_text "${C_RED}" "未运行" ;;
+        failed) style_text "${C_RED}" "失败" ;;
+        activating) style_text "${C_YELLOW}" "启动中" ;;
+        deactivating) style_text "${C_YELLOW}" "停止中" ;;
+      esac
       ;;
     not-installed)
-      style_text "${C_YELLOW}" "not-installed"
+      style_text "${C_YELLOW}" "未安装"
       ;;
     *)
       style_text "${C_YELLOW}" "${state}"
@@ -437,16 +442,33 @@ service_badge() {
 bool_badge() {
   case "${1}" in
     yes|enabled|true)
-      style_text "${C_GREEN}" "enabled"
+      style_text "${C_GREEN}" "已启用"
       ;;
     skipped)
-      style_text "${C_YELLOW}" "skipped"
+      style_text "${C_YELLOW}" "已跳过"
       ;;
     no|disabled|false)
-      style_text "${C_YELLOW}" "disabled"
+      style_text "${C_YELLOW}" "已禁用"
       ;;
     *)
-      style_text "${C_YELLOW}" "${1:-unknown}"
+      style_text "${C_YELLOW}" "${1:-未知}"
+      ;;
+  esac
+}
+
+service_install_state_label() {
+  case "${1}" in
+    enabled)
+      printf '已启用'
+      ;;
+    installed)
+      printf '已安装'
+      ;;
+    not-installed)
+      printf '未安装'
+      ;;
+    *)
+      printf '%s' "${1}"
       ;;
   esac
 }
@@ -454,19 +476,19 @@ bool_badge() {
 pretty_cert_mode() {
   case "${CERT_MODE:-unknown}" in
     self-signed)
-      printf 'self-signed'
+      printf '自签名'
       ;;
     existing)
-      printf 'existing'
+      printf '现有证书'
       ;;
     cf-origin-ca)
-      printf 'cloudflare-origin-ca'
+      printf 'Cloudflare Origin CA'
       ;;
     acme-dns-cf)
-      printf 'acme-dns-cf'
+      printf 'ACME DNS CF'
       ;;
     *)
-      printf '%s' "${CERT_MODE:-unknown}"
+      printf '%s' "${CERT_MODE:-未知}"
       ;;
   esac
 }
@@ -491,10 +513,10 @@ load_dashboard_context() {
   XHTTP_UUID="${XHTTP_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')}"
   XHTTP_PATH="${XHTTP_PATH:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')}"
   XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(haproxy_sni_for_backend 'be_xhttp_cdn')}"
-  SERVER_IP="${SERVER_IP:-$(output_field_value 'Address')}"
-  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value 'Node label prefix')}"
-  REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value 'Public key')}"
-  FINGERPRINT="${FINGERPRINT:-$(output_field_value 'Fingerprint')}"
+  SERVER_IP="${SERVER_IP:-$(output_field_value '地址')}"
+  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value '节点名前缀')}"
+  REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value '公钥')}"
+  FINGERPRINT="${FINGERPRINT:-$(output_field_value '指纹')}"
   ENABLE_WARP="${ENABLE_WARP:-$(if config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag' | grep -q 'WARP'; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')}"
   CERT_MODE="${CERT_MODE:-existing}"
@@ -530,37 +552,37 @@ show_dashboard() {
   version_line="$(xray_version_line)"
 
   divider
-  printf '%b%s%b\n' "${C_BOLD}${C_CYAN}" "Xray WARP Team Panel" "${C_RESET}"
+  printf '%b%s%b\n' "${C_BOLD}${C_CYAN}" "Xray WARP 管理面板" "${C_RESET}"
   divider
-  panel_row "Script version" "${SCRIPT_VERSION}"
-  panel_row "Updated at" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
+  panel_row "脚本版本" "${SCRIPT_VERSION}"
+  panel_row "更新时间" "$(date '+%Y-%m-%d %H:%M:%S %Z')"
 
   if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
-    panel_row "Install status" "$(style_text "${C_GREEN}" "managed")"
-    [[ -n "${version_line}" ]] && panel_row "Xray core" "${version_line}"
-    panel_row "Cert mode" "$(pretty_cert_mode)"
-    panel_row "REALITY" "${SERVER_IP:-unknown}:443  sni=${REALITY_SNI:-unknown}"
-    panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-unknown}:443  path=${XHTTP_PATH:-unknown}"
-    panel_row "Node prefix" "${NODE_LABEL_PREFIX:-unknown}"
-    panel_row "REALITY UUID" "$(short_value "${REALITY_UUID:-unknown}")"
-    panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-unknown}")"
-    panel_row "REALITY key" "$(short_value "${REALITY_PUBLIC_KEY:-unknown}" 10 8)"
-    panel_row "Links file" "${OUTPUT_FILE}"
+    panel_row "安装状态" "$(style_text "${C_GREEN}" "已托管")"
+    [[ -n "${version_line}" ]] && panel_row "Xray 核心" "${version_line}"
+    panel_row "证书模式" "$(pretty_cert_mode)"
+    panel_row "REALITY" "${SERVER_IP:-未知}:443  sni=${REALITY_SNI:-未知}"
+    panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-未知}:443  path=${XHTTP_PATH:-未知}"
+    panel_row "节点前缀" "${NODE_LABEL_PREFIX:-未知}"
+    panel_row "REALITY UUID" "$(short_value "${REALITY_UUID:-未知}")"
+    panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-未知}")"
+    panel_row "REALITY 公钥" "$(short_value "${REALITY_PUBLIC_KEY:-未知}" 10 8)"
+    panel_row "链接文件" "${OUTPUT_FILE}"
   else
-    panel_row "Install status" "$(style_text "${C_YELLOW}" "not-installed")"
+    panel_row "安装状态" "$(style_text "${C_YELLOW}" "未安装")"
   fi
 
   divider
-  printf '%b%s%b\n' "${C_BOLD}" "Services" "${C_RESET}"
-  panel_row "xray" "$(service_badge "${xray_state}") (${xray_enabled})"
-  panel_row "haproxy" "$(service_badge "${haproxy_state}") (${haproxy_enabled})"
-  panel_row "warp-svc" "$(service_badge "${warp_state}") (${warp_enabled})"
-  panel_row "net-opt" "$(service_badge "${net_state}") (${net_enabled})"
+  printf '%b%s%b\n' "${C_BOLD}" "服务状态" "${C_RESET}"
+  panel_row "xray" "$(service_badge "${xray_state}") ($(service_install_state_label "${xray_enabled}"))"
+  panel_row "haproxy" "$(service_badge "${haproxy_state}") ($(service_install_state_label "${haproxy_enabled}"))"
+  panel_row "warp-svc" "$(service_badge "${warp_state}") ($(service_install_state_label "${warp_enabled}"))"
+  panel_row "网络优化" "$(service_badge "${net_state}") ($(service_install_state_label "${net_enabled}"))"
 
   divider
-  printf '%b%s%b\n' "${C_BOLD}" "Features" "${C_RESET}"
-  panel_row "WARP route" "$(bool_badge "${ENABLE_WARP:-no}")  port=${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
-  panel_row "Net tuning" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
+  printf '%b%s%b\n' "${C_BOLD}" "功能开关" "${C_RESET}"
+  panel_row "WARP 分流" "$(bool_badge "${ENABLE_WARP:-no}")  端口=${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+  panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
   panel_row "XHTTP ECH" "$(bool_badge "yes")  doh=${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}"
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
     panel_row "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
@@ -570,7 +592,7 @@ show_dashboard() {
 
 ensure_debian_family() {
   if [[ ! -f /etc/os-release ]]; then
-    die "Unsupported system: /etc/os-release not found."
+    die "不支持的系统：找不到 /etc/os-release。"
   fi
 
   # shellcheck disable=SC1091
@@ -586,7 +608,7 @@ ensure_debian_family() {
     return
   fi
 
-  die "This installer currently supports Debian and Ubuntu only."
+  die "当前脚本仅支持 Debian 和 Ubuntu。"
 }
 
 detect_xray_arch() {
@@ -598,7 +620,7 @@ detect_xray_arch() {
       printf 'arm64-v8a'
       ;;
     *)
-      die "Unsupported CPU architecture: $(uname -m)"
+      die "不支持的 CPU 架构：$(uname -m)"
       ;;
   esac
 }
@@ -762,7 +784,7 @@ load_existing_state() {
 load_current_install_context() {
   load_existing_state
 
-  [[ -f "${XRAY_CONFIG_FILE}" ]] || die "Current Xray config not found: ${XRAY_CONFIG_FILE}"
+  [[ -f "${XRAY_CONFIG_FILE}" ]] || die "找不到当前 Xray 配置：${XRAY_CONFIG_FILE}"
 
   REALITY_UUID="${REALITY_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .settings.clients[0].id')}"
   REALITY_SNI="${REALITY_SNI:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.serverNames[0]')}"
@@ -775,10 +797,10 @@ load_current_install_context() {
   XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(haproxy_sni_for_backend 'be_xhttp_cdn')}"
   ENABLE_WARP="${ENABLE_WARP:-$(if config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag' | grep -q 'WARP'; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')}"
-  SERVER_IP="${SERVER_IP:-$(output_field_value 'Address')}"
-  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value 'Node label prefix')}"
-  REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value 'Public key')}"
-  FINGERPRINT="${FINGERPRINT:-$(output_field_value 'Fingerprint')}"
+  SERVER_IP="${SERVER_IP:-$(output_field_value '地址')}"
+  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value '节点名前缀')}"
+  REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value '公钥')}"
+  FINGERPRINT="${FINGERPRINT:-$(output_field_value '指纹')}"
   SERVER_IP="${SERVER_IP:-$(guess_server_ip)}"
   FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   CERT_MODE="${CERT_MODE:-existing}"
@@ -789,18 +811,18 @@ load_current_install_context() {
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
   NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(default_node_label_prefix)}"
 
-  [[ -n "${REALITY_UUID}" ]] || die "Could not determine REALITY UUID from current install."
-  [[ -n "${REALITY_SNI}" ]] || die "Could not determine REALITY SNI from current install."
-  [[ -n "${REALITY_TARGET}" ]] || die "Could not determine REALITY target from current install."
-  [[ -n "${REALITY_SHORT_ID}" ]] || die "Could not determine REALITY short ID from current install."
-  [[ -n "${REALITY_PRIVATE_KEY}" ]] || die "Could not determine REALITY private key from current install."
-  [[ -n "${XHTTP_UUID}" ]] || die "Could not determine XHTTP UUID from current install."
-  [[ -n "${XHTTP_DOMAIN}" ]] || die "Could not determine XHTTP domain from current install."
-  [[ -n "${XHTTP_PATH}" ]] || die "Could not determine XHTTP path from current install."
+  [[ -n "${REALITY_UUID}" ]] || die "无法从当前安装中识别 REALITY UUID。"
+  [[ -n "${REALITY_SNI}" ]] || die "无法从当前安装中识别 REALITY SNI。"
+  [[ -n "${REALITY_TARGET}" ]] || die "无法从当前安装中识别 REALITY 目标地址。"
+  [[ -n "${REALITY_SHORT_ID}" ]] || die "无法从当前安装中识别 REALITY 短 ID。"
+  [[ -n "${REALITY_PRIVATE_KEY}" ]] || die "无法从当前安装中识别 REALITY 私钥。"
+  [[ -n "${XHTTP_UUID}" ]] || die "无法从当前安装中识别 XHTTP UUID。"
+  [[ -n "${XHTTP_DOMAIN}" ]] || die "无法从当前安装中识别 XHTTP 域名。"
+  [[ -n "${XHTTP_PATH}" ]] || die "无法从当前安装中识别 XHTTP 路径。"
 }
 
 install_packages() {
-  log "Installing required packages."
+  log "正在安装依赖包。"
   apt-get update
   apt-get install -y ca-certificates curl gnupg haproxy iproute2 jq kmod openssl unzip uuid-runtime
 }
@@ -814,7 +836,7 @@ install_xray() {
   download_url="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${arch}.zip"
   tmp_dir="$(mktemp -d)"
 
-  log "Downloading Xray-core."
+  log "正在下载 Xray-core。"
   curl -fsSL "${download_url}" -o "${tmp_dir}/xray.zip"
   unzip -qo "${tmp_dir}/xray.zip" -d "${tmp_dir}/xray"
 
@@ -852,7 +874,7 @@ generate_reality_keys_if_needed() {
   if [[ -n "${REALITY_PRIVATE_KEY}" && -z "${REALITY_PUBLIC_KEY}" ]]; then
     key_output="$("${XRAY_BIN}" x25519 -i "${REALITY_PRIVATE_KEY}")"
     REALITY_PUBLIC_KEY="$(printf '%s\n' "${key_output}" | awk -F': ' '/Password \(PublicKey\)|Public key/ {print $2; exit}')"
-    [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "Failed to derive REALITY public key from the provided private key."
+    [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "无法从提供的 REALITY 私钥推导公钥。"
     return
   fi
 
@@ -860,8 +882,8 @@ generate_reality_keys_if_needed() {
   REALITY_PRIVATE_KEY="$(printf '%s\n' "${key_output}" | awk -F': ' '/Private key/ {print $2}')"
   REALITY_PUBLIC_KEY="$(printf '%s\n' "${key_output}" | awk -F': ' '/Public key/ {print $2}')"
 
-  [[ -n "${REALITY_PRIVATE_KEY}" ]] || die "Failed to generate REALITY private key."
-  [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "Failed to generate REALITY public key."
+  [[ -n "${REALITY_PRIVATE_KEY}" ]] || die "生成 REALITY 私钥失败。"
+  [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "生成 REALITY 公钥失败。"
 }
 
 prepare_install_inputs() {
@@ -869,49 +891,49 @@ prepare_install_inputs() {
 
   guessed_ip="$(guess_server_ip)"
 
-  prompt_with_default SERVER_IP "REALITY direct node address or IP" "${guessed_ip}"
-  prompt_with_default NODE_LABEL_PREFIX "Node label prefix used in exported links" "$(default_node_label_prefix)"
+  prompt_with_default SERVER_IP "REALITY 直连节点地址或 IP" "${guessed_ip}"
+  prompt_with_default NODE_LABEL_PREFIX "导出链接使用的节点名前缀" "$(default_node_label_prefix)"
   prompt_with_default REALITY_UUID "REALITY UUID" "$(random_uuid)"
-  prompt_with_default REALITY_SNI "REALITY visible SNI" "${DEFAULT_REALITY_SNI}"
-  prompt_with_default REALITY_TARGET "REALITY target host:port" "${REALITY_SNI}:443"
-  prompt_with_default REALITY_SHORT_ID "REALITY short ID" "$(random_hex 8)"
+  prompt_with_default REALITY_SNI "REALITY 可见 SNI" "${DEFAULT_REALITY_SNI}"
+  prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "${REALITY_SNI}:443"
+  prompt_with_default REALITY_SHORT_ID "REALITY 短 ID" "$(random_hex 8)"
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
-  prompt_with_default XHTTP_DOMAIN "XHTTP CDN domain" ""
-  prompt_with_default XHTTP_PATH "XHTTP path" "$(random_path)"
-  prompt_with_default CERT_MODE "TLS certificate mode (self-signed/existing/cf-origin-ca/acme-dns-cf)" "self-signed"
+  prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" ""
+  prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
+  prompt_with_default CERT_MODE "TLS 证书模式 (self-signed/existing/cf-origin-ca/acme-dns-cf)" "self-signed"
 
   case "${CERT_MODE}" in
     self-signed|existing|cf-origin-ca|acme-dns-cf)
       ;;
     *)
-      die "Unsupported cert mode: ${CERT_MODE}. Use self-signed, existing, cf-origin-ca, or acme-dns-cf."
+      die "不支持的证书模式：${CERT_MODE}。可用值：self-signed、existing、cf-origin-ca、acme-dns-cf。"
       ;;
   esac
 
   if [[ "${CERT_MODE}" == "existing" ]]; then
-    prompt_with_default CERT_SOURCE_FILE "Existing certificate file path" ""
-    prompt_with_default KEY_SOURCE_FILE "Existing key file path" ""
+    prompt_with_default CERT_SOURCE_FILE "现有证书文件路径" ""
+    prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" ""
   fi
 
   if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
-    prompt_with_default CF_ZONE_ID "Cloudflare zone ID" ""
-    prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA validity days" "${DEFAULT_CF_CERT_VALIDITY}"
-    prompt_secret CF_API_TOKEN "Cloudflare API token"
+    prompt_with_default CF_ZONE_ID "Cloudflare Zone ID" ""
+    prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA 有效期（天）" "${DEFAULT_CF_CERT_VALIDITY}"
+    prompt_secret CF_API_TOKEN "Cloudflare API 令牌"
   fi
 
   if [[ "${CERT_MODE}" == "acme-dns-cf" ]]; then
-    prompt_with_default ACME_EMAIL "acme.sh account email" ""
+    prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" ""
     prompt_with_default ACME_CA "ACME CA" "${DEFAULT_ACME_CA}"
-    prompt_secret CF_DNS_TOKEN "Cloudflare DNS API token"
+    prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌"
     if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-      read -r -p "Cloudflare account ID (optional): " CF_DNS_ACCOUNT_ID
+      read -r -p "Cloudflare Account ID（可选）: " CF_DNS_ACCOUNT_ID
     fi
     if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-      read -r -p "Cloudflare zone ID for DNS API (optional): " CF_DNS_ZONE_ID
+      read -r -p "Cloudflare DNS API 使用的 Zone ID（可选）: " CF_DNS_ZONE_ID
     fi
   fi
 
-  prompt_yes_no ENABLE_NET_OPT "Enable network optimization? [y/n]" "y"
+  prompt_yes_no ENABLE_NET_OPT "是否启用网络优化？ [y/n]" "y"
   ENABLE_NET_OPT="$(printf '%s' "${ENABLE_NET_OPT}" | tr 'A-Z' 'a-z')"
 
   case "${ENABLE_NET_OPT}" in
@@ -922,28 +944,28 @@ prepare_install_inputs() {
       ENABLE_NET_OPT="no"
       ;;
     *)
-      die "ENABLE_NET_OPT must be yes or no."
+      die "ENABLE_NET_OPT 只能是 yes 或 no。"
       ;;
   esac
 
   NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
 
-  prompt_yes_no ENABLE_WARP "Enable selective WARP outbound? [y/n]" "y"
+  prompt_yes_no ENABLE_WARP "是否启用选择性 WARP 出站？ [y/n]" "y"
   ENABLE_WARP="$(printf '%s' "${ENABLE_WARP}" | tr 'A-Z' 'a-z')"
 
   case "${ENABLE_WARP}" in
     y|yes)
       ENABLE_WARP="yes"
-      prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust team name" ""
-      prompt_with_default WARP_CLIENT_ID "Cloudflare service token client ID" ""
-      prompt_secret WARP_CLIENT_SECRET "Cloudflare service token client secret"
-      prompt_with_default WARP_PROXY_PORT "Local WARP SOCKS5 port" "${DEFAULT_WARP_PROXY_PORT}"
+      prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust 团队名" ""
+      prompt_with_default WARP_CLIENT_ID "Cloudflare 服务令牌 Client ID" ""
+      prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret" 
+      prompt_with_default WARP_PROXY_PORT "本地 WARP SOCKS5 端口" "${DEFAULT_WARP_PROXY_PORT}"
       ;;
     n|no)
       ENABLE_WARP="no"
       ;;
     *)
-      die "ENABLE_WARP must be yes or no."
+      die "ENABLE_WARP 只能是 yes 或 no。"
       ;;
   esac
 }
@@ -954,8 +976,8 @@ default_reality_target_for_sni() {
 }
 
 ensure_xhttp_path_format() {
-  [[ -n "${XHTTP_PATH}" ]] || die "XHTTP path cannot be empty."
-  [[ "${XHTTP_PATH}" == /* ]] || die "XHTTP path must start with '/'."
+  [[ -n "${XHTTP_PATH}" ]] || die "XHTTP 路径不能为空。"
+  [[ "${XHTTP_PATH}" == /* ]] || die "XHTTP 路径必须以 / 开头。"
 }
 
 prompt_cert_mode_inputs() {
@@ -971,8 +993,8 @@ prompt_cert_mode_inputs() {
       CF_DNS_ZONE_ID=""
       ;;
     existing)
-      prompt_with_default CERT_SOURCE_FILE "Existing certificate file path" "${CERT_SOURCE_FILE:-}"
-      prompt_with_default KEY_SOURCE_FILE "Existing key file path" "${KEY_SOURCE_FILE:-}"
+      prompt_with_default CERT_SOURCE_FILE "现有证书文件路径" "${CERT_SOURCE_FILE:-}"
+      prompt_with_default KEY_SOURCE_FILE "现有私钥文件路径" "${KEY_SOURCE_FILE:-}"
       CF_ZONE_ID=""
       CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
       ACME_EMAIL=""
@@ -983,9 +1005,9 @@ prompt_cert_mode_inputs() {
     cf-origin-ca)
       CERT_SOURCE_FILE=""
       KEY_SOURCE_FILE=""
-      prompt_with_default CF_ZONE_ID "Cloudflare zone ID" "${CF_ZONE_ID:-}"
-      prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA validity days" "${CF_CERT_VALIDITY:-${DEFAULT_CF_CERT_VALIDITY}}"
-      prompt_secret CF_API_TOKEN "Cloudflare API token"
+      prompt_with_default CF_ZONE_ID "Cloudflare Zone ID" "${CF_ZONE_ID:-}"
+      prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA 有效期（天）" "${CF_CERT_VALIDITY:-${DEFAULT_CF_CERT_VALIDITY}}"
+      prompt_secret CF_API_TOKEN "Cloudflare API 令牌"
       ACME_EMAIL=""
       ACME_CA="${DEFAULT_ACME_CA}"
       CF_DNS_ACCOUNT_ID=""
@@ -994,20 +1016,20 @@ prompt_cert_mode_inputs() {
     acme-dns-cf)
       CERT_SOURCE_FILE=""
       KEY_SOURCE_FILE=""
-      prompt_with_default ACME_EMAIL "acme.sh account email" "${ACME_EMAIL:-}"
+      prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}"
       prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
-      prompt_secret CF_DNS_TOKEN "Cloudflare DNS API token"
+      prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌"
       if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-        read -r -p "Cloudflare account ID (optional): " CF_DNS_ACCOUNT_ID
+        read -r -p "Cloudflare Account ID（可选）: " CF_DNS_ACCOUNT_ID
       fi
       if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-        read -r -p "Cloudflare zone ID for DNS API (optional): " CF_DNS_ZONE_ID
+        read -r -p "Cloudflare DNS API 使用的 Zone ID（可选）: " CF_DNS_ZONE_ID
       fi
       CF_ZONE_ID=""
       CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
       ;;
     *)
-      die "Unsupported cert mode: ${CERT_MODE}"
+      die "不支持的证书模式：${CERT_MODE}"
       ;;
   esac
 }
@@ -1048,8 +1070,8 @@ request_cf_origin_ca_cert() {
   local cert_body=""
   local error_text=""
 
-  [[ -n "${CF_ZONE_ID}" ]] || die "CF_ZONE_ID is required for cf-origin-ca mode."
-  [[ -n "${CF_API_TOKEN}" ]] || die "CF_API_TOKEN is required for cf-origin-ca mode."
+  [[ -n "${CF_ZONE_ID}" ]] || die "cf-origin-ca 模式必须提供 CF_ZONE_ID。"
+  [[ -n "${CF_API_TOKEN}" ]] || die "cf-origin-ca 模式必须提供 CF_API_TOKEN。"
 
   csr_file="$(mktemp)"
   openssl ecparam -name prime256v1 -genkey -noout -out "${TLS_KEY_FILE}"
@@ -1061,12 +1083,12 @@ request_cf_origin_ca_cert() {
     -H 'Content-Type: application/json' \
     -H "Authorization: Bearer ${CF_API_TOKEN}" \
     --data "{\"csr\":${csr_json},\"hostnames\":[\"${XHTTP_DOMAIN}\"],\"request_type\":\"origin-ecc\",\"requested_validity\":${CF_CERT_VALIDITY}}" \
-  )" || die "Failed to call Cloudflare Origin CA API."
+  )" || die "调用 Cloudflare Origin CA API 失败。"
 
   cert_body="$(printf '%s' "${response}" | jq -r '.result.certificate // empty')"
   if [[ -z "${cert_body}" ]]; then
-    error_text="$(printf '%s' "${response}" | jq -r '.errors[0].message // .messages[0].message // "unknown Cloudflare API error"')"
-    die "Cloudflare Origin CA API returned no certificate: ${error_text}"
+    error_text="$(printf '%s' "${response}" | jq -r '.errors[0].message // .messages[0].message // "未知的 Cloudflare API 错误"')"
+    die "Cloudflare Origin CA API 未返回证书：${error_text}"
   fi
 
   printf '%b\n' "${cert_body}" > "${TLS_CERT_FILE}"
@@ -1088,7 +1110,7 @@ set_cloudflare_ssl_mode_strict() {
 
   success="$(printf '%s' "${response}" | jq -r '.success // empty' 2>/dev/null || true)"
   if [[ "${success}" != "true" ]]; then
-    warn "Could not automatically set Cloudflare SSL/TLS mode to strict. Check the zone setting manually."
+    warn "无法自动把 Cloudflare SSL/TLS 模式切到 strict，请手动检查 Zone 设置。"
   fi
 }
 
@@ -1121,17 +1143,17 @@ install_acme_sh() {
     return
   fi
 
-  [[ -n "${ACME_EMAIL}" ]] || die "ACME_EMAIL is required for acme-dns-cf mode."
+  [[ -n "${ACME_EMAIL}" ]] || die "acme-dns-cf 模式必须提供 ACME_EMAIL。"
   tmp_file="$(mktemp)"
   curl -fsSL https://get.acme.sh -o "${tmp_file}"
   sh "${tmp_file}" email="${ACME_EMAIL}" >/dev/null
   rm -f "${tmp_file}"
-  [[ -x "${ACME_SH_BIN}" ]] || die "acme.sh installation failed."
+  [[ -x "${ACME_SH_BIN}" ]] || die "acme.sh 安装失败。"
 }
 
 issue_acme_cf_cert() {
-  [[ -n "${ACME_EMAIL}" ]] || die "ACME_EMAIL is required for acme-dns-cf mode."
-  [[ -n "${CF_DNS_TOKEN}" ]] || die "CF_DNS_TOKEN is required for acme-dns-cf mode."
+  [[ -n "${ACME_EMAIL}" ]] || die "acme-dns-cf 模式必须提供 ACME_EMAIL。"
+  [[ -n "${CF_DNS_TOKEN}" ]] || die "acme-dns-cf 模式必须提供 CF_DNS_TOKEN。"
 
   install_acme_sh
   write_acme_reload_helper
@@ -1162,8 +1184,8 @@ write_tls_assets() {
   backup_path "${TLS_KEY_FILE}"
 
   if [[ "${CERT_MODE}" == "existing" ]]; then
-    [[ -f "${CERT_SOURCE_FILE}" ]] || die "Certificate file not found: ${CERT_SOURCE_FILE}"
-    [[ -f "${KEY_SOURCE_FILE}" ]] || die "Key file not found: ${KEY_SOURCE_FILE}"
+    [[ -f "${CERT_SOURCE_FILE}" ]] || die "找不到证书文件：${CERT_SOURCE_FILE}"
+    [[ -f "${KEY_SOURCE_FILE}" ]] || die "找不到私钥文件：${KEY_SOURCE_FILE}"
 
     install -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
     install -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
@@ -1352,7 +1374,7 @@ install_network_optimization() {
   fi
 
   if ! printf ' %s ' "${cc}" | grep -q ' bbr '; then
-    warn "Kernel does not expose BBR support. Skipping network optimization."
+    warn "当前内核未暴露 BBR 支持，已跳过网络优化。"
     ENABLE_NET_OPT="skipped"
     return
   fi
@@ -1693,10 +1715,10 @@ install_warp() {
   # shellcheck disable=SC1091
   . /etc/os-release
   repo_codename="${VERSION_CODENAME:-}"
-  [[ -n "${repo_codename}" ]] || die "VERSION_CODENAME is empty, cannot install Cloudflare WARP."
+  [[ -n "${repo_codename}" ]] || die "VERSION_CODENAME 为空，无法安装 Cloudflare WARP。"
 
   key_tmp="$(mktemp)"
-  log "Installing Cloudflare WARP client."
+  log "正在安装 Cloudflare WARP 客户端。"
   curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o "${key_tmp}"
   gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg "${key_tmp}"
   rm -f "${key_tmp}"
@@ -1770,10 +1792,10 @@ remove_managed_paths() {
 }
 
 validate_configs() {
-  log "Validating Xray config."
+  log "正在校验 Xray 配置。"
   "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}"
 
-  log "Validating HAProxy config."
+  log "正在校验 HAProxy 配置。"
   haproxy -c -f "${HAPROXY_CONFIG}"
 }
 
@@ -1800,7 +1822,7 @@ install_self_command() {
   if [[ -f "${source_path}" ]]; then
     install -m 0755 "${source_path}" "${SELF_COMMAND_PATH}"
   else
-    warn "Could not persist the management command because the script path is unavailable."
+    warn "无法写入持久化管理命令，因为当前脚本路径不可用。"
   fi
 }
 
@@ -1839,7 +1861,7 @@ upgrade_cmd() {
 
   need_root
   ensure_debian_family
-  [[ -x "${XRAY_BIN}" ]] || die "Current Xray binary not found: ${XRAY_BIN}"
+  [[ -x "${XRAY_BIN}" ]] || die "找不到当前 Xray 可执行文件：${XRAY_BIN}"
 
   start_backup_session
   backup_path "${XRAY_BIN}"
@@ -1850,9 +1872,9 @@ upgrade_cmd() {
   systemctl restart xray
 
   current_version="$("${XRAY_BIN}" version 2>/dev/null | head -n 1 || true)"
-  log "Upgrade finished."
-  log "Backup directory: ${BACKUP_DIR}"
-  [[ -n "${current_version}" ]] && log "Current version: ${current_version}"
+  log "升级完成。"
+  log "备份目录：${BACKUP_DIR}"
+  [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
 }
 
 uri_encode() {
@@ -1927,65 +1949,65 @@ write_output_file() {
   fi
 
   cat > "${OUTPUT_FILE}" <<EOF
-# Xray WARP Team deployment
+# Xray WARP Team 部署信息
 
-## Node 1
-- Type: VLESS + REALITY + Vision
-- Node label prefix: ${NODE_LABEL_PREFIX}
-- Address: ${SERVER_IP}
-- Port: 443
+## 节点 1
+- 类型: VLESS + REALITY + Vision
+- 节点名前缀: ${NODE_LABEL_PREFIX}
+- 地址: ${SERVER_IP}
+- 端口: 443
 - UUID: ${REALITY_UUID}
 - SNI: ${REALITY_SNI}
-- Public key: ${REALITY_PUBLIC_KEY}
-- Short ID: ${REALITY_SHORT_ID}
-- Flow: xtls-rprx-vision
-- Fingerprint: ${FINGERPRINT}
+- 公钥: ${REALITY_PUBLIC_KEY}
+- 短 ID: ${REALITY_SHORT_ID}
+- 流控: xtls-rprx-vision
+- 指纹: ${FINGERPRINT}
 
-URI:
+链接:
 vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SNI}&fp=${FINGERPRINT}&pbk=${REALITY_PUBLIC_KEY}&sid=${REALITY_SHORT_ID}&type=tcp&headerType=none#${reality_label}
 
-## Node 2
-- Type: VLESS + XHTTP + TLS + CDN
-- Address: ${XHTTP_DOMAIN}
-- Port: 443
+## 节点 2
+- 类型: VLESS + XHTTP + TLS + CDN
+- 地址: ${XHTTP_DOMAIN}
+- 端口: 443
 - UUID: ${XHTTP_UUID}
 - SNI: ${XHTTP_DOMAIN}
-- Host: ${XHTTP_DOMAIN}
+- 主机名: ${XHTTP_DOMAIN}
 - ALPN: ${TLS_ALPN}
-- Path: ${XHTTP_PATH}
-- Mode: stream-one
-- Fingerprint: ${FINGERPRINT}
-- ECH query: ${XHTTP_ECH_CONFIG_LIST}
-- ECH mode: ${XHTTP_ECH_FORCE_QUERY}
+- 路径: ${XHTTP_PATH}
+- 模式: stream-one
+- 指纹: ${FINGERPRINT}
+- ECH 查询: ${XHTTP_ECH_CONFIG_LIST}
+- ECH 模式: ${XHTTP_ECH_FORCE_QUERY}
 
-URI:
+链接:
 vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}
 
-## Cloudflare DNS
-- Point ${XHTTP_DOMAIN} to this server IP.
-- Enable orange-cloud for ${XHTTP_DOMAIN}.
-- Set Cloudflare SSL/TLS mode to ${cf_ssl_mode}.
+## Cloudflare DNS 设置
+- 请将 ${XHTTP_DOMAIN} 解析到此服务器 IP。
+- 请为 ${XHTTP_DOMAIN} 打开橙云代理。
+- 请将 Cloudflare SSL/TLS 模式设置为 ${cf_ssl_mode}。
 
-## Local files
-- Xray config: ${XRAY_CONFIG_FILE}
-- HAProxy config: ${HAPROXY_CONFIG}
-- Installer state: ${STATE_FILE}
-- Links output: ${OUTPUT_FILE}
+## 本地文件
+- Xray 配置: ${XRAY_CONFIG_FILE}
+- HAProxy 配置: ${HAPROXY_CONFIG}
+- 安装状态文件: ${STATE_FILE}
+- 链接输出文件: ${OUTPUT_FILE}
 
 ## WARP
-- Enabled: ${ENABLE_WARP}
-- Local SOCKS5 port: ${WARP_PROXY_PORT}
+- 已启用: ${ENABLE_WARP}
+- 本地 SOCKS5 端口: ${WARP_PROXY_PORT}
 
 ## XHTTP ECH
-- Enabled: yes
-- DoH / ECH query: ${XHTTP_ECH_CONFIG_LIST}
-- Force query mode: ${XHTTP_ECH_FORCE_QUERY}
-- Note: generated XHTTP share link includes ech= for clients that support it. none remains the safer default than full.
+- 已启用: 是
+- DoH / ECH 查询: ${XHTTP_ECH_CONFIG_LIST}
+- 强制查询模式: ${XHTTP_ECH_FORCE_QUERY}
+- 说明: 生成的 XHTTP 分享链接会带上 ech= 参数，适用于支持该参数的客户端。相比 full，none 更适合作为默认值。
 
-## Network optimization
-- Enabled: ${ENABLE_NET_OPT}
-- Sysctl file: ${NET_SYSCTL_CONF}
-- Service: ${NET_SERVICE_NAME}
+## 网络优化
+- 已启用: ${ENABLE_NET_OPT}
+- Sysctl 文件: ${NET_SYSCTL_CONF}
+- 服务名: ${NET_SERVICE_NAME}
 EOF
 }
 
@@ -2016,14 +2038,14 @@ change_uuid_cmd() {
         exit 0
         ;;
       *)
-        die "Unknown change-uuid option: ${1}"
+        die "未知的 change-uuid 参数：${1}"
         ;;
     esac
     shift
   done
 
   if [[ "${rotate_reality}" -eq 0 && "${rotate_xhttp}" -eq 0 ]]; then
-    die "Nothing to change. Use default behavior, --reality-only, or --xhttp-only."
+    die "没有需要修改的内容。请使用默认行为，或传入 --reality-only / --xhttp-only。"
   fi
 
   need_root
@@ -2044,8 +2066,8 @@ change_uuid_cmd() {
   write_state_file
   write_output_file
 
-  log "UUID rotation finished."
-  log "Backup directory: ${BACKUP_DIR}"
+  log "UUID 轮换完成。"
+  log "备份目录：${BACKUP_DIR}"
   show_links
 }
 
@@ -2083,7 +2105,7 @@ change_sni_cmd() {
         exit 0
         ;;
       *)
-        die "Unknown change-sni option: ${1}"
+        die "未知的 change-sni 参数：${1}"
         ;;
     esac
     shift
@@ -2091,7 +2113,7 @@ change_sni_cmd() {
 
   if [[ "${sni_overridden}" -eq 0 ]]; then
     REALITY_SNI=""
-    prompt_with_default REALITY_SNI "New REALITY visible SNI" "${old_reality_sni}"
+    prompt_with_default REALITY_SNI "新的 REALITY 可见 SNI" "${old_reality_sni}"
   fi
 
   if [[ "${target_overridden}" -eq 0 ]]; then
@@ -2101,12 +2123,12 @@ change_sni_cmd() {
     else
       target_default="${old_reality_target}"
     fi
-    prompt_with_default REALITY_TARGET "New REALITY target host:port" "${target_default}"
+    prompt_with_default REALITY_TARGET "新的 REALITY 目标地址 host:port" "${target_default}"
   fi
 
   apply_managed_runtime_update
-  log "REALITY SNI updated."
-  log "Backup directory: ${BACKUP_DIR}"
+  log "REALITY SNI 已更新。"
+  log "备份目录：${BACKUP_DIR}"
   show_links
 }
 
@@ -2132,7 +2154,7 @@ change_path_cmd() {
         exit 0
         ;;
       *)
-        die "Unknown change-path option: ${1}"
+        die "未知的 change-path 参数：${1}"
         ;;
     esac
     shift
@@ -2140,13 +2162,13 @@ change_path_cmd() {
 
   if [[ "${path_overridden}" -eq 0 ]]; then
     XHTTP_PATH=""
-    prompt_with_default XHTTP_PATH "New XHTTP path" "$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')"
+    prompt_with_default XHTTP_PATH "新的 XHTTP 路径" "$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')"
   fi
   ensure_xhttp_path_format
 
   apply_managed_runtime_update
-  log "XHTTP path updated."
-  log "Backup directory: ${BACKUP_DIR}"
+  log "XHTTP 路径已更新。"
+  log "备份目录：${BACKUP_DIR}"
   show_links
 }
 
@@ -2172,7 +2194,7 @@ change_label_prefix_cmd() {
         exit 0
         ;;
       *)
-        die "Unknown change-label-prefix option: ${1}"
+        die "未知的 change-label-prefix 参数：${1}"
         ;;
     esac
     shift
@@ -2180,7 +2202,7 @@ change_label_prefix_cmd() {
 
   if [[ "${prefix_overridden}" -eq 0 ]]; then
     NODE_LABEL_PREFIX=""
-    prompt_with_default NODE_LABEL_PREFIX "New node label prefix" "$(default_node_label_prefix)"
+    prompt_with_default NODE_LABEL_PREFIX "新的节点名前缀" "$(default_node_label_prefix)"
   fi
 
   NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
@@ -2188,8 +2210,8 @@ change_label_prefix_cmd() {
   write_state_file
   write_output_file
 
-  log "Node label prefix updated."
-  log "Backup directory: ${BACKUP_DIR}"
+  log "节点名前缀已更新。"
+  log "备份目录：${BACKUP_DIR}"
   show_links
 }
 
@@ -2266,7 +2288,7 @@ change_cert_mode_cmd() {
         exit 0
         ;;
       *)
-        die "Unknown change-cert-mode option: ${1}"
+        die "未知的 change-cert-mode 参数：${1}"
         ;;
     esac
     shift
@@ -2274,32 +2296,32 @@ change_cert_mode_cmd() {
 
   if [[ "${mode_overridden}" -eq 0 ]]; then
     CERT_MODE=""
-    prompt_with_default CERT_MODE "New cert mode (self-signed/existing/cf-origin-ca/acme-dns-cf)" "${old_cert_mode}"
+    prompt_with_default CERT_MODE "新的证书模式 (self-signed/existing/cf-origin-ca/acme-dns-cf)" "${old_cert_mode}"
   fi
   case "${CERT_MODE}" in
     self-signed|existing|cf-origin-ca|acme-dns-cf)
       ;;
     *)
-      die "Unsupported cert mode: ${CERT_MODE}"
+      die "不支持的证书模式：${CERT_MODE}"
       ;;
   esac
 
   if [[ "${domain_overridden}" -eq 0 ]]; then
     XHTTP_DOMAIN=""
-    prompt_with_default XHTTP_DOMAIN "XHTTP CDN domain" "${old_xhttp_domain}"
+    prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" "${old_xhttp_domain}"
   fi
   prompt_cert_mode_inputs
   apply_managed_update
   cleanup_previous_acme_cert "${old_cert_mode}" "${old_xhttp_domain}"
 
-  log "Certificate mode updated."
-  log "Backup directory: ${BACKUP_DIR}"
+  log "证书模式已更新。"
+  log "备份目录：${BACKUP_DIR}"
   show_links
 }
 
 show_links() {
-  [[ -f "${STATE_FILE}" ]] || die "State file not found: ${STATE_FILE}"
-  [[ -f "${OUTPUT_FILE}" ]] || die "Output file not found: ${OUTPUT_FILE}"
+  [[ -f "${STATE_FILE}" ]] || die "找不到状态文件：${STATE_FILE}"
+  [[ -f "${OUTPUT_FILE}" ]] || die "找不到输出文件：${OUTPUT_FILE}"
   cat "${OUTPUT_FILE}"
 }
 
@@ -2320,7 +2342,7 @@ status_cmd() {
         exit 0
         ;;
       *)
-        die "Unknown status option: ${1}"
+        die "未知的 status 参数：${1}"
         ;;
     esac
     shift
@@ -2347,7 +2369,7 @@ restart_cmd() {
   if service_exists "${NET_SERVICE_NAME}"; then
     systemctl restart "${NET_SERVICE_NAME}" || true
   fi
-  log "Services restarted."
+  log "服务已重启。"
 }
 
 uninstall_cmd() {
@@ -2364,7 +2386,7 @@ uninstall_cmd() {
         exit 0
         ;;
       *)
-        die "Unknown uninstall option: ${1}"
+        die "未知的 uninstall 参数：${1}"
         ;;
     esac
     shift
@@ -2375,10 +2397,10 @@ uninstall_cmd() {
   load_existing_state
 
   if [[ "${assume_yes}" -ne 1 ]]; then
-    read -r -p "This will stop services and remove managed files, but keep installed packages. Continue? [y/N]: " answer
+    read -r -p "该操作会停止服务并删除脚本托管文件，但保留已安装的软件包。是否继续？ [y/N]: " answer
     answer="$(printf '%s' "${answer}" | tr 'A-Z' 'a-z')"
     if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
-      die "Uninstall cancelled."
+      die "已取消卸载。"
     fi
   fi
 
@@ -2412,9 +2434,9 @@ uninstall_cmd() {
   systemctl reset-failed xray.service haproxy.service warp-svc.service "${NET_SERVICE_NAME}" >/dev/null 2>&1 || true
   sysctl --system >/dev/null 2>&1 || true
 
-  log "Managed files removed."
-  log "Backup directory: ${BACKUP_DIR}"
-  log "Installed packages were kept in place."
+  log "脚本托管文件已删除。"
+  log "备份目录：${BACKUP_DIR}"
+  log "已安装的软件包已保留。"
 }
 
 main_menu() {
@@ -2426,22 +2448,22 @@ main_menu() {
     fi
     show_dashboard
     cat <<'EOF'
-  1. Install or reinstall
-  2. Show node links
-  3. Refresh status panel
-  4. Restart services
-  5. Upgrade Xray core
-  6. Rotate node UUIDs
-  7. Change REALITY SNI
-  8. Change XHTTP path
-  9. Change node label prefix
-  10. Change cert mode / CDN domain
-  11. Uninstall managed files
-  12. Raw service details
-  13. Help
-  0. Exit
+  1. 安装或重装
+  2. 查看节点链接
+  3. 刷新状态面板
+  4. 重启服务
+  5. 升级 Xray 核心
+  6. 轮换节点 UUID
+  7. 修改 REALITY SNI
+  8. 修改 XHTTP 路径
+  9. 修改节点名前缀
+  10. 修改证书模式 / CDN 域名
+  11. 卸载托管文件
+  12. 查看原始服务详情
+  13. 帮助
+  0. 退出
 EOF
-    read -r -p "Select: " choice
+    read -r -p "请选择: " choice
     case "${choice}" in
       1) install_cmd ;;
       2) show_links ;;
@@ -2457,11 +2479,11 @@ EOF
       12) status_raw_cmd ;;
       13) usage ;;
       0) exit 0 ;;
-      *) warn "Unknown selection: ${choice}" ;;
+      *) warn "未知的菜单项：${choice}" ;;
     esac
     if [[ "${choice}" != "0" ]]; then
       printf '\n'
-      read -r -p "Press Enter to continue..." _
+      read -r -p "按回车继续..." _
     fi
   done
 }
@@ -2589,7 +2611,7 @@ parse_install_args() {
         exit 0
         ;;
       *)
-        die "Unknown install option: ${1}"
+        die "未知的 install 参数：${1}"
         ;;
     esac
     shift
@@ -2620,10 +2642,10 @@ install_cmd() {
   write_state_file
   write_output_file
 
-  log "Deployment finished."
-  log "Backup directory: ${BACKUP_DIR}"
-  log "Management command: ${SELF_COMMAND_PATH}"
-  log "Node links saved to: ${OUTPUT_FILE}"
+  log "部署完成。"
+  log "备份目录：${BACKUP_DIR}"
+  log "管理命令：${SELF_COMMAND_PATH}"
+  log "节点链接已写入：${OUTPUT_FILE}"
   show_links
 }
 
@@ -2683,7 +2705,7 @@ main() {
       usage
       ;;
     *)
-      die "Unknown command: ${command}"
+      die "未知命令：${command}"
       ;;
   esac
 }
