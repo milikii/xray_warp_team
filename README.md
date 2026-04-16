@@ -45,6 +45,7 @@ bash xray-warp-team.sh install
 ```bash
 xray-warp-team status
 xray-warp-team show-links
+xray-warp-team change-label-prefix --node-label-prefix HKG
 xray-warp-team change-sni --reality-sni www.stanford.edu
 xray-warp-team change-path --xhttp-path /cfup-new
 xray-warp-team change-uuid --xhttp-only
@@ -68,6 +69,7 @@ bash xray-warp-team.sh uninstall --yes
 ```bash
 bash xray-warp-team.sh install --non-interactive \
   --server-ip 203.0.113.10 \
+  --node-label-prefix HKG \
   --reality-sni www.scu.edu \
   --reality-target www.scu.edu:443 \
   --reality-private-key your_existing_reality_private_key \
@@ -163,6 +165,7 @@ bash xray-warp-team.sh install \
 安装完成后，脚本会：
 
 - 输出 `REALITY` 和 `XHTTP` 两个节点 URI
+- 节点名称默认会带一个统一前缀，便于在客户端里区分机器
 - 写入 Xray 配置到 `/usr/local/etc/xray/config.json`
 - 写入 HAProxy 配置到 `/etc/haproxy/haproxy.cfg`
 - 写入节点元数据到 `/usr/local/etc/xray/node-meta.env`
@@ -194,6 +197,8 @@ bash xray-warp-team.sh show-links
   修改 REALITY 的可见 SNI；如果原来的 target 跟着旧 SNI，脚本会默认一起改成新 SNI 的 `:443`。
 - `bash xray-warp-team.sh change-path --xhttp-path /cfup-new`
   修改 XHTTP 的路径。
+- `bash xray-warp-team.sh change-label-prefix --node-label-prefix HKG`
+  修改导出节点名称前缀，例如生成 `HKG-REALITY` 和 `HKG-XHTTP-CDN`。
 - `bash xray-warp-team.sh change-cert-mode --cert-mode acme-dns-cf --xhttp-domain cdn.example.com`
   切换证书模式，也可以顺手改 XHTTP CDN 域名。
 - `bash xray-warp-team.sh uninstall --yes`

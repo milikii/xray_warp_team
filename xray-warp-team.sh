@@ -38,6 +38,7 @@ ENABLE_WARP=""
 ENABLE_NET_OPT=""
 CERT_MODE=""
 SERVER_IP=""
+NODE_LABEL_PREFIX=""
 REALITY_UUID=""
 REALITY_SNI=""
 REALITY_TARGET=""
@@ -112,6 +113,7 @@ Usage:
   bash xray-warp-team.sh change-uuid [options]
   bash xray-warp-team.sh change-sni [options]
   bash xray-warp-team.sh change-path [options]
+  bash xray-warp-team.sh change-label-prefix [options]
   bash xray-warp-team.sh change-cert-mode [options]
   bash xray-warp-team.sh uninstall [--yes]
   bash xray-warp-team.sh show-links
@@ -122,6 +124,7 @@ Usage:
 Install options:
   --non-interactive           Run without prompts. Missing required values will fail.
   --server-ip VALUE           Public IP or hostname for the direct REALITY node.
+  --node-label-prefix VALUE   Shared prefix for exported node names, for example HKG or SJC.
   --reality-uuid VALUE        UUID for the REALITY node.
   --reality-sni VALUE         Visible SNI for REALITY and HAProxy routing.
   --reality-target VALUE      REALITY target in host:port form.
@@ -165,6 +168,10 @@ Change-path options:
   --non-interactive           Run without prompts.
   --xhttp-path VALUE          New XHTTP path.
 
+Change-label-prefix options:
+  --non-interactive           Run without prompts.
+  --node-label-prefix VALUE   New prefix used in exported node names.
+
 Change-cert-mode options:
   --non-interactive           Run without prompts.
   --cert-mode VALUE           New cert mode: self-signed, existing, cf-origin-ca, acme-dns-cf.
@@ -192,6 +199,7 @@ Examples:
   bash xray-warp-team.sh change-uuid
   bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
   bash xray-warp-team.sh change-path --xhttp-path /cfup-new
+  bash xray-warp-team.sh change-label-prefix --node-label-prefix HKG
   bash xray-warp-team.sh change-cert-mode --cert-mode self-signed
   bash xray-warp-team.sh uninstall --yes
   bash xray-warp-team.sh install --non-interactive \
@@ -230,6 +238,28 @@ random_hex() {
 
 random_path() {
   printf '/cfup-%s' "$(random_hex 6)"
+}
+
+normalize_node_label_prefix() {
+  local input="${1:-}"
+  local cleaned=""
+
+  cleaned="$(printf '%s' "${input}" \
+    | tr '[:lower:]' '[:upper:]' \
+    | sed -E 's/[^A-Z0-9._-]+/-/g; s/^-+//; s/-+$//; s/-{2,}/-/g')"
+
+  if [[ -z "${cleaned}" || "${cleaned}" == "LOCALHOST" ]]; then
+    cleaned="VPS"
+  fi
+
+  printf '%s' "${cleaned}"
+}
+
+default_node_label_prefix() {
+  local guessed=""
+
+  guessed="$(hostname -s 2>/dev/null || true)"
+  normalize_node_label_prefix "${guessed}"
 }
 
 prompt_with_default() {
@@ -462,6 +492,7 @@ load_dashboard_context() {
   XHTTP_PATH="${XHTTP_PATH:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')}"
   XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(haproxy_sni_for_backend 'be_xhttp_cdn')}"
   SERVER_IP="${SERVER_IP:-$(output_field_value 'Address')}"
+  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value 'Node label prefix')}"
   REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value 'Public key')}"
   FINGERPRINT="${FINGERPRINT:-$(output_field_value 'Fingerprint')}"
   ENABLE_WARP="${ENABLE_WARP:-$(if config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag' | grep -q 'WARP'; then printf 'yes'; else printf 'no'; fi)}"
@@ -470,6 +501,7 @@ load_dashboard_context() {
   ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
   ACME_CA="${ACME_CA:-${DEFAULT_ACME_CA}}"
   SERVER_IP="${SERVER_IP:-$(guess_server_ip)}"
+  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(default_node_label_prefix)}"
   FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
 }
@@ -509,6 +541,7 @@ show_dashboard() {
     panel_row "Cert mode" "$(pretty_cert_mode)"
     panel_row "REALITY" "${SERVER_IP:-unknown}:443  sni=${REALITY_SNI:-unknown}"
     panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-unknown}:443  path=${XHTTP_PATH:-unknown}"
+    panel_row "Node prefix" "${NODE_LABEL_PREFIX:-unknown}"
     panel_row "REALITY UUID" "$(short_value "${REALITY_UUID:-unknown}")"
     panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-unknown}")"
     panel_row "REALITY key" "$(short_value "${REALITY_PUBLIC_KEY:-unknown}" 10 8)"
@@ -743,6 +776,7 @@ load_current_install_context() {
   ENABLE_WARP="${ENABLE_WARP:-$(if config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag' | grep -q 'WARP'; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')}"
   SERVER_IP="${SERVER_IP:-$(output_field_value 'Address')}"
+  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value 'Node label prefix')}"
   REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value 'Public key')}"
   FINGERPRINT="${FINGERPRINT:-$(output_field_value 'Fingerprint')}"
   SERVER_IP="${SERVER_IP:-$(guess_server_ip)}"
@@ -753,6 +787,7 @@ load_current_install_context() {
   XHTTP_ECH_FORCE_QUERY="${XHTTP_ECH_FORCE_QUERY:-${DEFAULT_XHTTP_ECH_FORCE_QUERY}}"
   ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+  NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(default_node_label_prefix)}"
 
   [[ -n "${REALITY_UUID}" ]] || die "Could not determine REALITY UUID from current install."
   [[ -n "${REALITY_SNI}" ]] || die "Could not determine REALITY SNI from current install."
@@ -835,6 +870,7 @@ prepare_install_inputs() {
   guessed_ip="$(guess_server_ip)"
 
   prompt_with_default SERVER_IP "REALITY direct node address or IP" "${guessed_ip}"
+  prompt_with_default NODE_LABEL_PREFIX "Node label prefix used in exported links" "$(default_node_label_prefix)"
   prompt_with_default REALITY_UUID "REALITY UUID" "$(random_uuid)"
   prompt_with_default REALITY_SNI "REALITY visible SNI" "${DEFAULT_REALITY_SNI}"
   prompt_with_default REALITY_TARGET "REALITY target host:port" "${REALITY_SNI}:443"
@@ -889,6 +925,8 @@ prepare_install_inputs() {
       die "ENABLE_NET_OPT must be yes or no."
       ;;
   esac
+
+  NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
 
   prompt_yes_no ENABLE_WARP "Enable selective WARP outbound? [y/n]" "y"
   ENABLE_WARP="$(printf '%s' "${ENABLE_WARP}" | tr 'A-Z' 'a-z')"
@@ -1842,8 +1880,9 @@ path_to_uri_component() {
 
 write_state_file() {
   mkdir -p "${XRAY_CONFIG_DIR}"
-  cat > "${STATE_FILE}" <<EOF
+cat > "${STATE_FILE}" <<EOF
 SERVER_IP='${SERVER_IP}'
+NODE_LABEL_PREFIX='${NODE_LABEL_PREFIX}'
 REALITY_UUID='${REALITY_UUID}'
 REALITY_SNI='${REALITY_SNI}'
 REALITY_TARGET='${REALITY_TARGET}'
@@ -1875,9 +1914,13 @@ write_output_file() {
   local xhttp_path_component=""
   local xhttp_ech_component=""
   local cf_ssl_mode="Full (strict)"
+  local reality_label=""
+  local xhttp_label=""
 
   xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
   xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
+  reality_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-REALITY"
+  xhttp_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-XHTTP-CDN"
 
   if [[ "${CERT_MODE}" == "self-signed" ]]; then
     cf_ssl_mode="Full"
@@ -1888,6 +1931,7 @@ write_output_file() {
 
 ## Node 1
 - Type: VLESS + REALITY + Vision
+- Node label prefix: ${NODE_LABEL_PREFIX}
 - Address: ${SERVER_IP}
 - Port: 443
 - UUID: ${REALITY_UUID}
@@ -1898,7 +1942,7 @@ write_output_file() {
 - Fingerprint: ${FINGERPRINT}
 
 URI:
-vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SNI}&fp=${FINGERPRINT}&pbk=${REALITY_PUBLIC_KEY}&sid=${REALITY_SHORT_ID}&type=tcp&headerType=none#REALITY-VISION
+vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SNI}&fp=${FINGERPRINT}&pbk=${REALITY_PUBLIC_KEY}&sid=${REALITY_SHORT_ID}&type=tcp&headerType=none#${reality_label}
 
 ## Node 2
 - Type: VLESS + XHTTP + TLS + CDN
@@ -1915,7 +1959,7 @@ vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&s
 - ECH mode: ${XHTTP_ECH_FORCE_QUERY}
 
 URI:
-vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#XHTTP-CDN
+vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}
 
 ## Cloudflare DNS
 - Point ${XHTTP_DOMAIN} to this server IP.
@@ -1936,7 +1980,7 @@ vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_comp
 - Enabled: yes
 - DoH / ECH query: ${XHTTP_ECH_CONFIG_LIST}
 - Force query mode: ${XHTTP_ECH_FORCE_QUERY}
-- Note: generated XHTTP share link includes `ech=` for clients that support it. `none` remains the safer default than `full`.
+- Note: generated XHTTP share link includes ech= for clients that support it. none remains the safer default than full.
 
 ## Network optimization
 - Enabled: ${ENABLE_NET_OPT}
@@ -2102,6 +2146,49 @@ change_path_cmd() {
 
   apply_managed_runtime_update
   log "XHTTP path updated."
+  log "Backup directory: ${BACKUP_DIR}"
+  show_links
+}
+
+change_label_prefix_cmd() {
+  local prefix_overridden=0
+
+  need_root
+  start_backup_session
+  load_current_install_context
+
+  while [[ $# -gt 0 ]]; do
+    case "${1}" in
+      --non-interactive)
+        NON_INTERACTIVE=1
+        ;;
+      --node-label-prefix)
+        NODE_LABEL_PREFIX="${2}"
+        prefix_overridden=1
+        shift
+        ;;
+      --help|-h|help)
+        usage
+        exit 0
+        ;;
+      *)
+        die "Unknown change-label-prefix option: ${1}"
+        ;;
+    esac
+    shift
+  done
+
+  if [[ "${prefix_overridden}" -eq 0 ]]; then
+    NODE_LABEL_PREFIX=""
+    prompt_with_default NODE_LABEL_PREFIX "New node label prefix" "$(default_node_label_prefix)"
+  fi
+
+  NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
+
+  write_state_file
+  write_output_file
+
+  log "Node label prefix updated."
   log "Backup directory: ${BACKUP_DIR}"
   show_links
 }
@@ -2347,10 +2434,11 @@ main_menu() {
   6. Rotate node UUIDs
   7. Change REALITY SNI
   8. Change XHTTP path
-  9. Change cert mode / CDN domain
-  10. Uninstall managed files
-  11. Raw service details
-  12. Help
+  9. Change node label prefix
+  10. Change cert mode / CDN domain
+  11. Uninstall managed files
+  12. Raw service details
+  13. Help
   0. Exit
 EOF
     read -r -p "Select: " choice
@@ -2363,10 +2451,11 @@ EOF
       6) change_uuid_cmd ;;
       7) change_sni_cmd ;;
       8) change_path_cmd ;;
-      9) change_cert_mode_cmd ;;
-      10) uninstall_cmd ;;
-      11) status_raw_cmd ;;
-      12) usage ;;
+      9) change_label_prefix_cmd ;;
+      10) change_cert_mode_cmd ;;
+      11) uninstall_cmd ;;
+      12) status_raw_cmd ;;
+      13) usage ;;
       0) exit 0 ;;
       *) warn "Unknown selection: ${choice}" ;;
     esac
@@ -2385,6 +2474,10 @@ parse_install_args() {
         ;;
       --server-ip)
         SERVER_IP="${2}"
+        shift
+        ;;
+      --node-label-prefix)
+        NODE_LABEL_PREFIX="${2}"
         shift
         ;;
       --reality-uuid)
@@ -2563,6 +2656,10 @@ main() {
     change-path)
       shift || true
       change_path_cmd "$@"
+      ;;
+    change-label-prefix)
+      shift || true
+      change_label_prefix_cmd "$@"
       ;;
     change-cert-mode)
       shift || true
