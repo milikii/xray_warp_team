@@ -54,6 +54,8 @@ WARP_TEAM_NAME=""
 WARP_CLIENT_ID=""
 WARP_CLIENT_SECRET=""
 WARP_PROXY_PORT="${DEFAULT_WARP_PROXY_PORT}"
+XRAY_UID=""
+XRAY_GID=""
 CERT_SOURCE_FILE=""
 KEY_SOURCE_FILE=""
 CERT_SOURCE_PEM=""
@@ -1095,29 +1097,39 @@ install_xray() {
 }
 
 ensure_managed_permissions() {
+  [[ -n "${XRAY_UID}" && -n "${XRAY_GID}" ]] || die "尚未解析 xray 用户的 UID/GID。"
+
   if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
-    chown root:xray "${XRAY_CONFIG_FILE}"
+    chown 0:"${XRAY_GID}" "${XRAY_CONFIG_FILE}"
     chmod 0640 "${XRAY_CONFIG_FILE}"
   fi
 
   if [[ -f "${TLS_CERT_FILE}" ]]; then
-    chown root:xray "${TLS_CERT_FILE}"
+    chown 0:"${XRAY_GID}" "${TLS_CERT_FILE}"
     chmod 0640 "${TLS_CERT_FILE}"
   fi
 
   if [[ -f "${TLS_KEY_FILE}" ]]; then
-    chown root:xray "${TLS_KEY_FILE}"
+    chown 0:"${XRAY_GID}" "${TLS_KEY_FILE}"
     chmod 0640 "${TLS_KEY_FILE}"
   fi
 
   if [[ -d "${SSL_DIR}" ]]; then
-    chown root:xray "${SSL_DIR}"
+    chown 0:"${XRAY_GID}" "${SSL_DIR}"
     chmod 0750 "${SSL_DIR}"
   fi
 
   if [[ -d /var/log/xray ]]; then
-    chown xray:xray /var/log/xray
+    chown "${XRAY_UID}:${XRAY_GID}" /var/log/xray
     chmod 0750 /var/log/xray
+    if [[ -f /var/log/xray/access.log ]]; then
+      chown "${XRAY_UID}:${XRAY_GID}" /var/log/xray/access.log
+      chmod 0640 /var/log/xray/access.log
+    fi
+    if [[ -f /var/log/xray/error.log ]]; then
+      chown "${XRAY_UID}:${XRAY_GID}" /var/log/xray/error.log
+      chmod 0640 /var/log/xray/error.log
+    fi
   fi
 }
 
@@ -1126,9 +1138,13 @@ ensure_xray_user() {
     useradd --system --home /var/lib/xray --create-home --shell /usr/sbin/nologin xray
   fi
 
+  XRAY_UID="$(id -u xray)"
+  XRAY_GID="$(id -g xray)"
+  [[ -n "${XRAY_UID}" && -n "${XRAY_GID}" ]] || die "无法解析 xray 用户的 UID/GID。"
+
   mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}"
-  install -d -o xray -g xray -m 0750 /var/log/xray
-  install -d -o root -g xray -m 0750 "${SSL_DIR}"
+  install -d -o "${XRAY_UID}" -g "${XRAY_GID}" -m 0750 /var/log/xray
+  install -d -o 0 -g "${XRAY_GID}" -m 0750 "${SSL_DIR}"
   ensure_managed_permissions
 }
 
@@ -1408,7 +1424,7 @@ write_acme_reload_helper() {
 set -Eeuo pipefail
 
 if [[ -f "${TLS_CERT_FILE}" && -f "${TLS_KEY_FILE}" ]]; then
-  chown root:xray "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" 2>/dev/null || true
+  chown 0:${XRAY_GID} "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" 2>/dev/null || true
   chmod 0640 "${TLS_CERT_FILE}" "${TLS_KEY_FILE}" 2>/dev/null || true
 fi
 
@@ -1487,8 +1503,8 @@ write_tls_assets() {
       [[ -f "${CERT_SOURCE_FILE}" ]] || die "找不到证书文件：${CERT_SOURCE_FILE}"
       [[ -f "${KEY_SOURCE_FILE}" ]] || die "找不到私钥文件：${KEY_SOURCE_FILE}"
 
-      install -o root -g xray -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
-      install -o root -g xray -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
+      install -o 0 -g "${XRAY_GID}" -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
+      install -o 0 -g "${XRAY_GID}" -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
     else
       [[ -n "${CERT_SOURCE_PEM}" ]] || die "existing 模式下缺少证书 PEM 内容。"
       [[ -n "${KEY_SOURCE_PEM}" ]] || die "existing 模式下缺少私钥 PEM 内容。"
