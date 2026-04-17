@@ -1088,14 +1088,40 @@ install_xray() {
   rm -rf "${tmp_dir}"
 }
 
+ensure_managed_permissions() {
+  if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
+    chown root:xray "${XRAY_CONFIG_FILE}"
+    chmod 0640 "${XRAY_CONFIG_FILE}"
+  fi
+
+  if [[ -f "${TLS_CERT_FILE}" ]]; then
+    chown root:xray "${TLS_CERT_FILE}"
+    chmod 0640 "${TLS_CERT_FILE}"
+  fi
+
+  if [[ -f "${TLS_KEY_FILE}" ]]; then
+    chown root:xray "${TLS_KEY_FILE}"
+    chmod 0640 "${TLS_KEY_FILE}"
+  fi
+
+  if [[ -d "${SSL_DIR}" ]]; then
+    chown root:xray "${SSL_DIR}"
+    chmod 0750 "${SSL_DIR}"
+  fi
+
+  if [[ -d /var/log/xray ]]; then
+    chown xray:xray /var/log/xray
+    chmod 0750 /var/log/xray
+  fi
+}
+
 ensure_xray_user() {
   if ! id -u xray >/dev/null 2>&1; then
     useradd --system --home /var/lib/xray --create-home --shell /usr/sbin/nologin xray
   fi
 
   mkdir -p /var/log/xray "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" "${SSL_DIR}"
-  chown -R xray:xray /var/log/xray
-  chmod 750 /var/log/xray
+  ensure_managed_permissions
 }
 
 generate_reality_keys_if_needed() {
@@ -1493,7 +1519,7 @@ EOF
     chmod 0640 "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
   fi
 
-  chown root:xray "${TLS_CERT_FILE}" "${TLS_KEY_FILE}"
+  ensure_managed_permissions
   validate_tls_assets
 
   if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
@@ -1908,8 +1934,7 @@ EOF
 EOF
   fi
 
-  chown root:xray "${XRAY_CONFIG_FILE}"
-  chmod 0640 "${XRAY_CONFIG_FILE}"
+  ensure_managed_permissions
 }
 
 write_haproxy_config() {
