@@ -203,8 +203,8 @@ bash xray-warp-team.sh show-links
 注意：
 
 - 脚本只导出分享链接，不再额外生成客户端 JSON。
-- `XHTTP` 链接会直接带上 `ech=` 查询地址，适合 `v2rayNG / v2rayN` 这类支持该参数的客户端。
-- `echForceQuery` 默认仍为 `none`，因为 `full` 在中国网络下更容易因为 DoH 或 HTTPS 记录获取失败而直接断开。
+- 默认导出的 `XHTTP` 分享链接不带 `ech=` 参数，避免额外的 DoH / DNS 查询。
+- 如果你后续明确需要测试 ECH，再手动加 `ech=` 相关参数更稳妥。
 
 也可以直接做后续维护：
 
@@ -231,17 +231,8 @@ bash xray-warp-team.sh show-links
 
 `change-uuid` 依赖脚本之前生成的状态文件和当前配置，适合这套脚本安装出来的节点。
 
-脚本当前对 `XHTTP CDN` 默认按 `ECH` 思路导出分享链接，使用：
-
-- `echConfigList = https://1.1.1.1/dns-query`
-- `echForceQuery = none`
-
-这是按官方文档取的更稳默认值：
-
-- `echForceQuery = full`
-  没拿到有效 ECH Config 时会直接失败。
-- `echForceQuery = none`
-  查询失败时会回退，不会因为 ECH 查询失败直接断开。
+脚本当前对 `XHTTP CDN` 默认不启用 `ECH`，导出的分享链接不带 `ech=` 参数。
+如果你后续自己手动加 `ECH`，再按客户端实际支持情况单独测试。
 
 默认情况下，安装流程也会启用 `WARP Team` 选择性出站；如果你明确不需要，才额外传 `--disable-warp`。
 

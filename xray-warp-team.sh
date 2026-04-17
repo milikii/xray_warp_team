@@ -9,8 +9,8 @@ DEFAULT_TLS_ALPN="h2"
 DEFAULT_FINGERPRINT="chrome"
 DEFAULT_CF_CERT_VALIDITY="5475"
 DEFAULT_ACME_CA="letsencrypt"
-DEFAULT_XHTTP_ECH_CONFIG_LIST="https://1.1.1.1/dns-query"
-DEFAULT_XHTTP_ECH_FORCE_QUERY="none"
+DEFAULT_XHTTP_ECH_CONFIG_LIST=""
+DEFAULT_XHTTP_ECH_FORCE_QUERY=""
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
@@ -122,6 +122,7 @@ xray-warp-team.sh v0.4.1
   bash xray-warp-team.sh show-links
   bash xray-warp-team.sh status [--raw]
   bash xray-warp-team.sh restart
+  bash xray-warp-team.sh repair-perms
   bash xray-warp-team.sh help
 
 安装参数:
@@ -212,6 +213,7 @@ xray-warp-team.sh v0.4.1
 示例:
   bash xray-warp-team.sh
   bash xray-warp-team.sh upgrade
+  bash xray-warp-team.sh repair-perms
   bash xray-warp-team.sh change-uuid
   bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
   bash xray-warp-team.sh change-path --xhttp-path /assets/v3
@@ -783,7 +785,7 @@ show_dashboard() {
   printf '%b%s%b\n' "${C_BOLD}" "功能开关" "${C_RESET}"
   panel_row "WARP 分流" "$(bool_badge "${ENABLE_WARP:-no}")  端口=${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
   panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
-  panel_row "XHTTP ECH" "$(bool_badge "yes")  doh=${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}"
+  panel_row "XHTTP ECH" "$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}" ]]; then bool_badge "yes"; else bool_badge "no"; fi)  doh=${XHTTP_ECH_CONFIG_LIST:-未设置}"
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
     panel_row "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
   fi
@@ -1012,6 +1014,10 @@ load_existing_state() {
     # shellcheck disable=SC1090
     . "${STATE_FILE}"
   fi
+  if [[ "${XHTTP_ECH_CONFIG_LIST:-}" == "https://1.1.1.1/dns-query" && "${XHTTP_ECH_FORCE_QUERY:-}" == "none" ]]; then
+    XHTTP_ECH_CONFIG_LIST=""
+    XHTTP_ECH_FORCE_QUERY=""
+  fi
   load_warp_mdm_context
 }
 
@@ -1120,7 +1126,9 @@ ensure_xray_user() {
     useradd --system --home /var/lib/xray --create-home --shell /usr/sbin/nologin xray
   fi
 
-  mkdir -p /var/log/xray "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}" "${SSL_DIR}"
+  mkdir -p "${XRAY_CONFIG_DIR}" "${XRAY_ASSET_DIR}"
+  install -d -o xray -g xray -m 0750 /var/log/xray
+  install -d -o root -g xray -m 0750 "${SSL_DIR}"
   ensure_managed_permissions
 }
 
@@ -1479,8 +1487,8 @@ write_tls_assets() {
       [[ -f "${CERT_SOURCE_FILE}" ]] || die "找不到证书文件：${CERT_SOURCE_FILE}"
       [[ -f "${KEY_SOURCE_FILE}" ]] || die "找不到私钥文件：${KEY_SOURCE_FILE}"
 
-      install -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
-      install -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
+      install -o root -g xray -m 0640 "${CERT_SOURCE_FILE}" "${TLS_CERT_FILE}"
+      install -o root -g xray -m 0640 "${KEY_SOURCE_FILE}" "${TLS_KEY_FILE}"
     else
       [[ -n "${CERT_SOURCE_PEM}" ]] || die "existing 模式下缺少证书 PEM 内容。"
       [[ -n "${KEY_SOURCE_PEM}" ]] || die "existing 模式下缺少私钥 PEM 内容。"
@@ -2100,6 +2108,8 @@ validate_configs() {
 }
 
 restart_services() {
+  ensure_xray_user
+  ensure_managed_permissions
   systemctl daemon-reload
   systemctl enable --now xray
   systemctl enable --now haproxy
@@ -2112,6 +2122,8 @@ restart_services() {
 }
 
 restart_core_services() {
+  ensure_xray_user
+  ensure_managed_permissions
   systemctl restart xray
   systemctl restart haproxy
 }
@@ -2241,6 +2253,7 @@ write_output_file() {
   local cf_ssl_mode="Full (strict)"
   local reality_label=""
   local xhttp_label=""
+  local xhttp_uri=""
 
   xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
   xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
@@ -2249,6 +2262,11 @@ write_output_file() {
 
   if [[ "${CERT_MODE}" == "self-signed" ]]; then
     cf_ssl_mode="Full"
+  fi
+
+  xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
+  if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
+    xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
   fi
 
   cat > "${OUTPUT_FILE}" <<EOF
@@ -2280,11 +2298,10 @@ vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&s
 - 路径: ${XHTTP_PATH}
 - 模式: stream-one
 - 指纹: ${FINGERPRINT}
-- ECH 查询: ${XHTTP_ECH_CONFIG_LIST}
-- ECH 模式: ${XHTTP_ECH_FORCE_QUERY}
+- ECH: $(if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then printf '已启用'; else printf '未启用'; fi)
 
 链接:
-vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}
+${xhttp_uri}
 
 ## Cloudflare DNS 设置
 - 请将 ${XHTTP_DOMAIN} 解析到此服务器 IP。
@@ -2302,10 +2319,10 @@ vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_comp
 - 本地 SOCKS5 端口: ${WARP_PROXY_PORT}
 
 ## XHTTP ECH
-- 已启用: 是
-- DoH / ECH 查询: ${XHTTP_ECH_CONFIG_LIST}
-- 强制查询模式: ${XHTTP_ECH_FORCE_QUERY}
-- 说明: 生成的 XHTTP 分享链接会带上 ech= 参数，适用于支持该参数的客户端。相比 full，none 更适合作为默认值。
+- 已启用: $(if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then printf '是'; else printf '否'; fi)
+- DoH / ECH 查询: ${XHTTP_ECH_CONFIG_LIST:-未设置}
+- 强制查询模式: ${XHTTP_ECH_FORCE_QUERY:-未设置}
+- 说明: 默认不启用 ECH，导出的 XHTTP 分享链接也不会带 ech= 参数，避免额外的 DNS / DoH 查询。
 
 ## 网络优化
 - 已启用: ${ENABLE_NET_OPT}
@@ -2776,6 +2793,15 @@ restart_cmd() {
   log "服务已重启。"
 }
 
+repair_perms_cmd() {
+  need_root
+  ensure_xray_user
+  ensure_managed_permissions
+  systemctl daemon-reload
+  systemctl restart xray haproxy >/dev/null 2>&1 || true
+  log "已修复脚本托管文件权限，并尝试重启 xray 与 haproxy。"
+}
+
 uninstall_cmd() {
   local assume_yes=0
   local answer=""
@@ -2863,9 +2889,10 @@ main_menu() {
   9. 修改节点名前缀
   10. 开关 WARP 分流
   11. 修改证书模式 / CDN 域名
-  12. 卸载托管文件
-  13. 查看原始服务详情
-  14. 帮助
+  12. 抢修文件权限
+  13. 卸载托管文件
+  14. 查看原始服务详情
+  15. 帮助
   0. 退出
 EOF
     read -r -p "请选择: " choice
@@ -2881,9 +2908,10 @@ EOF
       9) change_label_prefix_cmd ;;
       10) change_warp_cmd ;;
       11) change_cert_mode_cmd ;;
-      12) uninstall_cmd ;;
-      13) status_raw_cmd ;;
-      14) usage ;;
+      12) repair_perms_cmd ;;
+      13) uninstall_cmd ;;
+      14) status_raw_cmd ;;
+      15) usage ;;
       0) exit 0 ;;
       *) warn "未知的菜单项：${choice}" ;;
     esac
@@ -3118,6 +3146,9 @@ main() {
       ;;
     restart)
       restart_cmd
+      ;;
+    repair-perms)
+      repair_perms_cmd
       ;;
     help|--help|-h)
       usage
