@@ -6,7 +6,7 @@
 - `VLESS + XHTTP + TLS + CDN + VLESS Encryption` 节点
 - `上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality` 上下行分离节点
 - `Cloudflare WARP Team` 选择性出站
-- `nginx + xray fallback` 的 `443` 端口复用架构
+- `haproxy + nginx + xray` 的混合前置与 `443` 端口复用架构
 - 可选 `Cloudflare Origin CA` / `acme.sh + Cloudflare DNS` 证书模式
 - 可选 `BBR + fq + RPS/XPS` 网络优化
 
@@ -26,24 +26,28 @@ xray-warp-team.sh
 
 ## 当前脚本架构
 
-不是 `haproxy TCP SNI 分流` 了，而是：
+当前是“混合前置”架构：
 
-- `xray :443`
+- `haproxy :443`
+  - 只负责按 `SNI` 做 TCP 分流
+  - `CDN 域名 -> nginx 127.0.0.1:8443`
+  - 其它域名 -> `xray reality 127.0.0.1:2443`
+- `xray 127.0.0.1:2443`
   - `REALITY + Vision`
   - `fallback -> 127.0.0.1:8001`
-  - `target -> 127.0.0.1:8003`
+  - `target -> 你设置的 Reality 伪装站，比如 www.harvard.edu:443`
 - `xray 127.0.0.1:8001`
   - `VLESS + XHTTP`
   - 默认开启 `VLESS Encryption`
-- `nginx 127.0.0.1:8003`
-  - `Reality 域名` 的伪装站
-  - `CDN 域名` 的伪装站
-  - `CDN 域名 + /XHTTP_PATH` 转到 `grpc_pass 127.0.0.1:8001`
+- `nginx 127.0.0.1:8443`
+  - 给 `CDN 域名` 提供 TLS / HTTP2
+  - `/XHTTP_PATH -> grpc_pass 127.0.0.1:8001`
+  - `/ -> 伪装站`
 
 也就是说，三节点共享同一个 `443`，但实现方式是：
 
-- `Reality` 由 `xray:443` 直接处理
-- `XHTTP CDN` 由 `xray:443 -> nginx:8003 -> xray:8001`
+- `Reality` 由 `haproxy:443 -> xray:2443`
+- `XHTTP CDN` 由 `haproxy:443 -> nginx:8443 -> xray:8001`
 - `XHTTP 上下行分离` 仍然复用同一套服务端，只是在客户端通过 `downloadSettings` 实现上下行拆分
 
 ## 这套脚本适合什么场景
@@ -511,11 +515,13 @@ xray-warp-team uninstall --yes
 先分层排查：
 
 1. `xray` 是否真的运行
-2. `nginx` 是否真的运行
-3. `xray` 是否监听了 `443` 和 `8001`
-4. `nginx` 是否监听了 `127.0.0.1:8003`
-5. Cloudflare SSL/TLS 模式是否正确
-6. 证书是否覆盖 `CDN 域名` 和 `Reality 域名`
+2. `haproxy` 是否真的运行
+3. `nginx` 是否真的运行
+4. `xray` 是否监听了 `2443` 和 `8001`
+5. `nginx` 是否监听了 `127.0.0.1:8443`
+6. `haproxy` 是否监听了 `:443`
+7. Cloudflare SSL/TLS 模式是否正确
+8. 证书是否覆盖 `CDN 域名`
 
 建议第一步先跑：
 

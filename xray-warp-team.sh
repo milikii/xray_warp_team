@@ -18,9 +18,10 @@ XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_ASSET_DIR="/usr/local/share/xray"
 XRAY_SERVICE_FILE="/etc/systemd/system/xray.service"
 SELF_COMMAND_PATH="/usr/local/sbin/xray-warp-team"
+HAPROXY_CONFIG="/etc/haproxy/haproxy.cfg"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
 NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
-NGINX_FALLBACK_PORT="8003"
+NGINX_TLS_PORT="8443"
 XHTTP_LOCAL_PORT="8001"
 NGINX_SERVICE_FILE="/lib/systemd/system/nginx.service"
 STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
@@ -580,7 +581,7 @@ service_active_state() {
     return
   fi
 
-  state="$(systemctl is-active "${unit_name}" 2>/dev/null || true)"
+  state="$(systemctl show "${unit_name}" -p ActiveState --value 2>/dev/null || true)"
   if [[ -n "${state}" ]]; then
     printf '%s' "${state}"
   else
@@ -590,21 +591,23 @@ service_active_state() {
 
 service_enable_state() {
   local unit_name="${1}"
-  local path=""
 
   if ! service_exists "${unit_name}"; then
     printf 'not-installed'
     return
   fi
 
-  for path in /etc/systemd/system/*.wants/"${unit_name}" /etc/systemd/system/"${unit_name}"; do
-    if [[ -e "${path}" || -L "${path}" ]]; then
+  case "$(systemctl show "${unit_name}" -p UnitFileState --value 2>/dev/null || true)" in
+    enabled)
       printf 'enabled'
-      return
-    fi
-  done
-
-  printf 'installed'
+      ;;
+    disabled|masked|static|indirect|generated|transient)
+      printf 'installed'
+      ;;
+    *)
+      printf 'installed'
+      ;;
+  esac
 }
 
 service_badge() {
@@ -728,10 +731,12 @@ load_dashboard_context() {
 
 show_dashboard() {
   local xray_state=""
+  local haproxy_state=""
   local nginx_state=""
   local warp_state=""
   local net_state=""
   local xray_enabled=""
+  local haproxy_enabled=""
   local nginx_enabled=""
   local warp_enabled=""
   local net_enabled=""
@@ -740,10 +745,12 @@ show_dashboard() {
   load_dashboard_context
 
   xray_state="$(service_active_state 'xray.service')"
+  haproxy_state="$(service_active_state 'haproxy.service')"
   nginx_state="$(service_active_state 'nginx.service')"
   warp_state="$(service_active_state 'warp-svc.service')"
   net_state="$(service_active_state "${NET_SERVICE_NAME}")"
   xray_enabled="$(service_enable_state 'xray.service')"
+  haproxy_enabled="$(service_enable_state 'haproxy.service')"
   nginx_enabled="$(service_enable_state 'nginx.service')"
   warp_enabled="$(service_enable_state 'warp-svc.service')"
   net_enabled="$(service_enable_state "${NET_SERVICE_NAME}")"
@@ -773,6 +780,7 @@ show_dashboard() {
   divider
   printf '%b%s%b\n' "${C_BOLD}" "服务状态" "${C_RESET}"
   panel_row "xray" "$(service_badge "${xray_state}") ($(service_install_state_label "${xray_enabled}"))"
+  panel_row "haproxy" "$(service_badge "${haproxy_state}") ($(service_install_state_label "${haproxy_enabled}"))"
   panel_row "nginx" "$(service_badge "${nginx_state}") ($(service_install_state_label "${nginx_enabled}"))"
   panel_row "warp-svc" "$(service_badge "${warp_state}") ($(service_install_state_label "${warp_enabled}"))"
   panel_row "网络优化" "$(service_badge "${net_state}") ($(service_install_state_label "${net_enabled}"))"
@@ -1087,7 +1095,7 @@ load_current_install_context() {
 install_packages() {
   log "正在安装依赖包。"
   apt-get update
-  apt-get install -y ca-certificates curl gnupg nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin
+  apt-get install -y ca-certificates curl gnupg haproxy nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin
 }
 
 install_xray() {
@@ -1247,7 +1255,7 @@ prepare_install_inputs() {
   prompt_with_default NODE_LABEL_PREFIX "导出链接使用的节点名前缀" "$(default_node_label_prefix)"
   prompt_with_default REALITY_UUID "REALITY UUID" "$(random_uuid)"
   prompt_with_default REALITY_SNI "REALITY 可见 SNI" "${DEFAULT_REALITY_SNI}"
-  REALITY_TARGET="127.0.0.1:${NGINX_FALLBACK_PORT}"
+  prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "${REALITY_SNI}:443"
   prompt_with_default REALITY_SHORT_ID "REALITY 短 ID" "$(random_hex 8)"
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" ""
@@ -1790,8 +1798,8 @@ write_xray_config() {
   "inbounds": [
     {
       "tag": "reality-vision",
-      "listen": "0.0.0.0",
-      "port": 443,
+      "listen": "127.0.0.1",
+      "port": 2443,
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -1814,7 +1822,7 @@ write_xray_config() {
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": "127.0.0.1:${NGINX_FALLBACK_PORT}",
+          "target": "${REALITY_TARGET}",
           "xver": 0,
           "serverNames": [
             "${REALITY_SNI}"
@@ -1952,8 +1960,8 @@ EOF
   "inbounds": [
     {
       "tag": "reality-vision",
-      "listen": "0.0.0.0",
-      "port": 443,
+      "listen": "127.0.0.1",
+      "port": 2443,
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -1976,7 +1984,7 @@ EOF
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": "127.0.0.1:${NGINX_FALLBACK_PORT}",
+          "target": "${REALITY_TARGET}",
           "xver": 0,
           "serverNames": [
             "${REALITY_SNI}"
@@ -2059,24 +2067,8 @@ write_nginx_config() {
 
   cat > "${NGINX_CONFIG_FILE}" <<EOF
 server {
-    listen 127.0.0.1:${NGINX_FALLBACK_PORT} ssl http2;
-    server_name ${REALITY_SNI};
-
-    ssl_certificate ${TLS_CERT_FILE};
-    ssl_certificate_key ${TLS_KEY_FILE};
-
-    location / {
-        proxy_pass https://www.stanford.edu;
-        proxy_set_header Host www.stanford.edu;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
-    }
-}
-
-server {
-    listen 127.0.0.1:${NGINX_FALLBACK_PORT} ssl http2;
+    listen 127.0.0.1:${NGINX_TLS_PORT} ssl;
+    http2 on;
     server_name ${XHTTP_DOMAIN};
 
     ssl_certificate ${TLS_CERT_FILE};
@@ -2100,6 +2092,45 @@ server {
         grpc_set_header X-Forwarded-Host \$host;
     }
 }
+EOF
+}
+
+write_haproxy_config() {
+  backup_path "${HAPROXY_CONFIG}"
+
+  cat > "${HAPROXY_CONFIG}" <<EOF
+global
+    log /dev/log local0
+    log /dev/log local1 notice
+    daemon
+    user haproxy
+    group haproxy
+    maxconn 20000
+
+defaults
+    log global
+    mode tcp
+    option tcplog
+    timeout connect 5s
+    timeout client 2m
+    timeout server 2m
+
+frontend fe_tls_shared_443
+    bind :443
+    mode tcp
+    tcp-request inspect-delay 5s
+    tcp-request content accept if { req.ssl_hello_type 1 }
+
+    use_backend be_xhttp_cdn if { req.ssl_sni -i ${XHTTP_DOMAIN} }
+    default_backend be_reality_vision
+
+backend be_xhttp_cdn
+    mode tcp
+    server nginx_cdn 127.0.0.1:${NGINX_TLS_PORT} check
+
+backend be_reality_vision
+    mode tcp
+    server reality_vision 127.0.0.1:2443 check
 EOF
 }
 
@@ -2227,6 +2258,9 @@ validate_configs() {
 
   log "正在校验 Nginx 配置。"
   nginx -t
+
+  log "正在校验 HAProxy 配置。"
+  haproxy -c -f "${HAPROXY_CONFIG}"
 }
 
 restart_services() {
@@ -2234,8 +2268,10 @@ restart_services() {
   ensure_managed_permissions
   systemctl daemon-reload
   systemctl enable --now xray
+  systemctl enable --now haproxy
   systemctl enable --now nginx
   systemctl restart xray
+  systemctl restart haproxy
   systemctl restart nginx
 
   if [[ "${ENABLE_WARP}" == "yes" ]]; then
@@ -2247,14 +2283,21 @@ restart_core_services() {
   ensure_xray_user
   ensure_managed_permissions
   systemctl restart xray
+  systemctl restart haproxy
   systemctl restart nginx
 }
 
 install_self_command() {
-  local source_path="${BASH_SOURCE[0]:-$0}"
+  local source_path="$0"
+  local source_real=""
+  local target_real=""
 
   if [[ -f "${source_path}" ]]; then
-    install -m 0755 "${source_path}" "${SELF_COMMAND_PATH}"
+    source_real="$(readlink -f "${source_path}" 2>/dev/null || printf '%s' "${source_path}")"
+    target_real="$(readlink -f "${SELF_COMMAND_PATH}" 2>/dev/null || printf '%s' "${SELF_COMMAND_PATH}")"
+    if [[ "${source_real}" != "${target_real}" ]]; then
+      install -m 0755 "${source_path}" "${SELF_COMMAND_PATH}"
+    fi
   else
     warn "无法写入持久化管理命令，因为当前脚本路径不可用。"
   fi
@@ -2274,6 +2317,7 @@ cleanup_previous_acme_cert() {
 apply_managed_update() {
   write_tls_assets
   write_xray_config
+  write_haproxy_config
   write_nginx_config
   validate_configs
   restart_core_services
@@ -2283,6 +2327,7 @@ apply_managed_update() {
 
 apply_managed_runtime_update() {
   write_xray_config
+  write_haproxy_config
   write_nginx_config
   validate_configs
   restart_core_services
@@ -2923,7 +2968,7 @@ show_links() {
 }
 
 status_raw_cmd() {
-  systemctl --no-pager --full status xray nginx warp-svc "${NET_SERVICE_NAME}" 2>/dev/null || true
+  systemctl --no-pager --full status xray haproxy nginx warp-svc "${NET_SERVICE_NAME}" 2>/dev/null || true
 }
 
 status_cmd() {
@@ -2957,6 +3002,9 @@ restart_cmd() {
   if service_exists "xray.service"; then
     systemctl restart xray
   fi
+  if service_exists "haproxy.service"; then
+    systemctl restart haproxy
+  fi
   if service_exists "nginx.service"; then
     systemctl restart nginx
   fi
@@ -2974,8 +3022,8 @@ repair_perms_cmd() {
   ensure_xray_user
   ensure_managed_permissions
   systemctl daemon-reload
-  systemctl restart xray nginx >/dev/null 2>&1 || true
-  log "已修复脚本托管文件权限，并尝试重启 xray 与 nginx。"
+  systemctl restart xray haproxy nginx >/dev/null 2>&1 || true
+  log "已修复脚本托管文件权限，并尝试重启 xray、haproxy 与 nginx。"
 }
 
 uninstall_cmd() {
@@ -3011,6 +3059,7 @@ uninstall_cmd() {
   fi
 
   stop_and_disable_service_if_present "xray.service"
+  stop_and_disable_service_if_present "haproxy.service"
   stop_and_disable_service_if_present "nginx.service"
   stop_and_disable_service_if_present "warp-svc.service"
   stop_and_disable_service_if_present "${NET_SERVICE_NAME}"
@@ -3025,6 +3074,7 @@ uninstall_cmd() {
     "${XRAY_CONFIG_DIR}" \
     "${XRAY_ASSET_DIR}" \
     "${XRAY_SERVICE_FILE}" \
+    "${HAPROXY_CONFIG}" \
     "${NGINX_CONFIG_FILE}" \
     "${SSL_DIR}" \
     "${WARP_MDM_FILE}" \
@@ -3037,7 +3087,7 @@ uninstall_cmd() {
     "/var/lib/xray"
 
   systemctl daemon-reload
-  systemctl reset-failed xray.service nginx.service warp-svc.service "${NET_SERVICE_NAME}" >/dev/null 2>&1 || true
+  systemctl reset-failed xray.service haproxy.service nginx.service warp-svc.service "${NET_SERVICE_NAME}" >/dev/null 2>&1 || true
   sysctl --system >/dev/null 2>&1 || true
 
   log "脚本托管文件已删除。"
@@ -3258,6 +3308,7 @@ install_cmd() {
   generate_reality_keys_if_needed
   write_tls_assets
   write_xray_config
+  write_haproxy_config
   write_nginx_config
   write_xray_service
   install_network_optimization
