@@ -1,11 +1,12 @@
 # xray_warp_team
 
-一个面向 Debian / Ubuntu VPS 的一键部署脚本，用来快速搭一套：
+一个面向 Debian / Ubuntu VPS 的一键部署脚本，用来在一台机器上稳定搭建：
 
 - `VLESS + REALITY + Vision` 直连节点
-- `VLESS + XHTTP + TLS + CDN` 节点
-- `HAProxy :443` 基于 SNI 分流
-- 可选 `Cloudflare WARP Team` 选择性出站
+- `VLESS + XHTTP + TLS + CDN + VLESS Encryption` 节点
+- `上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality` 上下行分离节点
+- `Cloudflare WARP Team` 选择性出站
+- `nginx + xray fallback` 的 `443` 端口复用架构
 - 可选 `Cloudflare Origin CA` / `acme.sh + Cloudflare DNS` 证书模式
 - 可选 `BBR + fq + RPS/XPS` 网络优化
 
@@ -15,28 +16,55 @@
 xray-warp-team.sh
 ```
 
-安装完成后，脚本会自动落到：
+安装完成后会自动落到：
 
 ```bash
 /usr/local/sbin/xray-warp-team
 ```
 
-后续维护直接用这个命令即可。
+后续维护统一使用这个命令。
+
+## 当前脚本架构
+
+不是 `haproxy TCP SNI 分流` 了，而是：
+
+- `xray :443`
+  - `REALITY + Vision`
+  - `fallback -> 127.0.0.1:8001`
+  - `target -> 127.0.0.1:8003`
+- `xray 127.0.0.1:8001`
+  - `VLESS + XHTTP`
+  - 默认开启 `VLESS Encryption`
+- `nginx 127.0.0.1:8003`
+  - `Reality 域名` 的伪装站
+  - `CDN 域名` 的伪装站
+  - `CDN 域名 + /XHTTP_PATH` 转到 `grpc_pass 127.0.0.1:8001`
+
+也就是说，三节点共享同一个 `443`，但实现方式是：
+
+- `Reality` 由 `xray:443` 直接处理
+- `XHTTP CDN` 由 `xray:443 -> nginx:8003 -> xray:8001`
+- `XHTTP 上下行分离` 仍然复用同一套服务端，只是在客户端通过 `downloadSettings` 实现上下行拆分
 
 ## 这套脚本适合什么场景
 
 适合：
 
-- 你想在一台 VPS 上同时提供 `REALITY` 和 `XHTTP CDN`
-- 你希望脚本统一生成配置、systemd 服务、HAProxy 分流、节点链接
-- 你需要 `Cloudflare WARP Team` 作为一部分出站
-- 你希望后续可以直接改 `SNI / 路径 / UUID / WARP / 证书模式`
+- 你想一台 VPS 同时提供 `Reality`、`xhttp CDN`、`xhttp split`
+- 你需要 `WARP Team` 作为一部分出站
+- 你希望后续直接改：
+  - `Reality 域名/SNI`
+  - `XHTTP 路径`
+  - `节点名前缀`
+  - `UUID`
+  - `WARP 开关`
+  - `证书模式`
 
 不适合：
 
 - 非 Debian / Ubuntu 系统
 - 不想使用 root
-- 想做复杂多站点反代编排
+- 想保留自己已有的复杂 `nginx` 网站体系且不希望脚本接管 `nginx`
 
 ## 安装前准备
 
@@ -44,24 +72,18 @@ xray-warp-team.sh
 
 - 一台 Debian / Ubuntu VPS
 - root 权限
-- 一个用于 `XHTTP CDN` 的 Cloudflare 域名
+- 一个用于 `XHTTP CDN` 的 Cloudflare 橙云域名
+- 一个证书可覆盖的 `Reality` 域名
+  - 推荐同一张通配证书下的灰云子域名
+  - 例如：
+    - `cdn.example.com` 用于 CDN
+    - `reality.example.com` 用于 Reality
 
 如果你要启用 WARP Team，还需要：
 
 - Cloudflare Zero Trust 团队名
 - Service Token 的 `Client ID`
 - Service Token 的 `Client Secret`
-
-如果你要用证书模式：
-
-- `self-signed`
-  不需要额外准备，Cloudflare SSL/TLS 设为 `Full`
-- `existing`
-  你已经有证书和私钥，比如 Cloudflare Origin CA 或 Let’s Encrypt
-- `cf-origin-ca`
-  需要 Cloudflare API Token 和 Zone ID
-- `acme-dns-cf`
-  需要 Cloudflare DNS API Token 和 ACME 邮箱
 
 ## 快速开始
 
@@ -78,14 +100,15 @@ bash xray-warp-team.sh
 1. 安装或重装
 ```
 
-如果你偏好非交互安装，也可以：
+## 最小非交互示例
+
+下面是推荐的最小安装方式：
 
 ```bash
 bash xray-warp-team.sh install --non-interactive \
   --server-ip 203.0.113.10 \
   --node-label-prefix HKG \
-  --reality-sni www.scu.edu \
-  --reality-target www.scu.edu:443 \
+  --reality-sni reality.example.com \
   --xhttp-domain cdn.example.com \
   --xhttp-path /assets/v3 \
   --cert-mode existing \
@@ -96,7 +119,7 @@ bash xray-warp-team.sh install --non-interactive \
   --warp-client-secret xxxxxxxxx
 ```
 
-如果你明确不想启用 WARP：
+如果你明确不需要 WARP：
 
 ```bash
 bash xray-warp-team.sh install --non-interactive \
@@ -104,37 +127,45 @@ bash xray-warp-team.sh install --non-interactive \
   --disable-warp
 ```
 
+如果你明确不想启用 `XHTTP VLESS Encryption`：
+
+```bash
+bash xray-warp-team.sh install --non-interactive \
+  ... \
+  --disable-xhttp-vless-encryption
+```
+
 ## 安装完成后会得到什么
 
-脚本会生成并托管：
+脚本会托管：
 
 - `/usr/local/etc/xray/config.json`
-- `/etc/haproxy/haproxy.cfg`
+- `/etc/nginx/conf.d/xray-warp-team.conf`
 - `/etc/systemd/system/xray.service`
 - `/usr/local/etc/xray/node-meta.env`
 - `/root/xray-warp-team-output.md`
 
-安装成功后，你会得到两条分享链接：
+安装成功后会导出 3 个节点：
 
-- `REALITY`
-- `XHTTP CDN`
+1. `REALITY + Vision`
+2. `XHTTP + TLS + CDN + VLESS Encryption`
+3. `上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality`
 
 默认说明：
 
 - `XHTTP` 默认不启用 `ECH`
-- 导出的 `XHTTP` 分享链接默认不带 `ech=` 参数
-- 默认会给节点名加统一前缀，便于在客户端区分机器
+- 导出的两个 `XHTTP` 分享链接默认不带 `ech=`
+- `XHTTP VLESS Encryption` 默认开启
+- 默认会给节点名加统一前缀，便于客户端区分机器
 
 ## WARP Team 教程
 
-这是本 README 里最重要的补充部分。
+### WARP Team 在这套脚本里做什么
 
-### WARP Team 是做什么的
+这套脚本里的 WARP 不是“整机全局代理”，而是：
 
-这套脚本里的 WARP 不是“全局代理整台机器”，而是：
-
-- 让 `Xray` 的部分目标域名走 `Cloudflare WARP Team`
-- 其它流量仍按原本规则直连
+- 让 `Xray` 的一部分目标域名走 `Cloudflare WARP Team`
+- 其它流量仍按原规则直连
 
 默认会走 WARP 的目标包括：
 
@@ -149,9 +180,9 @@ bash xray-warp-team.sh install --non-interactive \
 - `x.com / twitter.com / t.co / twimg.com`
 - `github.com` 和 Copilot 相关域名
 
-Telegram 相关域名默认直连。
+Telegram 默认直连。
 
-### 你需要准备什么
+### 需要准备什么
 
 需要 3 个值：
 
@@ -159,24 +190,15 @@ Telegram 相关域名默认直连。
 - `Client ID`
 - `Client Secret`
 
-### 在哪里获取
-
-在 Cloudflare Zero Trust 后台创建一个 Service Token，拿到：
-
-- `Client ID`
-- `Client Secret`
-
-团队名就是你 Zero Trust 的组织名。
-
 ### 安装时怎么填
 
-交互安装时，脚本会问：
+交互安装时会问：
 
-- `是否启用选择性 WARP 出站`
-- `Cloudflare Zero Trust 团队名`
-- `Cloudflare 服务令牌 Client ID`
-- `Cloudflare 服务令牌 Client Secret`
-- `本地 WARP SOCKS5 端口`
+- 是否启用选择性 WARP 出站
+- Cloudflare Zero Trust 团队名
+- Cloudflare 服务令牌 Client ID
+- Cloudflare 服务令牌 Client Secret
+- 本地 WARP SOCKS5 端口
 
 非交互安装时直接传：
 
@@ -189,25 +211,25 @@ Telegram 相关域名默认直连。
 
 ### 装好后如何验证
 
-先看服务状态：
+先看面板：
 
 ```bash
 xray-warp-team status
 ```
 
-或者看原始状态：
+再看原始服务状态：
 
 ```bash
 systemctl status --no-pager warp-svc
 ```
 
-如果需要看当前 MDM 配置：
+如果要查看当前 MDM 配置：
 
 ```bash
 sed -n '1,200p' /var/lib/cloudflare-warp/mdm.xml
 ```
 
-### 以后怎么开关 WARP
+### 以后如何开关 WARP
 
 关闭：
 
@@ -231,33 +253,33 @@ xray-warp-team change-warp --enable-warp \
   --warp-proxy-port 40000
 ```
 
-## 证书模式说明
+## 证书模式
 
 ### 1. self-signed
 
-适合快速启动测试环境。
+适合快速测试。
 
 要求：
 
-- Cloudflare SSL/TLS 模式设为 `Full`
+- Cloudflare SSL/TLS 设为 `Full`
 
 ### 2. existing
 
-适合你已经准备好证书的情况，比如：
+适合你已经有证书的情况，比如：
 
 - Cloudflare Origin CA
 - Let’s Encrypt
 
 要求：
 
-- Cloudflare SSL/TLS 模式设为 `Full (strict)`
+- Cloudflare SSL/TLS 设为 `Full (strict)`
 
 支持两种输入方式：
 
 1. 直接给本机文件路径
 2. 直接粘贴 PEM 内容，由脚本写入
 
-本机已有文件：
+本机已有文件示例：
 
 ```bash
 bash xray-warp-team.sh install \
@@ -266,7 +288,7 @@ bash xray-warp-team.sh install \
   --key-file /etc/ssl/cloudflare/key.pem
 ```
 
-直接传 PEM 内容：
+直接传 PEM 内容示例：
 
 ```bash
 bash xray-warp-team.sh install \
@@ -305,15 +327,21 @@ bash xray-warp-team.sh install \
 
 ## Cloudflare 侧需要做什么
 
-脚本不会替你自动把整套 DNS 记录和代理状态都配好，所以还要手动确认：
+请手动确认：
 
-1. 给 `XHTTP` 域名添加 `A` 记录，指向 VPS 公网 IP
-2. 打开橙云代理
-3. 根据证书模式设置 Cloudflare SSL/TLS：
+1. `CDN 域名`
+   - 指向 VPS 公网 IP
+   - 打开橙云代理
+2. `Reality 域名`
+   - 推荐灰云 / DNS only
+   - 证书必须覆盖它
+3. SSL/TLS 模式：
    - `self-signed` -> `Full`
    - `existing` -> `Full (strict)`
    - `cf-origin-ca` -> `Full (strict)`
    - `acme-dns-cf` -> `Full (strict)`
+4. 如果走 Cloudflare CDN 的 `XHTTP`
+   - 建议开启 `gRPC`
 
 ## 常用命令
 
@@ -335,10 +363,10 @@ xray-warp-team status --raw
 xray-warp-team show-links
 ```
 
-### 修改 REALITY 的 SNI
+### 修改 REALITY 域名 / SNI
 
 ```bash
-xray-warp-team change-sni --reality-sni www.stanford.edu
+xray-warp-team change-sni --reality-sni reality.example.com
 ```
 
 ### 修改 XHTTP 路径
@@ -347,7 +375,7 @@ xray-warp-team change-sni --reality-sni www.stanford.edu
 xray-warp-team change-path --xhttp-path /assets/v3
 ```
 
-### 修改节点名称前缀
+### 修改节点名前缀
 
 ```bash
 xray-warp-team change-label-prefix --node-label-prefix HKG
@@ -369,6 +397,16 @@ xray-warp-team change-uuid --reality-only
 
 ```bash
 xray-warp-team change-uuid --xhttp-only
+```
+
+### 开关 WARP
+
+```bash
+xray-warp-team change-warp --disable-warp
+```
+
+```bash
+xray-warp-team change-warp --enable-warp
 ```
 
 ### 切换证书模式
@@ -393,16 +431,13 @@ xray-warp-team restart
 
 ### 抢修权限
 
-这是这套脚本里非常重要的维护命令。
-
 如果你遇到：
 
-- `xray.service` 启不来
+- `xray.service` 起不来
 - `status=23`
-- `haproxy` 里看到 `<NOSRV>`
-- `config.json` / `cert.pem` / `key.pem` / `access.log` 权限不对
+- `config.json / cert.pem / key.pem / access.log / error.log` 权限不对
 
-直接先跑：
+先直接跑：
 
 ```bash
 xray-warp-team repair-perms
@@ -413,8 +448,8 @@ xray-warp-team repair-perms
 - 修正 `config.json`
 - 修正证书目录和证书文件
 - 修正 `/var/log/xray`
-- 修正 `access.log` / `error.log`
-- 然后尝试重启 `xray` 和 `haproxy`
+- 修正 `access.log / error.log`
+- 尝试重启 `xray` 与 `nginx`
 
 ### 卸载脚本托管文件
 
@@ -424,21 +459,18 @@ xray-warp-team uninstall --yes
 
 ## 常见问题
 
-### 1. REALITY 用 IP 还是域名
+### 1. Reality 用 IP 还是域名
 
 建议：
 
-- 稳定优先：直接用公网 IP
-- 维护优先：用灰云域名
+- 稳定优先：客户端地址直接用公网 IP
+- 维护优先：客户端地址用灰云域名
 
-不要：
+当前脚本默认导出的 `Reality` 节点地址是公网 IP，`serverName/SNI` 则使用你设置的 Reality 域名。
 
-- 让 REALITY 走 Cloudflare 橙云代理
-- 让 REALITY 和 XHTTP CDN 共用橙云域名
+### 2. 为什么 XHTTP 默认像正常网站资源路径
 
-### 2. XHTTP 默认路径为什么像正常网站资源
-
-脚本默认会从几条更像正常站点资源路径的候选里随机选一个，例如：
+脚本默认会从这些候选里随机选一个：
 
 - `/assets/v3`
 - `/static/app`
@@ -446,35 +478,44 @@ xray-warp-team uninstall --yes
 - `/fonts/inter`
 - `/media/cache`
 
-这样比早期那种 `/cfup-随机串` 更好记，也更自然。
+这样比早期 `/cfup-随机串` 更自然，也更好记。
 
 ### 3. 为什么默认不启用 ECH
 
 因为在很多网络环境里，尤其中国网络下：
 
-- `ECH` 依赖额外的 DNS / DoH 查询
-- 容易引入额外的不稳定性
+- `ECH` 依赖额外 DNS / DoH 查询
+- 容易引入额外不稳定性
 
-所以现在脚本默认：
+所以脚本默认：
 
 - `XHTTP` 不启用 `ECH`
 - 导出的分享链接不带 `ech=`
 
 如果你后续明确要测，再自己手动加。
 
-### 4. Cloudflare 返回 525 怎么办
+### 4. 现在的三节点里，split 为什么不用额外服务端入站
 
-`525` 的意思通常是：
+因为这套架构里：
 
-- Cloudflare 到你的源站 TLS 握手失败
+- 服务端只有一套 `xhttp` 入站
+- “上下行分离”是客户端通过 `downloadSettings` 实现的
 
-优先检查：
+也就是说：
 
-1. 本机 `xray` 是否真的运行
-2. `haproxy` 是否真的运行
-3. 证书是否覆盖 `XHTTP` 域名
-4. Cloudflare SSL/TLS 模式是否正确
-5. 本机权限是否异常
+- 节点 2 和 节点 3 共用同一个服务端 `xhttp` 入站
+- 区别在客户端的下载链路选择
+
+### 5. Cloudflare 返回 521 / 525 怎么办
+
+先分层排查：
+
+1. `xray` 是否真的运行
+2. `nginx` 是否真的运行
+3. `xray` 是否监听了 `443` 和 `8001`
+4. `nginx` 是否监听了 `127.0.0.1:8003`
+5. Cloudflare SSL/TLS 模式是否正确
+6. 证书是否覆盖 `CDN 域名` 和 `Reality 域名`
 
 建议第一步先跑：
 
@@ -482,15 +523,6 @@ xray-warp-team uninstall --yes
 xray-warp-team repair-perms
 xray-warp-team status
 ```
-
-### 5. 为什么 change-* 依赖状态文件
-
-因为脚本需要从：
-
-- `/usr/local/etc/xray/node-meta.env`
-- `/root/xray-warp-team-output.md`
-
-回读当前参数，才能安全地做增量修改。
 
 ## 网络优化说明
 
@@ -513,5 +545,7 @@ xray-warp-team status
   https://developers.cloudflare.com/cloudflare-one/tutorials/deploy-client-headless-linux/
 - Cloudflare One Client 文档  
   https://developers.cloudflare.com/cloudflare-one/team-and-resources/devices/cloudflare-one-client/
+- Xray 官方讨论 `#4118`  
+  https://github.com/XTLS/Xray-core/discussions/4118
 - Xray 官方仓库  
   https://github.com/XTLS/Xray-core

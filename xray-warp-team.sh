@@ -7,6 +7,7 @@ DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
 DEFAULT_FINGERPRINT="chrome"
+DEFAULT_XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
 DEFAULT_CF_CERT_VALIDITY="5475"
 DEFAULT_ACME_CA="letsencrypt"
 DEFAULT_XHTTP_ECH_CONFIG_LIST=""
@@ -17,7 +18,11 @@ XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_ASSET_DIR="/usr/local/share/xray"
 XRAY_SERVICE_FILE="/etc/systemd/system/xray.service"
 SELF_COMMAND_PATH="/usr/local/sbin/xray-warp-team"
-HAPROXY_CONFIG="/etc/haproxy/haproxy.cfg"
+NGINX_CONF_DIR="/etc/nginx/conf.d"
+NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
+NGINX_FALLBACK_PORT="8003"
+XHTTP_LOCAL_PORT="8001"
+NGINX_SERVICE_FILE="/lib/systemd/system/nginx.service"
 STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
 OUTPUT_FILE="/root/xray-warp-team-output.md"
 SSL_DIR="/etc/ssl/xray-warp-team"
@@ -48,6 +53,9 @@ REALITY_PUBLIC_KEY=""
 XHTTP_UUID=""
 XHTTP_DOMAIN=""
 XHTTP_PATH=""
+XHTTP_VLESS_ENCRYPTION_ENABLED="${DEFAULT_XHTTP_VLESS_ENCRYPTION_ENABLED}"
+XHTTP_VLESS_DECRYPTION=""
+XHTTP_VLESS_ENCRYPTION=""
 TLS_ALPN="${DEFAULT_TLS_ALPN}"
 FINGERPRINT="${DEFAULT_FINGERPRINT}"
 WARP_TEAM_NAME=""
@@ -56,6 +64,7 @@ WARP_CLIENT_SECRET=""
 WARP_PROXY_PORT="${DEFAULT_WARP_PROXY_PORT}"
 XRAY_UID=""
 XRAY_GID=""
+XHTTP_SPLIT_EXTRA=""
 CERT_SOURCE_FILE=""
 KEY_SOURCE_FILE=""
 CERT_SOURCE_PEM=""
@@ -133,12 +142,13 @@ xray-warp-team.sh v0.4.1
   --node-label-prefix VALUE   导出节点名称前缀，例如 HKG 或 SJC。
   --reality-uuid VALUE        指定 REALITY 节点 UUID。
   --reality-sni VALUE         REALITY 可见 SNI，同时用于 HAProxy 分流。
-  --reality-target VALUE      REALITY 目标地址，格式为 host:port。
   --reality-short-id VALUE    REALITY 短 ID。
   --reality-private-key VALUE 复用现有 REALITY 私钥。
   --xhttp-uuid VALUE          指定 XHTTP CDN 节点 UUID。
   --xhttp-domain VALUE        XHTTP CDN 使用的橙云域名。
   --xhttp-path VALUE          XHTTP 路径，例如 /cfup-example。
+  --enable-xhttp-vless-encryption   启用 XHTTP CDN 的 VLESS Encryption。
+  --disable-xhttp-vless-encryption  禁用 XHTTP CDN 的 VLESS Encryption。
   --cert-mode VALUE           证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
   --cert-file VALUE           当证书模式为 existing 时使用的证书文件。
   --key-file VALUE            当证书模式为 existing 时使用的私钥文件。
@@ -170,7 +180,6 @@ xray-warp-team.sh v0.4.1
 变更 SNI 参数:
   --non-interactive           非交互运行。
   --reality-sni VALUE         新的 REALITY 可见 SNI。
-  --reality-target VALUE      新的 REALITY 目标地址，格式为 host:port。
 
 变更路径参数:
   --non-interactive           非交互运行。
@@ -571,27 +580,6 @@ service_active_state() {
     return
   fi
 
-  case "${unit_name}" in
-    xray.service)
-      if pgrep -x xray >/dev/null 2>&1; then
-        printf 'active'
-        return
-      fi
-      ;;
-    haproxy.service)
-      if pgrep -x haproxy >/dev/null 2>&1; then
-        printf 'active'
-        return
-      fi
-      ;;
-    warp-svc.service)
-      if pgrep -f 'warp-svc|warp-service' >/dev/null 2>&1; then
-        printf 'active'
-        return
-      fi
-      ;;
-  esac
-
   state="$(systemctl is-active "${unit_name}" 2>/dev/null || true)"
   if [[ -n "${state}" ]]; then
     printf '%s' "${state}"
@@ -716,7 +704,8 @@ load_dashboard_context() {
   REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.shortIds[0]')}"
   XHTTP_UUID="${XHTTP_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')}"
   XHTTP_PATH="${XHTTP_PATH:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')}"
-  XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(haproxy_sni_for_backend 'be_xhttp_cdn')}"
+  XHTTP_VLESS_DECRYPTION="${XHTTP_VLESS_DECRYPTION:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.decryption')}"
+  XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(nginx_server_name "${XHTTP_PATH:-/}")}"
   SERVER_IP="${SERVER_IP:-$(output_field_value '地址')}"
   NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(output_field_value '节点名前缀')}"
   REALITY_PUBLIC_KEY="${REALITY_PUBLIC_KEY:-$(output_field_value '公钥')}"
@@ -730,15 +719,20 @@ load_dashboard_context() {
   NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(default_node_label_prefix)}"
   FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+  if [[ "${XHTTP_VLESS_DECRYPTION:-}" == "none" || -z "${XHTTP_VLESS_DECRYPTION:-}" ]]; then
+    XHTTP_VLESS_ENCRYPTION_ENABLED="${XHTTP_VLESS_ENCRYPTION_ENABLED:-no}"
+  else
+    XHTTP_VLESS_ENCRYPTION_ENABLED="${XHTTP_VLESS_ENCRYPTION_ENABLED:-yes}"
+  fi
 }
 
 show_dashboard() {
   local xray_state=""
-  local haproxy_state=""
+  local nginx_state=""
   local warp_state=""
   local net_state=""
   local xray_enabled=""
-  local haproxy_enabled=""
+  local nginx_enabled=""
   local warp_enabled=""
   local net_enabled=""
   local version_line=""
@@ -746,11 +740,11 @@ show_dashboard() {
   load_dashboard_context
 
   xray_state="$(service_active_state 'xray.service')"
-  haproxy_state="$(service_active_state 'haproxy.service')"
+  nginx_state="$(service_active_state 'nginx.service')"
   warp_state="$(service_active_state 'warp-svc.service')"
   net_state="$(service_active_state "${NET_SERVICE_NAME}")"
   xray_enabled="$(service_enable_state 'xray.service')"
-  haproxy_enabled="$(service_enable_state 'haproxy.service')"
+  nginx_enabled="$(service_enable_state 'nginx.service')"
   warp_enabled="$(service_enable_state 'warp-svc.service')"
   net_enabled="$(service_enable_state "${NET_SERVICE_NAME}")"
   version_line="$(xray_version_line)"
@@ -779,7 +773,7 @@ show_dashboard() {
   divider
   printf '%b%s%b\n' "${C_BOLD}" "服务状态" "${C_RESET}"
   panel_row "xray" "$(service_badge "${xray_state}") ($(service_install_state_label "${xray_enabled}"))"
-  panel_row "haproxy" "$(service_badge "${haproxy_state}") ($(service_install_state_label "${haproxy_enabled}"))"
+  panel_row "nginx" "$(service_badge "${nginx_state}") ($(service_install_state_label "${nginx_enabled}"))"
   panel_row "warp-svc" "$(service_badge "${warp_state}") ($(service_install_state_label "${warp_enabled}"))"
   panel_row "网络优化" "$(service_badge "${net_state}") ($(service_install_state_label "${net_enabled}"))"
 
@@ -787,6 +781,7 @@ show_dashboard() {
   printf '%b%s%b\n' "${C_BOLD}" "功能开关" "${C_RESET}"
   panel_row "WARP 分流" "$(bool_badge "${ENABLE_WARP:-no}")  端口=${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
   panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
+  panel_row "VLESS Encryption" "$(bool_badge "${XHTTP_VLESS_ENCRYPTION_ENABLED:-${DEFAULT_XHTTP_VLESS_ENCRYPTION_ENABLED}}")"
   panel_row "XHTTP ECH" "$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}" ]]; then bool_badge "yes"; else bool_badge "no"; fi)  doh=${XHTTP_ECH_CONFIG_LIST:-未设置}"
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
     panel_row "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
@@ -953,6 +948,9 @@ config_jq_read() {
     '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.tlsSettings.alpn[0]')
       config_fallback_first_array_value_in_tag "xhttp-cdn" "alpn"
       ;;
+    '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.decryption')
+      config_fallback_string_in_tag "xhttp-cdn" "decryption"
+      ;;
     '.outbounds[] | select(.tag=="WARP") | .tag')
       if config_fallback_has_outbound_tag "WARP"; then
         printf 'WARP'
@@ -1004,11 +1002,28 @@ load_warp_mdm_context() {
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(warp_mdm_value 'proxy_port')}"
 }
 
-haproxy_sni_for_backend() {
-  local backend_name="${1}"
+nginx_server_name() {
+  local path_hint="${1}"
 
-  [[ -f "${HAPROXY_CONFIG}" ]] || return 0
-  sed -n "s/.*use_backend ${backend_name} if { req\\.ssl_sni -i \\([^ }][^ }]*\\) }.*/\\1/p" "${HAPROXY_CONFIG}" | head -n 1
+  [[ -f "${NGINX_CONFIG_FILE}" ]] || return 0
+  awk -v path_hint="${path_hint}" '
+    /location[[:space:]]+\// { in_loc = 1 }
+    in_loc && index($0, path_hint) { wanted = 1 }
+    /^[[:space:]]*server_name[[:space:]]+/ {
+      line = $0
+      sub(/^[[:space:]]*server_name[[:space:]]+/, "", line)
+      sub(/;.*/, "", line)
+      current = line
+      if (wanted) {
+        print current
+        exit
+      }
+    }
+    /^}/ {
+      in_loc = 0
+      wanted = 0
+    }
+  ' "${NGINX_CONFIG_FILE}" 2>/dev/null | head -n 1
 }
 
 load_existing_state() {
@@ -1035,8 +1050,9 @@ load_current_install_context() {
   REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.privateKey')}"
   XHTTP_UUID="${XHTTP_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')}"
   XHTTP_PATH="${XHTTP_PATH:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')}"
+  XHTTP_VLESS_DECRYPTION="${XHTTP_VLESS_DECRYPTION:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.decryption')}"
   TLS_ALPN="${TLS_ALPN:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.tlsSettings.alpn[0]')}"
-  XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(haproxy_sni_for_backend 'be_xhttp_cdn')}"
+  XHTTP_DOMAIN="${XHTTP_DOMAIN:-$(nginx_server_name "${XHTTP_PATH:-/}")}"
   ENABLE_WARP="${ENABLE_WARP:-$(if config_jq_read '.outbounds[] | select(.tag=="WARP") | .tag' | grep -q 'WARP'; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')}"
   SERVER_IP="${SERVER_IP:-$(output_field_value '地址')}"
@@ -1052,6 +1068,11 @@ load_current_install_context() {
   ENABLE_NET_OPT="${ENABLE_NET_OPT:-$(if [[ -f "${NET_SERVICE_FILE}" || -f "${NET_SYSCTL_CONF}" ]]; then printf 'yes'; else printf 'no'; fi)}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
   NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(default_node_label_prefix)}"
+  if [[ "${XHTTP_VLESS_DECRYPTION:-}" == "none" || -z "${XHTTP_VLESS_DECRYPTION:-}" ]]; then
+    XHTTP_VLESS_ENCRYPTION_ENABLED="${XHTTP_VLESS_ENCRYPTION_ENABLED:-no}"
+  else
+    XHTTP_VLESS_ENCRYPTION_ENABLED="${XHTTP_VLESS_ENCRYPTION_ENABLED:-yes}"
+  fi
 
   [[ -n "${REALITY_UUID}" ]] || die "无法从当前安装中识别 REALITY UUID。"
   [[ -n "${REALITY_SNI}" ]] || die "无法从当前安装中识别 REALITY SNI。"
@@ -1066,7 +1087,7 @@ load_current_install_context() {
 install_packages() {
   log "正在安装依赖包。"
   apt-get update
-  apt-get install -y ca-certificates curl gnupg haproxy iproute2 jq kmod openssl unzip uuid-runtime
+  apt-get install -y ca-certificates curl gnupg nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin
 }
 
 install_xray() {
@@ -1094,6 +1115,14 @@ install_xray() {
   fi
 
   rm -rf "${tmp_dir}"
+}
+
+ensure_xray_bind_capability() {
+  if command -v setcap >/dev/null 2>&1; then
+    setcap cap_net_bind_service=+ep "${XRAY_BIN}" || die "为 Xray 二进制设置 CAP_NET_BIND_SERVICE 失败。"
+  else
+    warn "系统中未找到 setcap，Xray 可能无法以普通用户绑定 443。"
+  fi
 }
 
 ensure_managed_permissions() {
@@ -1188,6 +1217,27 @@ generate_reality_keys_if_needed() {
   [[ -n "${REALITY_PUBLIC_KEY}" ]] || die "生成 REALITY 公钥失败。"
 }
 
+generate_xhttp_vless_encryption_if_needed() {
+  local enc_output=""
+
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" != "yes" ]]; then
+    XHTTP_VLESS_DECRYPTION=""
+    XHTTP_VLESS_ENCRYPTION=""
+    return
+  fi
+
+  if [[ -n "${XHTTP_VLESS_DECRYPTION}" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    return
+  fi
+
+  enc_output="$("${XRAY_BIN}" vlessenc)"
+  XHTTP_VLESS_DECRYPTION="$(printf '%s\n' "${enc_output}" | awk -F'"' '/"decryption":/ {print $4; exit}')"
+  XHTTP_VLESS_ENCRYPTION="$(printf '%s\n' "${enc_output}" | awk -F'"' '/"encryption":/ {print $4; exit}')"
+
+  [[ -n "${XHTTP_VLESS_DECRYPTION}" ]] || die "生成 XHTTP 的 VLESS decryption 失败。"
+  [[ -n "${XHTTP_VLESS_ENCRYPTION}" ]] || die "生成 XHTTP 的 VLESS encryption 失败。"
+}
+
 prepare_install_inputs() {
   local guessed_ip=""
 
@@ -1197,11 +1247,24 @@ prepare_install_inputs() {
   prompt_with_default NODE_LABEL_PREFIX "导出链接使用的节点名前缀" "$(default_node_label_prefix)"
   prompt_with_default REALITY_UUID "REALITY UUID" "$(random_uuid)"
   prompt_with_default REALITY_SNI "REALITY 可见 SNI" "${DEFAULT_REALITY_SNI}"
-  prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "${REALITY_SNI}:443"
+  REALITY_TARGET="127.0.0.1:${NGINX_FALLBACK_PORT}"
   prompt_with_default REALITY_SHORT_ID "REALITY 短 ID" "$(random_hex 8)"
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" ""
   prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
+  prompt_yes_no XHTTP_VLESS_ENCRYPTION_ENABLED "是否启用 XHTTP CDN 的 VLESS Encryption？ [y/n]" "y"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="$(printf '%s' "${XHTTP_VLESS_ENCRYPTION_ENABLED}" | tr 'A-Z' 'a-z')"
+  case "${XHTTP_VLESS_ENCRYPTION_ENABLED}" in
+    y|yes)
+      XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+      ;;
+    n|no)
+      XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+      ;;
+    *)
+      die "XHTTP_VLESS_ENCRYPTION_ENABLED 只能是 yes 或 no。"
+      ;;
+  esac
   prompt_with_default CERT_MODE "TLS 证书模式（自签名/self-signed，现有证书/existing，Cloudflare Origin CA/cf-origin-ca，ACME DNS/acme-dns-cf）" "self-signed"
   CERT_MODE="$(normalize_cert_mode "${CERT_MODE}")"
 
@@ -1429,7 +1492,7 @@ if [[ -f "${TLS_CERT_FILE}" && -f "${TLS_KEY_FILE}" ]]; then
 fi
 
 systemctl restart xray >/dev/null 2>&1 || true
-systemctl restart haproxy >/dev/null 2>&1 || true
+systemctl restart nginx >/dev/null 2>&1 || true
 EOF
 
   backup_path "${ACME_RELOAD_HELPER}"
@@ -1714,6 +1777,7 @@ install_network_optimization() {
 
 write_xray_config() {
   backup_path "${XRAY_CONFIG_FILE}"
+  generate_xhttp_vless_encryption_if_needed
 
   if [[ "${ENABLE_WARP}" == "yes" ]]; then
     cat > "${XRAY_CONFIG_FILE}" <<EOF
@@ -1726,8 +1790,8 @@ write_xray_config() {
   "inbounds": [
     {
       "tag": "reality-vision",
-      "listen": "127.0.0.1",
-      "port": 2443,
+      "listen": "0.0.0.0",
+      "port": 443,
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -1737,14 +1801,21 @@ write_xray_config() {
             "email": "reality-vision"
           }
         ],
-        "decryption": "none"
+        "decryption": "none",
+        "fallbacks": [
+          {
+            "dest": "${XHTTP_LOCAL_PORT}",
+            "xver": 0
+          }
+        ]
       },
       "streamSettings": {
         "network": "raw",
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": "${REALITY_TARGET}",
+          "target": "127.0.0.1:${NGINX_FALLBACK_PORT}",
+          "xver": 0,
           "serverNames": [
             "${REALITY_SNI}"
           ],
@@ -1753,12 +1824,22 @@ write_xray_config() {
             "${REALITY_SHORT_ID}"
           ]
         }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "metadataOnly": false,
+        "routeOnly": true
       }
     },
     {
       "tag": "xhttp-cdn",
       "listen": "127.0.0.1",
-      "port": 3443,
+      "port": ${XHTTP_LOCAL_PORT},
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -1767,28 +1848,25 @@ write_xray_config() {
             "email": "xhttp-cdn"
           }
         ],
-        "decryption": "none"
+        "decryption": "${XHTTP_VLESS_DECRYPTION:-none}"
       },
       "streamSettings": {
         "network": "xhttp",
-        "security": "tls",
-        "tlsSettings": {
-          "minVersion": "1.2",
-          "alpn": [
-            "${TLS_ALPN}",
-            "http/1.1"
-          ],
-          "rejectUnknownSni": true,
-          "certificates": [
-            {
-              "certificateFile": "${TLS_CERT_FILE}",
-              "keyFile": "${TLS_KEY_FILE}"
-            }
-          ]
-        },
         "xhttpSettings": {
-          "path": "${XHTTP_PATH}"
+          "host": "",
+          "path": "${XHTTP_PATH}",
+          "mode": "auto"
         }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "metadataOnly": false,
+        "routeOnly": true
       }
     }
   ],
@@ -1874,8 +1952,8 @@ EOF
   "inbounds": [
     {
       "tag": "reality-vision",
-      "listen": "127.0.0.1",
-      "port": 2443,
+      "listen": "0.0.0.0",
+      "port": 443,
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -1885,14 +1963,21 @@ EOF
             "email": "reality-vision"
           }
         ],
-        "decryption": "none"
+        "decryption": "none",
+        "fallbacks": [
+          {
+            "dest": "${XHTTP_LOCAL_PORT}",
+            "xver": 0
+          }
+        ]
       },
       "streamSettings": {
         "network": "raw",
         "security": "reality",
         "realitySettings": {
           "show": false,
-          "target": "${REALITY_TARGET}",
+          "target": "127.0.0.1:${NGINX_FALLBACK_PORT}",
+          "xver": 0,
           "serverNames": [
             "${REALITY_SNI}"
           ],
@@ -1901,12 +1986,22 @@ EOF
             "${REALITY_SHORT_ID}"
           ]
         }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "metadataOnly": false,
+        "routeOnly": true
       }
     },
     {
       "tag": "xhttp-cdn",
       "listen": "127.0.0.1",
-      "port": 3443,
+      "port": ${XHTTP_LOCAL_PORT},
       "protocol": "vless",
       "settings": {
         "clients": [
@@ -1915,28 +2010,25 @@ EOF
             "email": "xhttp-cdn"
           }
         ],
-        "decryption": "none"
+        "decryption": "${XHTTP_VLESS_DECRYPTION:-none}"
       },
       "streamSettings": {
         "network": "xhttp",
-        "security": "tls",
-        "tlsSettings": {
-          "minVersion": "1.2",
-          "alpn": [
-            "${TLS_ALPN}",
-            "http/1.1"
-          ],
-          "rejectUnknownSni": true,
-          "certificates": [
-            {
-              "certificateFile": "${TLS_CERT_FILE}",
-              "keyFile": "${TLS_KEY_FILE}"
-            }
-          ]
-        },
         "xhttpSettings": {
-          "path": "${XHTTP_PATH}"
+          "host": "",
+          "path": "${XHTTP_PATH}",
+          "mode": "auto"
         }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "metadataOnly": false,
+        "routeOnly": true
       }
     }
   ],
@@ -1961,47 +2053,53 @@ EOF
   ensure_managed_permissions
 }
 
-write_haproxy_config() {
-  backup_path "${HAPROXY_CONFIG}"
+write_nginx_config() {
+  mkdir -p "${NGINX_CONF_DIR}"
+  backup_path "${NGINX_CONFIG_FILE}"
 
-  cat > "${HAPROXY_CONFIG}" <<EOF
-global
-    log /dev/log local0
-    log /dev/log local1 notice
-    daemon
-    user haproxy
-    group haproxy
-    maxconn 20000
+  cat > "${NGINX_CONFIG_FILE}" <<EOF
+server {
+    listen 127.0.0.1:${NGINX_FALLBACK_PORT} ssl http2;
+    server_name ${REALITY_SNI};
 
-defaults
-    log global
-    mode tcp
-    option tcplog
-    timeout connect 5s
-    timeout client 2m
-    timeout server 2m
+    ssl_certificate ${TLS_CERT_FILE};
+    ssl_certificate_key ${TLS_KEY_FILE};
 
-frontend fe_tls_shared_443
-    bind :443
-    mode tcp
-    tcp-request inspect-delay 5s
-    tcp-request content accept if { req.ssl_hello_type 1 }
+    location / {
+        proxy_pass https://www.stanford.edu;
+        proxy_set_header Host www.stanford.edu;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
+    }
+}
 
-    use_backend be_xhttp_cdn if { req.ssl_sni -i ${XHTTP_DOMAIN} }
-    use_backend be_reality_vision if { req.ssl_sni -i ${REALITY_SNI} }
-    default_backend be_reject
+server {
+    listen 127.0.0.1:${NGINX_FALLBACK_PORT} ssl http2;
+    server_name ${XHTTP_DOMAIN};
 
-backend be_xhttp_cdn
-    mode tcp
-    server xhttp_cdn 127.0.0.1:3443 check
+    ssl_certificate ${TLS_CERT_FILE};
+    ssl_certificate_key ${TLS_KEY_FILE};
 
-backend be_reality_vision
-    mode tcp
-    server reality_vision 127.0.0.1:2443 check
+    location / {
+        proxy_pass https://www.harvard.edu;
+        proxy_set_header Host www.harvard.edu;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
+    }
 
-backend be_reject
-    mode tcp
-    server blackhole 127.0.0.1:9
+    location ${XHTTP_PATH} {
+        grpc_pass 127.0.0.1:${XHTTP_LOCAL_PORT};
+        grpc_set_header Host \$host;
+        grpc_set_header X-Real-IP \$remote_addr;
+        grpc_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        grpc_set_header X-Forwarded-Proto \$scheme;
+        grpc_set_header X-Forwarded-Host \$host;
+    }
+}
 EOF
 }
 
@@ -2020,6 +2118,8 @@ Type=simple
 User=xray
 Group=xray
 Environment=XRAY_LOCATION_ASSET=${XRAY_ASSET_DIR}
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG_FILE}
 Restart=on-failure
 RestartSec=5s
@@ -2028,6 +2128,12 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+
+retire_haproxy_if_present() {
+  if service_exists "haproxy.service"; then
+    systemctl disable --now haproxy >/dev/null 2>&1 || systemctl stop haproxy >/dev/null 2>&1 || true
+  fi
 }
 
 install_warp() {
@@ -2119,8 +2225,8 @@ validate_configs() {
   log "正在校验 Xray 配置。"
   "${XRAY_BIN}" run -test -config "${XRAY_CONFIG_FILE}"
 
-  log "正在校验 HAProxy 配置。"
-  haproxy -c -f "${HAPROXY_CONFIG}"
+  log "正在校验 Nginx 配置。"
+  nginx -t
 }
 
 restart_services() {
@@ -2128,9 +2234,9 @@ restart_services() {
   ensure_managed_permissions
   systemctl daemon-reload
   systemctl enable --now xray
-  systemctl enable --now haproxy
+  systemctl enable --now nginx
   systemctl restart xray
-  systemctl restart haproxy
+  systemctl restart nginx
 
   if [[ "${ENABLE_WARP}" == "yes" ]]; then
     systemctl enable --now warp-svc
@@ -2141,7 +2247,7 @@ restart_core_services() {
   ensure_xray_user
   ensure_managed_permissions
   systemctl restart xray
-  systemctl restart haproxy
+  systemctl restart nginx
 }
 
 install_self_command() {
@@ -2168,7 +2274,7 @@ cleanup_previous_acme_cert() {
 apply_managed_update() {
   write_tls_assets
   write_xray_config
-  write_haproxy_config
+  write_nginx_config
   validate_configs
   restart_core_services
   write_state_file
@@ -2177,7 +2283,7 @@ apply_managed_update() {
 
 apply_managed_runtime_update() {
   write_xray_config
-  write_haproxy_config
+  write_nginx_config
   validate_configs
   restart_core_services
   write_state_file
@@ -2196,6 +2302,7 @@ upgrade_cmd() {
   backup_path "${XRAY_ASSET_DIR}"
 
   install_xray
+  ensure_xray_bind_capability
   validate_configs
   systemctl restart xray
 
@@ -2242,6 +2349,9 @@ REALITY_PUBLIC_KEY='${REALITY_PUBLIC_KEY}'
 XHTTP_UUID='${XHTTP_UUID}'
 XHTTP_DOMAIN='${XHTTP_DOMAIN}'
 XHTTP_PATH='${XHTTP_PATH}'
+XHTTP_VLESS_ENCRYPTION_ENABLED='${XHTTP_VLESS_ENCRYPTION_ENABLED}'
+XHTTP_VLESS_DECRYPTION='${XHTTP_VLESS_DECRYPTION}'
+XHTTP_VLESS_ENCRYPTION='${XHTTP_VLESS_ENCRYPTION}'
 TLS_ALPN='${TLS_ALPN}'
 FINGERPRINT='${FINGERPRINT}'
 ENABLE_WARP='${ENABLE_WARP}'
@@ -2266,23 +2376,74 @@ EOF
 write_output_file() {
   local xhttp_path_component=""
   local xhttp_ech_component=""
+  local xhttp_vlessenc_component=""
   local cf_ssl_mode="Full (strict)"
   local reality_label=""
   local xhttp_label=""
+  local xhttp_split_label=""
   local xhttp_uri=""
+  local xhttp_split_uri=""
+  local xhttp_encryption_value="none"
+  local split_extra_json=""
+  local split_extra_component=""
 
   xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
   xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
+  xhttp_vlessenc_component="$(uri_encode "${XHTTP_VLESS_ENCRYPTION}")"
   reality_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-REALITY"
   xhttp_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-XHTTP-CDN"
+  xhttp_split_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-XHTTP-SPLIT-CDN-REALITY"
 
   if [[ "${CERT_MODE}" == "self-signed" ]]; then
     cf_ssl_mode="Full"
   fi
 
-  xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    xhttp_encryption_value="${xhttp_vlessenc_component}"
+  fi
+
+  xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_encryption_value}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_vlessenc_component}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
+  fi
   if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
-    xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=stream-one&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
+    xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
+    if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+      xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_vlessenc_component}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
+    fi
+  fi
+
+  split_extra_json="$(jq -cn \
+    --arg address "${SERVER_IP}" \
+    --arg server_name "${REALITY_SNI}" \
+    --arg fingerprint "${FINGERPRINT}" \
+    --arg short_id "${REALITY_SHORT_ID}" \
+    --arg public_key "${REALITY_PUBLIC_KEY}" \
+    --arg path "${XHTTP_PATH}" \
+    '{
+      downloadSettings: {
+        address: $address,
+        port: 443,
+        network: "xhttp",
+        security: "reality",
+        realitySettings: {
+          show: false,
+          serverName: $server_name,
+          fingerprint: $fingerprint,
+          shortId: $short_id,
+          publicKey: $public_key
+        },
+        xhttpSettings: {
+          host: "",
+          path: $path,
+          mode: "auto"
+        }
+      }
+    }')"
+  split_extra_component="$(uri_encode "${split_extra_json}")"
+  xhttp_split_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_encryption_value}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}&extra=${split_extra_component}#${xhttp_split_label}"
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    xhttp_split_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_vlessenc_component}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}&extra=${split_extra_component}#${xhttp_split_label}"
   fi
 
   cat > "${OUTPUT_FILE}" <<EOF
@@ -2312,12 +2473,25 @@ vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&s
 - 主机名: ${XHTTP_DOMAIN}
 - ALPN: ${TLS_ALPN}
 - 路径: ${XHTTP_PATH}
-- 模式: stream-one
+- 模式: auto
 - 指纹: ${FINGERPRINT}
-- ECH: $(if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then printf '已启用'; else printf '未启用'; fi)
+- VLESS Encryption: $(if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then printf '已启用'; else printf '未启用'; fi)
 
 链接:
 ${xhttp_uri}
+
+## 节点 3
+- 类型: 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality
+- 地址: ${XHTTP_DOMAIN}
+- 端口: 443
+- UUID: ${XHTTP_UUID}
+- 上行: XHTTP + TLS + CDN
+- 下行: XHTTP + Reality
+- 路径: ${XHTTP_PATH}
+- VLESS Encryption: $(if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then printf '已启用'; else printf '未启用'; fi)
+
+链接:
+${xhttp_split_uri}
 
 ## Cloudflare DNS 设置
 - 请将 ${XHTTP_DOMAIN} 解析到此服务器 IP。
@@ -2326,7 +2500,7 @@ ${xhttp_uri}
 
 ## 本地文件
 - Xray 配置: ${XRAY_CONFIG_FILE}
-- HAProxy 配置: ${HAPROXY_CONFIG}
+- Nginx 配置: ${NGINX_CONFIG_FILE}
 - 安装状态文件: ${STATE_FILE}
 - 链接输出文件: ${OUTPUT_FILE}
 
@@ -2338,7 +2512,11 @@ ${xhttp_uri}
 - 已启用: $(if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then printf '是'; else printf '否'; fi)
 - DoH / ECH 查询: ${XHTTP_ECH_CONFIG_LIST:-未设置}
 - 强制查询模式: ${XHTTP_ECH_FORCE_QUERY:-未设置}
-- 说明: 默认不启用 ECH，导出的 XHTTP 分享链接也不会带 ech= 参数，避免额外的 DNS / DoH 查询。
+- 说明: 默认不启用 ECH，导出的两个 XHTTP 节点分享链接也不会带 ech= 参数，避免额外的 DNS / DoH 查询。
+
+## XHTTP VLESS Encryption
+- 已启用: $(if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then printf '是'; else printf '否'; fi)
+- 说明: 默认开启，用于给 XHTTP 相关节点增加一层 VLESS 端到端加密。
 
 ## 网络优化
 - 已启用: ${ENABLE_NET_OPT}
@@ -2409,17 +2587,13 @@ change_uuid_cmd() {
 
 change_sni_cmd() {
   local old_reality_sni=""
-  local old_reality_target=""
-  local target_default=""
   local sni_overridden=0
-  local target_overridden=0
 
   need_root
   start_backup_session
   load_current_install_context
 
   old_reality_sni="${REALITY_SNI}"
-  old_reality_target="${REALITY_TARGET}"
 
   while [[ $# -gt 0 ]]; do
     case "${1}" in
@@ -2429,11 +2603,6 @@ change_sni_cmd() {
       --reality-sni)
         REALITY_SNI="${2}"
         sni_overridden=1
-        shift
-        ;;
-      --reality-target)
-        REALITY_TARGET="${2}"
-        target_overridden=1
         shift
         ;;
       --help|-h|help)
@@ -2451,16 +2620,7 @@ change_sni_cmd() {
     REALITY_SNI=""
     prompt_with_default REALITY_SNI "新的 REALITY 可见 SNI" "${old_reality_sni}"
   fi
-
-  if [[ "${target_overridden}" -eq 0 ]]; then
-    REALITY_TARGET=""
-    if [[ "${old_reality_target}" == "$(default_reality_target_for_sni "${old_reality_sni}")" ]]; then
-      target_default="$(default_reality_target_for_sni "${REALITY_SNI}")"
-    else
-      target_default="${old_reality_target}"
-    fi
-    prompt_with_default REALITY_TARGET "新的 REALITY 目标地址 host:port" "${target_default}"
-  fi
+  REALITY_TARGET="127.0.0.1:${NGINX_FALLBACK_PORT}"
 
   apply_managed_runtime_update
   log "REALITY SNI 已更新。"
@@ -2763,7 +2923,7 @@ show_links() {
 }
 
 status_raw_cmd() {
-  systemctl --no-pager --full status xray haproxy warp-svc "${NET_SERVICE_NAME}" 2>/dev/null || true
+  systemctl --no-pager --full status xray nginx warp-svc "${NET_SERVICE_NAME}" 2>/dev/null || true
 }
 
 status_cmd() {
@@ -2797,8 +2957,8 @@ restart_cmd() {
   if service_exists "xray.service"; then
     systemctl restart xray
   fi
-  if service_exists "haproxy.service"; then
-    systemctl restart haproxy
+  if service_exists "nginx.service"; then
+    systemctl restart nginx
   fi
   if service_exists "warp-svc.service"; then
     systemctl restart warp-svc || true
@@ -2814,8 +2974,8 @@ repair_perms_cmd() {
   ensure_xray_user
   ensure_managed_permissions
   systemctl daemon-reload
-  systemctl restart xray haproxy >/dev/null 2>&1 || true
-  log "已修复脚本托管文件权限，并尝试重启 xray 与 haproxy。"
+  systemctl restart xray nginx >/dev/null 2>&1 || true
+  log "已修复脚本托管文件权限，并尝试重启 xray 与 nginx。"
 }
 
 uninstall_cmd() {
@@ -2851,7 +3011,7 @@ uninstall_cmd() {
   fi
 
   stop_and_disable_service_if_present "xray.service"
-  stop_and_disable_service_if_present "haproxy.service"
+  stop_and_disable_service_if_present "nginx.service"
   stop_and_disable_service_if_present "warp-svc.service"
   stop_and_disable_service_if_present "${NET_SERVICE_NAME}"
 
@@ -2865,7 +3025,7 @@ uninstall_cmd() {
     "${XRAY_CONFIG_DIR}" \
     "${XRAY_ASSET_DIR}" \
     "${XRAY_SERVICE_FILE}" \
-    "${HAPROXY_CONFIG}" \
+    "${NGINX_CONFIG_FILE}" \
     "${SSL_DIR}" \
     "${WARP_MDM_FILE}" \
     "${NET_SYSCTL_CONF}" \
@@ -2877,7 +3037,7 @@ uninstall_cmd() {
     "/var/lib/xray"
 
   systemctl daemon-reload
-  systemctl reset-failed xray.service haproxy.service warp-svc.service "${NET_SERVICE_NAME}" >/dev/null 2>&1 || true
+  systemctl reset-failed xray.service nginx.service warp-svc.service "${NET_SERVICE_NAME}" >/dev/null 2>&1 || true
   sysctl --system >/dev/null 2>&1 || true
 
   log "脚本托管文件已删除。"
@@ -2984,6 +3144,12 @@ parse_install_args() {
         XHTTP_PATH="${2}"
         shift
         ;;
+      --enable-xhttp-vless-encryption)
+        XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+        ;;
+      --disable-xhttp-vless-encryption)
+        XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+        ;;
       --cert-mode)
         CERT_MODE="${2}"
         shift
@@ -3087,14 +3253,16 @@ install_cmd() {
   install_packages
   install_self_command
   install_xray
+  ensure_xray_bind_capability
   ensure_xray_user
   generate_reality_keys_if_needed
   write_tls_assets
   write_xray_config
-  write_haproxy_config
+  write_nginx_config
   write_xray_service
   install_network_optimization
   install_warp
+  retire_haproxy_if_present
   validate_configs
   restart_services
   write_state_file
