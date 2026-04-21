@@ -94,9 +94,75 @@ decode_simple_shell_word() {
 
 decode_ansi_c_shell_word() {
   local raw="${1}"
+  local content="${raw:2:${#raw}-3}"
   local decoded=""
+  local char=""
+  local next_char=""
+  local seq=""
+  local decoded_char=""
+  local index=0
+  local max_index=0
+  local hex=""
+  local octal=""
 
-  eval "decoded=${raw}"
+  max_index="${#content}"
+  while [[ "${index}" -lt "${max_index}" ]]; do
+    char="${content:index:1}"
+    if [[ "${char}" != '\' || $((index + 1)) -ge "${max_index}" ]]; then
+      decoded+="${char}"
+      index=$((index + 1))
+      continue
+    fi
+
+    next_char="${content:index+1:1}"
+    case "${next_char}" in
+      a) decoded+=$'\a'; index=$((index + 2)) ;;
+      b) decoded+=$'\b'; index=$((index + 2)) ;;
+      e|E) decoded+=$'\033'; index=$((index + 2)) ;;
+      f) decoded+=$'\f'; index=$((index + 2)) ;;
+      n) decoded+=$'\n'; index=$((index + 2)) ;;
+      r) decoded+=$'\r'; index=$((index + 2)) ;;
+      t) decoded+=$'\t'; index=$((index + 2)) ;;
+      v) decoded+=$'\v'; index=$((index + 2)) ;;
+      \\) decoded+='\'; index=$((index + 2)) ;;
+      \') decoded+="'"; index=$((index + 2)) ;;
+      \") decoded+='"'; index=$((index + 2)) ;;
+      x)
+        hex=""
+        if [[ $((index + 2)) -lt "${max_index}" && "${content:index+2:1}" =~ [[:xdigit:]] ]]; then
+          hex+="${content:index+2:1}"
+        fi
+        if [[ $((index + 3)) -lt "${max_index}" && "${content:index+3:1}" =~ [[:xdigit:]] ]]; then
+          hex+="${content:index+3:1}"
+        fi
+        if [[ -n "${hex}" ]]; then
+          printf -v decoded_char '%b' "\\x${hex}"
+          decoded+="${decoded_char}"
+          index=$((index + 2 + ${#hex}))
+        else
+          decoded+='x'
+          index=$((index + 2))
+        fi
+        ;;
+      [0-7])
+        octal="${next_char}"
+        if [[ $((index + 2)) -lt "${max_index}" && "${content:index+2:1}" =~ [0-7] ]]; then
+          octal+="${content:index+2:1}"
+        fi
+        if [[ $((index + 3)) -lt "${max_index}" && "${content:index+3:1}" =~ [0-7] ]]; then
+          octal+="${content:index+3:1}"
+        fi
+        printf -v decoded_char '%b' "\\${octal}"
+        decoded+="${decoded_char}"
+        index=$((index + 1 + ${#octal}))
+        ;;
+      *)
+        decoded+="${next_char}"
+        index=$((index + 2))
+        ;;
+    esac
+  done
+
   printf '%s' "${decoded}"
 }
 

@@ -206,12 +206,14 @@ STATE_VERSION=1
 WARP_CLIENT_SECRET=sec\'ret\ 0\ \[\]
 XHTTP_ECH_CONFIG_LIST=$'line1\nline2'
 WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
+WARP_TEAM_NAME=$'tab\tbackslash\\done'
 EOF
 
   load_existing_state
   [[ "${WARP_CLIENT_SECRET}" == "sec'ret 0 []" ]]
   [[ "${XHTTP_ECH_CONFIG_LIST}" == $'line1\nline2' ]]
   [[ "${WARP_RULES_TEXT}" == $'geosite:google\ndomain:github.com' ]]
+  [[ "${WARP_TEAM_NAME}" == $'tab\tbackslash\\done' ]]
 }
 
 run_runtime_context_reset_case() {
