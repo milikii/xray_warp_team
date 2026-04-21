@@ -28,6 +28,18 @@ EOF
   [[ "${output}" == "vless://example-link" ]]
 }
 
+run_single_file_bootstrap_case() {
+  local workdir=""
+  local output=""
+
+  workdir="$(mktemp -d)"
+  cp "${ROOT_DIR}/xray-warp-team.sh" "${workdir}/xray-warp-team.sh"
+
+  output="$(XRAY_WARP_TEAM_BOOTSTRAP_ROOT="${ROOT_DIR}" bash "${workdir}/xray-warp-team.sh" help)"
+  [[ "${output}" == *$'\n  xray-warp-team.sh help'* ]]
+  [[ "${output}" == *$'\n  xray-warp-team.sh diagnose'* ]]
+}
+
 run_install_self_command_case() {
   local workdir=""
   local output=""

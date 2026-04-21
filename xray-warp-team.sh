@@ -16,6 +16,59 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
+SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xray-warp-team"
+BOOTSTRAP_SELF_INSTALL_DIR="${XRAY_WARP_TEAM_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
+BOOTSTRAP_ARCHIVE_URL="${XRAY_WARP_TEAM_BOOTSTRAP_ARCHIVE_URL:-https://codeload.github.com/milikii/xray_warp_team/tar.gz/main}"
+
+bootstrap_die() {
+  printf '[错误] %s\n' "$*" >&2
+  exit 1
+}
+
+bundle_root_ready() {
+  local root_path="${1}"
+  [[ -n "${root_path}" && -f "${root_path}/xray-warp-team.sh" && -f "${root_path}/lib/base/helpers.sh" ]]
+}
+
+exec_bundle_root() {
+  local bundle_root="${1}"
+  shift
+
+  exec env \
+    ROOT_DIR="${bundle_root}" \
+    XRAY_WARP_TEAM_COMMAND_NAME="${XRAY_WARP_TEAM_COMMAND_NAME:-$(basename "$0")}" \
+    bash "${bundle_root}/xray-warp-team.sh" "$@"
+}
+
+bootstrap_script_root_if_needed() {
+  local bundle_root=""
+  local tmp_dir=""
+  local archive_path=""
+
+  bundle_root_ready "${SCRIPT_ROOT}" && return 0
+
+  if bundle_root_ready "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT:-}"; then
+    exec_bundle_root "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT}" "$@"
+  fi
+
+  if bundle_root_ready "${BOOTSTRAP_SELF_INSTALL_DIR}"; then
+    exec_bundle_root "${BOOTSTRAP_SELF_INSTALL_DIR}" "$@"
+  fi
+
+  command -v curl >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 curl，无法自动拉取脚本 bundle。"
+  command -v tar >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 tar，无法自动拉取脚本 bundle。"
+
+  tmp_dir="$(mktemp -d)"
+  archive_path="${tmp_dir}/xray-warp-team.tar.gz"
+  curl -fsSL "${BOOTSTRAP_ARCHIVE_URL}" -o "${archive_path}" || bootstrap_die "自动下载脚本 bundle 失败：${BOOTSTRAP_ARCHIVE_URL}"
+  tar -xzf "${archive_path}" -C "${tmp_dir}" || bootstrap_die "解压脚本 bundle 失败。"
+  bundle_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  bundle_root_ready "${bundle_root}" || bootstrap_die "下载的脚本 bundle 缺少必需文件。"
+  exec_bundle_root "${bundle_root}" "$@"
+}
+
+bootstrap_script_root_if_needed "$@"
+
 SCRIPT_VERSION="0.4.1"
 STATE_VERSION_CURRENT="1"
 DEFAULT_REALITY_SNI="www.scu.edu"
@@ -33,7 +86,7 @@ XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_ASSET_DIR="/usr/local/share/xray"
 XRAY_SERVICE_FILE="/etc/systemd/system/xray.service"
 SELF_COMMAND_PATH="/usr/local/sbin/xray-warp-team"
-SELF_INSTALL_DIR="/usr/local/lib/xray-warp-team"
+SELF_INSTALL_DIR="${BOOTSTRAP_SELF_INSTALL_DIR}"
 HAPROXY_CONFIG="/etc/haproxy/haproxy.cfg"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
 NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"

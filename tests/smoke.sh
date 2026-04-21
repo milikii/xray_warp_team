@@ -23,6 +23,7 @@ main() {
   run_runtime_context_reset_case
   run_usage_case
   run_show_links_without_state_case
+  run_single_file_bootstrap_case
   run_install_self_command_case
   run_value_source_case
   run_install_validation_case
