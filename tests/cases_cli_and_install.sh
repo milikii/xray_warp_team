@@ -263,6 +263,23 @@ EOF
   printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验未通过'
 }
 
+run_warp_rule_normalize_case() {
+  local output=""
+
+  output="$(normalize_warp_rules_text $' chat.openai.com \n# comment\ngeosite:google\ndomain:chat.openai.com\n')"
+  [[ "${output}" == $'domain:chat.openai.com\ngeosite:google' ]]
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+normalize_warp_rules_text \$'bad rule with space'
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'WARP 分流规则不能包含空白字符'
+}
+
 run_cert_mode_input_case() {
   NON_INTERACTIVE=1
 

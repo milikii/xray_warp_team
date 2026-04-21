@@ -19,6 +19,7 @@ write_warp_mdm_file() {
   local escaped_client_id=""
   local escaped_client_secret=""
   local escaped_team_name=""
+  local tmp_file=""
 
   ensure_warp_proxy_port_format
   mkdir -p /var/lib/cloudflare-warp
@@ -26,7 +27,8 @@ write_warp_mdm_file() {
   escaped_client_id="$(xml_escape "${WARP_CLIENT_ID}")"
   escaped_client_secret="$(xml_escape "${WARP_CLIENT_SECRET}")"
   escaped_team_name="$(xml_escape "${WARP_TEAM_NAME}")"
-  cat > "${WARP_MDM_FILE}" <<EOF
+  tmp_file="$(mktemp "$(dirname "${WARP_MDM_FILE}")/.mdm.xml.tmp.XXXXXX")"
+  cat > "${tmp_file}" <<EOF
 <dict>
     <key>auth_client_id</key>
     <string>${escaped_client_id}</string>
@@ -47,23 +49,30 @@ write_warp_mdm_file() {
 </dict>
 EOF
 
-  chmod 0600 "${WARP_MDM_FILE}"
+  chmod 0600 "${tmp_file}"
+  mv -f "${tmp_file}" "${WARP_MDM_FILE}"
 }
 
 install_warp_apt_repo() {
   local repo_codename="${1}"
   local key_tmp=""
+  local keyring_tmp=""
+  local source_tmp=""
 
   key_tmp="$(mktemp)"
+  keyring_tmp="$(mktemp "$(dirname "${WARP_APT_KEYRING}")/.cloudflare-warp-archive-keyring.gpg.tmp.XXXXXX")"
+  source_tmp="$(mktemp "$(dirname "${WARP_APT_SOURCE_LIST}")/.cloudflare-client.list.tmp.XXXXXX")"
   backup_path "${WARP_APT_KEYRING}"
   backup_path "${WARP_APT_SOURCE_LIST}"
   curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o "${key_tmp}"
-  gpg --yes --dearmor --output "${WARP_APT_KEYRING}" "${key_tmp}"
+  gpg --yes --dearmor --output "${keyring_tmp}" "${key_tmp}"
   rm -f "${key_tmp}"
 
-  cat > "${WARP_APT_SOURCE_LIST}" <<EOF
+  cat > "${source_tmp}" <<EOF
 deb [signed-by=${WARP_APT_KEYRING}] https://pkg.cloudflareclient.com/ ${repo_codename} main
 EOF
+  mv -f "${keyring_tmp}" "${WARP_APT_KEYRING}"
+  mv -f "${source_tmp}" "${WARP_APT_SOURCE_LIST}"
 
   apt-get update
   apt-get install -y cloudflare-warp

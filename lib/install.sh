@@ -408,21 +408,23 @@ normalize_warp_rule_value() {
 normalize_warp_rules_text() {
   local input_text="${1:-}"
   local line=""
+  local normalized_line=""
   local seen=""
 
   while IFS= read -r line; do
     line="$(printf '%s' "${line}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
     [[ -n "${line}" ]] || continue
     [[ "${line}" != \#* ]] || continue
+    normalized_line="$(normalize_warp_rule_value "${line}")"
 
     case $'\n'"${seen}" in
-      *$'\n'"${line}"$'\n'*)
+      *$'\n'"${normalized_line}"$'\n'*)
         continue
         ;;
     esac
 
-    seen+="${line}"$'\n'
-    printf '%s\n' "${line}"
+    seen+="${normalized_line}"$'\n'
+    printf '%s\n' "${normalized_line}"
   done <<< "${input_text}"
 }
 
@@ -638,6 +640,7 @@ install_self_command() {
   local target_entry="${SELF_INSTALL_DIR}/xray-warp-team.sh"
   local staging_dir=""
   local source_bundle_root=""
+  local wrapper_tmp=""
 
   if [[ ! -f "${source_path}" ]]; then
     warn "无法写入持久化管理命令，因为当前脚本路径不可用。"
@@ -666,12 +669,14 @@ install_self_command() {
   cp -a "${source_bundle_root}/lib" "${SELF_INSTALL_DIR}/lib"
   [[ -n "${staging_dir}" ]] && rm -rf "${staging_dir}"
 
-  cat > "${SELF_COMMAND_PATH}" <<EOF
+  wrapper_tmp="$(mktemp)"
+  cat > "${wrapper_tmp}" <<EOF
 #!/usr/bin/env bash
 export XRAY_WARP_TEAM_COMMAND_NAME="\$(basename "\$0")"
 exec "${target_entry}" "\$@"
 EOF
-  chmod 0755 "${SELF_COMMAND_PATH}"
+  install -m 0755 "${wrapper_tmp}" "${SELF_COMMAND_PATH}"
+  rm -f "${wrapper_tmp}"
 }
 
 . "${SCRIPT_ROOT}/lib/install/certs.sh"

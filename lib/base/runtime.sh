@@ -6,9 +6,10 @@
 # ------------------------------
 
 write_xray_service() {
-  backup_path "${XRAY_SERVICE_FILE}"
+  local tmp_file=""
 
-  cat > "${XRAY_SERVICE_FILE}" <<EOF
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
 [Unit]
 Description=Xray Service
 Documentation=https://github.com/XTLS/Xray-core
@@ -34,6 +35,10 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
+
+  backup_path "${XRAY_SERVICE_FILE}"
+  install -m 0644 "${tmp_file}" "${XRAY_SERVICE_FILE}"
+  rm -f "${tmp_file}"
 }
 
 write_core_health_helper() {

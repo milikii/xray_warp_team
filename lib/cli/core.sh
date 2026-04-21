@@ -122,6 +122,7 @@ diagnose_cmd() {
   local warp_state=""
   local core_health_state=""
   local warp_health_state=""
+  local warp_exit_ip=""
   local -a service_failures=()
   local -a port_failures=()
   local -a config_failures=()
@@ -149,6 +150,7 @@ diagnose_cmd() {
   warp_state="$(service_active_state 'warp-svc.service')"
   core_health_state="$(service_active_state "${CORE_HEALTH_TIMER_NAME}")"
   warp_health_state="$(service_active_state "${WARP_HEALTH_TIMER_NAME}")"
+  warp_exit_ip="$(warp_exit_ip_text)"
 
   printf '%s\n' "Xray WARP 诊断"
   printf '%s\n' "脚本版本: ${SCRIPT_VERSION}"
@@ -167,7 +169,7 @@ diagnose_cmd() {
   printf '%s\n' "HAProxy 配置: $(haproxy_config_check_text)"
   printf '%s\n' "本地 TLS 探测: $(local_tls_probe_text)"
   printf '%s\n' "证书到期: $(cert_expiry_text)"
-  printf '%s\n' "WARP 出口 IP: $(warp_exit_ip_text)"
+  printf '%s\n' "WARP 出口 IP: ${warp_exit_ip}"
   printf '%s\n' "核心自恢复: $(health_event_text CORE_HEALTH)"
   printf '%s\n' "WARP 自恢复: $(health_event_text WARP_HEALTH)"
   printf '%s\n' "最近恢复记录: $(latest_health_history_text)"
@@ -190,7 +192,7 @@ diagnose_cmd() {
   if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
     [[ "${warp_state}" == "active" ]] || warp_failures+=("warp-svc 未运行")
     [[ "${warp_health_state}" == "active" ]] || warp_failures+=("WARP 巡检未运行")
-    [[ "$(warp_exit_ip_text)" != 未探测* ]] || warp_failures+=("WARP 出口 IP 未探测成功")
+    [[ "${warp_exit_ip}" != 未探测* ]] || warp_failures+=("WARP 出口 IP 未探测成功")
   fi
 
   failures=$(( ${#service_failures[@]} + ${#port_failures[@]} + ${#config_failures[@]} + ${#tls_failures[@]} + ${#warp_failures[@]} ))

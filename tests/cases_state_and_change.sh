@@ -850,6 +850,9 @@ run_upgrade_command_case() {
 run_diagnose_command_case() {
   local output=""
   local status=0
+  local probe_file=""
+
+  probe_file="$(mktemp)"
 
   load_dashboard_context() { :; }
   service_active_state() {
@@ -873,7 +876,12 @@ run_diagnose_command_case() {
   haproxy_config_check_text() { printf '通过'; }
   local_tls_probe_text() { printf '通过'; }
   cert_expiry_text() { printf 'Jun  1 00:00:00 2026 GMT'; }
-  warp_exit_ip_text() { printf '203.0.113.99'; }
+  warp_exit_ip_text() {
+    local count=0
+    count="$(cat "${probe_file}" 2>/dev/null || printf '0')"
+    printf '%s' "$((count + 1))" > "${probe_file}"
+    printf '203.0.113.99'
+  }
   health_event_text() { printf 'ok'; }
   latest_health_history_text() { printf 'latest history'; }
 
@@ -881,8 +889,10 @@ run_diagnose_command_case() {
   printf '%s' "${output}" | grep -q 'Xray WARP 诊断'
   printf '%s' "${output}" | grep -q '监听 443: 运行中'
   printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
+  [[ "$(cat "${probe_file}")" == "1" ]]
 
   service_active_state() { printf 'failed'; }
+  printf '0' > "${probe_file}"
   set +e
   output="$(diagnose_cmd 2>&1)"
   status=$?
@@ -890,4 +900,5 @@ run_diagnose_command_case() {
   [[ "${status}" -ne 0 ]]
   printf '%s' "${output}" | grep -q '诊断摘要: 检测到'
   printf '%s' "${output}" | grep -q '服务: xray 未运行'
+  [[ "$(cat "${probe_file}")" == "1" ]]
 }
