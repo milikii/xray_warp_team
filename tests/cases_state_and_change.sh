@@ -201,15 +201,17 @@ run_state_file_decode_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
-  cat > "${STATE_FILE}" <<'EOF'
+cat > "${STATE_FILE}" <<'EOF'
 STATE_VERSION=1
 WARP_CLIENT_SECRET=sec\'ret\ 0\ \[\]
 XHTTP_ECH_CONFIG_LIST=$'line1\nline2'
+WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
 EOF
 
   load_existing_state
   [[ "${WARP_CLIENT_SECRET}" == "sec'ret 0 []" ]]
   [[ "${XHTTP_ECH_CONFIG_LIST}" == $'line1\nline2' ]]
+  [[ "${WARP_RULES_TEXT}" == $'geosite:google\ndomain:github.com' ]]
 }
 
 run_runtime_context_reset_case() {

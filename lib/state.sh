@@ -394,6 +394,7 @@ state_file_text() {
   write_state_kv "WARP_TEAM_NAME" "${WARP_TEAM_NAME}"
   write_state_kv "WARP_CLIENT_ID" "${WARP_CLIENT_ID}"
   write_state_kv "WARP_CLIENT_SECRET" "${WARP_CLIENT_SECRET}"
+  write_state_kv "WARP_RULES_TEXT" "${WARP_RULES_TEXT}"
   write_state_kv "CERT_MODE" "${CERT_MODE}"
   write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID}"
   write_state_kv "CF_CERT_VALIDITY" "${CF_CERT_VALIDITY}"
