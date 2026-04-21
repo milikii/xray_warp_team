@@ -134,6 +134,21 @@ ensure_managed_permissions() {
     chmod 0640 "${XRAY_CONFIG_FILE}"
   fi
 
+  if [[ -f "${WARP_RULES_FILE}" ]]; then
+    chown 0:"${XRAY_GID}" "${WARP_RULES_FILE}"
+    chmod 0640 "${WARP_RULES_FILE}"
+  fi
+
+  if [[ -f "${HEALTH_STATE_FILE}" ]]; then
+    chown 0:"${XRAY_GID}" "${HEALTH_STATE_FILE}"
+    chmod 0640 "${HEALTH_STATE_FILE}"
+  fi
+
+  if [[ -f "${HEALTH_HISTORY_FILE}" ]]; then
+    chown 0:"${XRAY_GID}" "${HEALTH_HISTORY_FILE}"
+    chmod 0640 "${HEALTH_HISTORY_FILE}"
+  fi
+
   if [[ -f "${TLS_CERT_FILE}" ]]; then
     chown 0:"${XRAY_GID}" "${TLS_CERT_FILE}"
     chmod 0640 "${TLS_CERT_FILE}"
@@ -327,10 +342,199 @@ validate_cert_mode_value() {
 }
 
 prompt_warp_settings() {
+  resolve_value_source WARP_TEAM_NAME
+  resolve_value_source WARP_CLIENT_ID
+  resolve_value_source WARP_CLIENT_SECRET
+  resolve_value_source WARP_PROXY_PORT
   prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust 团队名" "${WARP_TEAM_NAME:-}"
   prompt_with_default WARP_CLIENT_ID "Cloudflare 服务令牌 Client ID" "${WARP_CLIENT_ID:-}"
   prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
   prompt_with_default WARP_PROXY_PORT "本地 WARP SOCKS5 端口" "${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+}
+
+default_warp_rules_text() {
+  cat <<'EOF'
+geosite:google
+geosite:youtube
+geosite:openai
+geosite:netflix
+geosite:disney
+domain:gemini.google.com
+domain:claude.ai
+domain:anthropic.com
+domain:api.anthropic.com
+domain:console.anthropic.com
+domain:statsig.anthropic.com
+domain:sentry.io
+domain:x.com
+domain:twitter.com
+domain:t.co
+domain:twimg.com
+domain:github.com
+domain:api.github.com
+domain:githubcopilot.com
+domain:copilot-proxy.githubusercontent.com
+domain:origin-tracker.githubusercontent.com
+domain:copilot-telemetry.githubusercontent.com
+domain:collector.github.com
+domain:default.exp-tas.com
+EOF
+}
+
+normalize_warp_rule_value() {
+  local raw_value="${1:-}"
+  local trimmed=""
+
+  trimmed="$(printf '%s' "${raw_value}" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+  [[ -n "${trimmed}" ]] || die "WARP 分流规则不能为空。"
+  [[ "${trimmed}" != *[[:space:]]* ]] || die "WARP 分流规则不能包含空白字符：${trimmed}"
+
+  case "${trimmed}" in
+    domain:*)
+      validate_hostname_value "WARP 域名规则" "${trimmed#domain:}"
+      printf '%s' "${trimmed}"
+      ;;
+    geosite:*)
+      [[ "${trimmed#geosite:}" =~ ^[A-Za-z0-9._-]+$ ]] || die "WARP geosite 规则不合法：${trimmed}"
+      printf '%s' "${trimmed}"
+      ;;
+    *)
+      validate_hostname_value "WARP 域名规则" "${trimmed}"
+      printf 'domain:%s' "${trimmed}"
+      ;;
+  esac
+}
+
+normalize_warp_rules_text() {
+  local input_text="${1:-}"
+  local line=""
+  local seen=""
+
+  while IFS= read -r line; do
+    line="$(printf '%s' "${line}" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    [[ -n "${line}" ]] || continue
+    [[ "${line}" != \#* ]] || continue
+
+    case $'\n'"${seen}" in
+      *$'\n'"${line}"$'\n'*)
+        continue
+        ;;
+    esac
+
+    seen+="${line}"$'\n'
+    printf '%s\n' "${line}"
+  done <<< "${input_text}"
+}
+
+current_warp_rules_text() {
+  if [[ -n "${WARP_RULES_TEXT:-}" ]]; then
+    printf '%s\n' "${WARP_RULES_TEXT}" | sed '/^$/d'
+    return
+  fi
+
+  if [[ -f "${WARP_RULES_FILE}" ]]; then
+    normalize_warp_rules_text "$(<"${WARP_RULES_FILE}")"
+    return
+  fi
+
+  default_warp_rules_text
+}
+
+write_warp_rules_file() {
+  local tmp_file=""
+  local rules_text=""
+
+  rules_text="$(normalize_warp_rules_text "$(current_warp_rules_text)")"
+  mkdir -p "${XRAY_CONFIG_DIR}"
+  backup_path "${WARP_RULES_FILE}"
+  tmp_file="$(mktemp "${XRAY_CONFIG_DIR}/.warp-domains.list.tmp.XXXXXX")"
+  printf '%s\n' "${rules_text}" > "${tmp_file}"
+  mv -f "${tmp_file}" "${WARP_RULES_FILE}"
+  chmod 0640 "${WARP_RULES_FILE}"
+}
+
+resolve_install_input_sources() {
+  resolve_value_source CERT_SOURCE_PEM
+  resolve_value_source KEY_SOURCE_PEM
+  resolve_value_source WARP_TEAM_NAME
+  resolve_value_source WARP_CLIENT_ID
+  resolve_value_source WARP_CLIENT_SECRET
+  resolve_value_source WARP_PROXY_PORT
+  resolve_value_source CF_API_TOKEN
+  resolve_value_source CF_DNS_TOKEN
+}
+
+preflight_check_port_443() {
+  local listeners=""
+
+  if ! command -v ss >/dev/null 2>&1; then
+    warn "系统中未找到 ss，已跳过 443 端口占用预检。"
+    return 0
+  fi
+
+  listeners="$(ss -ltnH '( sport = :443 )' 2>/dev/null || true)"
+  [[ -z "${listeners}" ]] && return 0
+
+  if [[ -f "${XRAY_CONFIG_FILE}" || -f "${HAPROXY_CONFIG}" ]]; then
+    warn "检测到 443 端口已被当前机器上的现有服务占用，继续执行重装流程。"
+    return 0
+  fi
+
+  die "预检失败：443 端口已被占用，请先释放端口或确认是否为当前脚本托管服务。"
+}
+
+preflight_check_domain_resolution() {
+  local domain="${1}"
+  local label="${2}"
+  local resolved_ip=""
+
+  [[ -n "${domain}" ]] || return 0
+  resolved_ip="$(getent ahostsv4 "${domain}" 2>/dev/null | awk 'NR==1 {print $1}')"
+  if [[ -z "${resolved_ip}" ]]; then
+    warn "预检提示：${label} 当前无法解析，后续请确认 DNS 配置。"
+    return 0
+  fi
+
+  if [[ -n "${SERVER_IP:-}" && "${resolved_ip}" == "${SERVER_IP}" ]]; then
+    log_success "${label} 已解析到当前服务器地址：${resolved_ip}"
+    return 0
+  fi
+
+  warn "预检提示：${label} 当前解析为 ${resolved_ip}，如果使用了 Cloudflare 橙云，这可能是正常现象。"
+}
+
+verify_cloudflare_token() {
+  local token="${1}"
+  local label="${2}"
+  local response=""
+
+  [[ -n "${token}" ]] || return 0
+  response="$(curl -fsSL https://api.cloudflare.com/client/v4/user/tokens/verify \
+    -H "Authorization: Bearer ${token}" \
+    -H 'Content-Type: application/json' 2>/dev/null || true)"
+  if [[ -z "${response}" ]]; then
+    warn "预检提示：无法在线校验 ${label}，已跳过权限验证。"
+    return 0
+  fi
+
+  printf '%s' "${response}" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true' \
+    || die "预检失败：${label} 校验未通过。"
+  log_success "${label} 校验通过。"
+}
+
+run_install_preflight_checks() {
+  log_step "执行安装前预检。"
+  preflight_check_port_443
+  preflight_check_domain_resolution "${XHTTP_DOMAIN}" "XHTTP CDN 域名"
+
+  case "${CERT_MODE}" in
+    cf-origin-ca)
+      verify_cloudflare_token "${CF_API_TOKEN}" "Cloudflare API Token"
+      ;;
+    acme-dns-cf)
+      verify_cloudflare_token "${CF_DNS_TOKEN}" "Cloudflare DNS Token"
+      ;;
+  esac
 }
 
 is_valid_hostname() {

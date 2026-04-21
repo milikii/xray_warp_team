@@ -52,6 +52,9 @@ run_warp_enabled_case() {
   assert_contains 'extra=' "${OUTPUT_FILE}"
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
   assert_contains '已启用: 是' "${OUTPUT_FILE}"
+  assert_contains '## Clash Meta / Mihomo 片段' "${OUTPUT_FILE}"
+  assert_contains '## sing-box outbound 片段' "${OUTPUT_FILE}"
+  assert_contains 'XHTTP-SPLIT 的不同客户端支持差异较大' "${OUTPUT_FILE}"
 }
 
 run_warp_disabled_case() {
@@ -97,6 +100,30 @@ run_warp_disabled_case() {
   assert_contains 'encryption=none' "${OUTPUT_FILE}"
 }
 
+run_warp_rules_file_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  WARP_RULES_FILE="${workdir}/warp-domains.list"
+
+  SERVER_IP="203.0.113.15"
+  REALITY_UUID="88888888-8888-8888-8888-888888888888"
+  REALITY_SNI="reality5.example.com"
+  REALITY_TARGET="www.scu.edu:443"
+  REALITY_SHORT_ID="qrst7890"
+  REALITY_PRIVATE_KEY="private-key-5"
+  XHTTP_UUID="99999999-9999-9999-9999-999999999999"
+  XHTTP_PATH="/assets/v4"
+  ENABLE_WARP="yes"
+  WARP_PROXY_PORT="41000"
+  printf '%s\n' 'domain:custom.example.com' 'geosite:google' > "${WARP_RULES_FILE}"
+
+  write_xray_config
+
+  jq -e '.routing.rules[] | select(.outboundTag == "WARP") | .domain == ["domain:custom.example.com","geosite:google"]' "${XRAY_CONFIG_FILE}" >/dev/null
+}
+
 run_output_helper_case() {
   SERVER_IP="203.0.113.12"
   NODE_LABEL_PREFIX="hkg"
@@ -132,15 +159,33 @@ run_service_config_helper_case() {
   NGINX_TLS_PORT="8443"
   TLS_CERT_FILE="/etc/ssl/xray-warp-team/cert.pem"
   TLS_KEY_FILE="/etc/ssl/xray-warp-team/key.pem"
+  CORE_HEALTH_HELPER="${workdir}/core-health.sh"
+  CORE_HEALTH_SERVICE_FILE="${workdir}/core-health.service"
+  CORE_HEALTH_TIMER_FILE="${workdir}/core-health.timer"
+  CORE_HEALTH_SERVICE_NAME="xray-warp-team-core-health.service"
+  CORE_HEALTH_TIMER_NAME="xray-warp-team-core-health.timer"
+  HEALTH_STATE_FILE="${workdir}/health-state.env"
+  HEALTH_HISTORY_FILE="${workdir}/health-history.log"
 
   write_nginx_config
   write_haproxy_config
+  write_core_health_monitor
 
   assert_contains 'server_name cdn.example.com;' "${NGINX_CONFIG_FILE}"
   assert_contains 'proxy_pass https://www.harvard.edu;' "${NGINX_CONFIG_FILE}"
   assert_contains 'grpc_pass 127.0.0.1:8001;' "${NGINX_CONFIG_FILE}"
   assert_contains 'use_backend be_xhttp_cdn if { req.ssl_sni -i cdn.example.com }' "${HAPROXY_CONFIG}"
   assert_contains 'server nginx_cdn 127.0.0.1:8443 check' "${HAPROXY_CONFIG}"
+  assert_contains 'check_port 443' "${CORE_HEALTH_HELPER}"
+  assert_contains 'check_port 2443' "${CORE_HEALTH_HELPER}"
+  assert_contains 'check_port 8001' "${CORE_HEALTH_HELPER}"
+  assert_contains "health_state_file='${HEALTH_STATE_FILE}'" "${CORE_HEALTH_HELPER}"
+  assert_contains "health_history_file='${workdir}/health-history.log'" "${CORE_HEALTH_HELPER}"
+  assert_contains 'dirname "${health_state_file}"' "${CORE_HEALTH_HELPER}"
+  assert_contains '$(date '\''+%Y-%m-%d %H:%M:%S %Z'\'')' "${CORE_HEALTH_HELPER}"
+  assert_contains "ExecStart=${CORE_HEALTH_HELPER}" "${CORE_HEALTH_SERVICE_FILE}"
+  assert_contains 'OnUnitActiveSec=3min' "${CORE_HEALTH_TIMER_FILE}"
+  assert_contains "Unit=${CORE_HEALTH_SERVICE_NAME}" "${CORE_HEALTH_TIMER_FILE}"
 }
 
 run_xray_config_escape_case() {

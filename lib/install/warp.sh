@@ -67,6 +67,126 @@ EOF
   apt-get install -y cloudflare-warp
 }
 
+write_warp_health_helper() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+proxy_port='${WARP_PROXY_PORT}'
+health_state_file='${HEALTH_STATE_FILE}'
+health_history_file='${HEALTH_HISTORY_FILE}'
+
+write_health_state() {
+  local action="\${1}"
+  local reason="\${2}"
+  local tmp_file=""
+
+  mkdir -p "\$(dirname "\${health_state_file}")"
+  tmp_file="\$(mktemp "\$(dirname "\${health_state_file}")/.health-state.tmp.XXXXXX")"
+  if [[ -f "\${health_state_file}" ]]; then
+    grep -v '^WARP_HEALTH_' "\${health_state_file}" > "\${tmp_file}" 2>/dev/null || true
+  fi
+  {
+    printf 'WARP_HEALTH_LAST_CHECK_AT=%q\n' "\$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    printf 'WARP_HEALTH_LAST_ACTION=%q\n' "\${action}"
+    printf 'WARP_HEALTH_LAST_REASON=%q\n' "\${reason}"
+  } >> "\${tmp_file}"
+  mv -f "\${tmp_file}" "\${health_state_file}"
+  chmod 0640 "\${health_state_file}" 2>/dev/null || true
+}
+
+append_health_history() {
+  local action="\${1}"
+  local reason="\${2}"
+  local tmp_file=""
+
+  mkdir -p "\$(dirname "\${health_history_file}")"
+  tmp_file="\$(mktemp "\$(dirname "\${health_history_file}")/.health-history.tmp.XXXXXX")"
+  if [[ -f "\${health_history_file}" ]]; then
+    tail -n 49 "\${health_history_file}" > "\${tmp_file}" 2>/dev/null || true
+  fi
+  printf '%s | warp | %s | %s\n' "\$(date '+%Y-%m-%d %H:%M:%S %Z')" "\${action}" "\${reason}" >> "\${tmp_file}"
+  mv -f "\${tmp_file}" "\${health_history_file}"
+  chmod 0640 "\${health_history_file}" 2>/dev/null || true
+}
+
+if ! systemctl is-active --quiet warp-svc; then
+  systemctl restart warp-svc >/dev/null 2>&1 || true
+  sleep 3
+fi
+
+if command -v curl >/dev/null 2>&1; then
+  if ! curl --socks5-hostname "127.0.0.1:\${proxy_port}" -fsSL --max-time 8 https://api.ipify.org >/dev/null 2>&1; then
+    warp-cli --accept-tos mdm refresh >/dev/null 2>&1 || true
+    systemctl restart warp-svc >/dev/null 2>&1 || true
+    write_health_state "restarted" "warp socks5 probe failed"
+    append_health_history "restarted" "warp socks5 probe failed"
+    exit 0
+  fi
+fi
+
+write_health_state "ok" "warp socks5 probe passed"
+append_health_history "ok" "warp socks5 probe passed"
+EOF
+
+  backup_path "${WARP_HEALTH_HELPER}"
+  install -m 0755 "${tmp_file}" "${WARP_HEALTH_HELPER}"
+  rm -f "${tmp_file}"
+}
+
+write_warp_health_service() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+[Unit]
+Description=Check and recover Cloudflare WARP proxy health
+After=network-online.target warp-svc.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${WARP_HEALTH_HELPER}
+EOF
+
+  backup_path "${WARP_HEALTH_SERVICE_FILE}"
+  install -m 0644 "${tmp_file}" "${WARP_HEALTH_SERVICE_FILE}"
+  rm -f "${tmp_file}"
+}
+
+write_warp_health_timer() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+[Unit]
+Description=Run Cloudflare WARP health recovery periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=${WARP_HEALTH_SERVICE_NAME}
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  backup_path "${WARP_HEALTH_TIMER_FILE}"
+  install -m 0644 "${tmp_file}" "${WARP_HEALTH_TIMER_FILE}"
+  rm -f "${tmp_file}"
+}
+
+install_warp_health_monitor() {
+  write_warp_health_helper
+  write_warp_health_service
+  write_warp_health_timer
+  systemctl daemon-reload
+  systemctl enable --now "${WARP_HEALTH_TIMER_NAME}"
+}
+
 install_warp() {
   local repo_codename=""
 
@@ -80,6 +200,7 @@ install_warp() {
   log "正在安装 Cloudflare WARP 客户端。"
   install_warp_apt_repo "${repo_codename}"
   write_warp_mdm_file
+  install_warp_health_monitor
   systemctl enable --now warp-svc
   warp-cli --accept-tos mdm refresh || true
   systemctl restart warp-svc

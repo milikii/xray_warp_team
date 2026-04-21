@@ -8,6 +8,9 @@ run_usage_case() {
 
   [[ "${output}" == *$'\n  xray-warp-team help'* ]]
   [[ "${output}" == *$'\n  xray-warp-team install [参数]'* ]]
+  [[ "${output}" == *$'\n  xray-warp-team renew-cert [参数]'* ]]
+  [[ "${output}" == *$'\n  xray-warp-team change-warp-rules [参数]'* ]]
+  [[ "${output}" == *$'\n  xray-warp-team diagnose'* ]]
 }
 
 run_install_self_command_case() {
@@ -78,6 +81,23 @@ EOF
     return 1
   fi
   printf '%s' "${output}" | grep -q 'XHTTP 路径不能包含空白字符'
+}
+
+run_value_source_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  printf 'secret-from-file\n' > "${workdir}/secret.txt"
+
+  WARP_CLIENT_SECRET="@${workdir}/secret.txt"
+  resolve_value_source WARP_CLIENT_SECRET
+  [[ "${WARP_CLIENT_SECRET}" == "secret-from-file" ]]
+
+  WARP_CLIENT_ID=""
+  export WARP_CLIENT_ID="client-from-env"
+  resolve_value_source WARP_CLIENT_ID
+  [[ "${WARP_CLIENT_ID}" == "client-from-env" ]]
+  unset WARP_CLIENT_ID
 }
 
 run_xray_digest_parse_case() {
@@ -180,6 +200,39 @@ run_install_parse_case() {
   [[ "${WARP_CLIENT_SECRET}" == "client-secret" ]]
   [[ "${WARP_PROXY_PORT}" == "41000" ]]
   [[ "${ENABLE_NET_OPT}" == "no" ]]
+}
+
+run_preflight_token_verify_case() {
+  local output=""
+
+  if ! output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+curl() {
+  printf '%s' '{"success":true}'
+}
+jq() {
+  return 99
+}
+verify_cloudflare_token "token-value" "Cloudflare API Token"
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验通过'
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+curl() {
+  printf '%s' '{"success":false}'
+}
+verify_cloudflare_token "token-value" "Cloudflare API Token"
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验未通过'
 }
 
 run_cert_mode_input_case() {
@@ -323,8 +376,24 @@ run_dispatch_case() {
     dispatched="status"
     dispatched_args="$*"
   }
+  diagnose_cmd() {
+    dispatched="diagnose"
+    dispatched_args="$*"
+  }
+  uninstall_cmd() {
+    dispatched="uninstall"
+    dispatched_args="$*"
+  }
+  change_warp_rules_cmd() {
+    dispatched="change-warp-rules"
+    dispatched_args="$*"
+  }
   main_menu() {
     dispatched="menu"
+    dispatched_args="$*"
+  }
+  renew_cert_cmd() {
+    dispatched="renew-cert"
     dispatched_args="$*"
   }
 
@@ -336,12 +405,27 @@ run_dispatch_case() {
   [[ "${dispatched}" == "status" ]]
   [[ "${dispatched_args}" == "--raw" ]]
 
+  run_cli_command diagnose
+  [[ "${dispatched}" == "diagnose" ]]
+
   run_cli_command
   [[ "${dispatched}" == "menu" ]]
 
-  run_menu_choice 14
+  run_menu_choice 16
+  [[ "${dispatched}" == "uninstall" ]]
+
+  run_menu_choice 17
   [[ "${dispatched}" == "status" ]]
   [[ "${dispatched_args}" == "--raw" ]]
+
+  run_menu_choice 14
+  [[ "${dispatched}" == "renew-cert" ]]
+
+  run_menu_choice 12
+  [[ "${dispatched}" == "change-warp-rules" ]]
+
+  run_menu_choice 3
+  [[ "${dispatched}" == "diagnose" ]]
 }
 
 run_install_flow_case() {

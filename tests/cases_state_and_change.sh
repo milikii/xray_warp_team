@@ -7,6 +7,8 @@ run_state_context_case() {
   NGINX_CONF_DIR="${workdir}/nginx"
   NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
   WARP_MDM_FILE="${workdir}/warp-mdm.xml"
+  HEALTH_STATE_FILE="${workdir}/health-state.env"
+  HEALTH_HISTORY_FILE="${workdir}/health-history.log"
   NET_SERVICE_FILE="${workdir}/net.service"
   NET_SYSCTL_CONF="${workdir}/net.conf"
   mkdir -p "${NGINX_CONF_DIR}"
@@ -80,6 +82,7 @@ server {
 EOF
 
   cat > "${STATE_FILE}" <<'EOF'
+STATE_VERSION='1'
 TLS_ALPN='h2'
 CERT_MODE='existing'
 ACME_CA='letsencrypt'
@@ -92,6 +95,21 @@ EOF
 - 节点名前缀: HKG
 - 公钥: public-key-value
 - 指纹: firefox
+EOF
+
+  cat > "${HEALTH_STATE_FILE}" <<'EOF'
+CORE_HEALTH_LAST_CHECK_AT='2026-04-21 12:00:00 UTC'
+CORE_HEALTH_LAST_ACTION='ok'
+CORE_HEALTH_LAST_REASON='services healthy'
+WARP_HEALTH_LAST_CHECK_AT='2026-04-21 12:05:00 UTC'
+WARP_HEALTH_LAST_ACTION='restarted'
+WARP_HEALTH_LAST_REASON='warp socks5 probe failed'
+EOF
+
+  cat > "${HEALTH_HISTORY_FILE}" <<'EOF'
+2026-04-21 12:00:00 UTC | core | ok | services healthy
+2026-04-21 12:10:00 UTC | core | restarted | service inactive
+2026-04-21 12:05:00 UTC | warp | restarted | warp socks5 probe failed
 EOF
 
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
@@ -113,6 +131,14 @@ EOF
   [[ "${ENABLE_NET_OPT}" == "no" ]]
   [[ -z "${XHTTP_ECH_CONFIG_LIST}" ]]
   [[ -z "${XHTTP_ECH_FORCE_QUERY}" ]]
+  [[ "${CORE_HEALTH_LAST_ACTION}" == "ok" ]]
+  [[ "${WARP_HEALTH_LAST_ACTION}" == "restarted" ]]
+  [[ "$(latest_health_history_text)" == "2026-04-21 12:05:00 UTC | warp | restarted | warp socks5 probe failed" ]]
+  HEALTH_HISTORY_NOW='2026-04-21 12:30:00 UTC'
+  [[ "$(health_history_count_text 1 core)" == "1" ]]
+  [[ "$(health_history_count_text 1 warp)" == "1" ]]
+  [[ "$(health_history_count_text 24 core)" == "1" ]]
+  [[ "$(stability_signal_text)" == *"稳定"* ]]
 
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
   REALITY_PUBLIC_KEY="" XHTTP_UUID="" XHTTP_DOMAIN="" XHTTP_PATH="" XHTTP_VLESS_DECRYPTION="" \
@@ -125,6 +151,49 @@ EOF
   [[ "${TLS_ALPN}" == "h2" ]]
   [[ "${CERT_MODE}" == "existing" ]]
   [[ "${ACME_CA}" == "letsencrypt" ]]
+}
+
+run_state_version_case() {
+  local workdir=""
+  local warned=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  cat > "${STATE_FILE}" <<'EOF'
+STATE_VERSION='0'
+TLS_ALPN='h2'
+EOF
+
+  warn() {
+    warned+="${1}"$'\n'
+  }
+
+  load_existing_state
+  [[ "${TLS_ALPN}" == "h2" ]]
+  printf '%s' "${warned}" | grep -q '旧版本状态文件'
+}
+
+run_health_history_count_without_python_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  HEALTH_HISTORY_FILE="${workdir}/health-history.log"
+  cat > "${HEALTH_HISTORY_FILE}" <<'EOF'
+2026-04-21 12:00:00 UTC | core | ok | services healthy
+2026-04-21 12:10:00 UTC | core | restarted | service inactive
+2026-04-21 12:05:00 UTC | warp | restarted | warp probe failed
+EOF
+
+  python3() {
+    return 99
+  }
+
+  HEALTH_HISTORY_NOW='2026-04-21 12:30:00 UTC'
+  [[ "$(health_history_count_text 1 core)" == "1" ]]
+  [[ "$(health_history_count_text 1 warp)" == "1" ]]
+  [[ "$(health_history_count_text 24 core)" == "1" ]]
+  unset -f python3
 }
 
 run_managed_apply_case() {
@@ -359,6 +428,34 @@ print('xml ok')
 PY
 }
 
+run_warp_health_monitor_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  WARP_HEALTH_HELPER="${workdir}/warp-health.sh"
+  WARP_HEALTH_SERVICE_FILE="${workdir}/warp-health.service"
+  WARP_HEALTH_TIMER_FILE="${workdir}/warp-health.timer"
+  WARP_HEALTH_SERVICE_NAME="xray-warp-team-warp-health.service"
+  WARP_HEALTH_TIMER_NAME="xray-warp-team-warp-health.timer"
+  HEALTH_STATE_FILE="${workdir}/health-state.env"
+  HEALTH_HISTORY_FILE="${workdir}/health-history.log"
+  WARP_PROXY_PORT="41000"
+
+  write_warp_health_helper
+  write_warp_health_service
+  write_warp_health_timer
+
+  assert_contains 'proxy_port='\''41000'\''' "${WARP_HEALTH_HELPER}"
+  assert_contains "health_state_file='${HEALTH_STATE_FILE}'" "${WARP_HEALTH_HELPER}"
+  assert_contains "health_history_file='${HEALTH_HISTORY_FILE}'" "${WARP_HEALTH_HELPER}"
+  assert_contains 'dirname "${health_state_file}"' "${WARP_HEALTH_HELPER}"
+  assert_contains '$(date '\''+%Y-%m-%d %H:%M:%S %Z'\'')' "${WARP_HEALTH_HELPER}"
+  assert_contains 'curl --socks5-hostname "127.0.0.1:${proxy_port}"' "${WARP_HEALTH_HELPER}"
+  assert_contains "ExecStart=${WARP_HEALTH_HELPER}" "${WARP_HEALTH_SERVICE_FILE}"
+  assert_contains 'OnUnitActiveSec=5min' "${WARP_HEALTH_TIMER_FILE}"
+  assert_contains "Unit=${WARP_HEALTH_SERVICE_NAME}" "${WARP_HEALTH_TIMER_FILE}"
+}
+
 run_change_helper_case() {
   local original_prompt=""
   local -A uuid_request=()
@@ -464,6 +561,7 @@ run_change_command_case() {
   local output_written=0
   local written_prefix=""
   local shown_links=0
+  local rules_written=""
 
   need_root() { :; }
   start_backup_session() { BACKUP_DIR="/tmp/change-backup"; }
@@ -479,11 +577,13 @@ run_change_command_case() {
     WARP_CLIENT_ID="old-id"
     WARP_CLIENT_SECRET="old-secret"
     WARP_PROXY_PORT="40000"
+    WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
   }
   apply_managed_runtime_update() {
     runtime_updated=1
     runtime_sni="${REALITY_SNI}"
     runtime_target="${REALITY_TARGET}"
+    rules_written="${WARP_RULES_TEXT}"
   }
   write_state_file() {
     state_written=1
@@ -512,6 +612,54 @@ run_change_command_case() {
   [[ "${output_written}" -eq 1 ]]
   [[ "${written_prefix}" == "HKG" ]]
   [[ "${shown_links}" -eq 2 ]]
+
+  NON_INTERACTIVE=0
+  change_warp_rules_cmd --non-interactive --add-domain chat.openai.com --del-domain github.com
+  [[ "${runtime_updated}" -eq 1 ]]
+  [[ "${rules_written}" == *$'domain:chat.openai.com'* ]]
+  [[ "${rules_written}" != *$'domain:github.com'* ]]
+  [[ "${shown_links}" -eq 3 ]]
+}
+
+run_renew_cert_command_case() {
+  local applied=0
+  local shown_links=0
+  local logged=""
+
+  need_root() { :; }
+  start_backup_session() { BACKUP_DIR="/tmp/renew-backup"; }
+  load_current_install_context() {
+    CERT_MODE="acme-dns-cf"
+    XHTTP_DOMAIN="cdn.old.example.com"
+    REALITY_SNI="old.example.com"
+    REALITY_TARGET="www.harvard.edu:443"
+    XHTTP_PATH="/old"
+    WARP_PROXY_PORT="40000"
+  }
+  apply_managed_update() {
+    applied=$((applied + 1))
+  }
+  show_links() {
+    shown_links=$((shown_links + 1))
+  }
+  log() {
+    logged+="${1}"$'\n'
+  }
+  log_step() {
+    logged+="STEP:${1}"$'\n'
+  }
+  log_success() {
+    logged+="OK:${1}"$'\n'
+  }
+  resolve_install_input_sources() { :; }
+  prompt_cert_mode_inputs() { :; }
+  validate_install_inputs() { :; }
+
+  renew_cert_cmd --non-interactive --acme-email ops@example.com --cf-dns-token dns-token
+  [[ "${applied}" -eq 1 ]]
+  [[ "${shown_links}" -eq 1 ]]
+  printf '%s' "${logged}" | grep -q 'STEP:刷新 TLS 证书资产。'
+  printf '%s' "${logged}" | grep -q 'OK:证书已续期。'
 }
 
 run_upgrade_command_case() {
@@ -563,4 +711,49 @@ run_upgrade_command_case() {
   [[ "${restarted}" -eq 0 ]]
   printf '%s' "${logged}" | grep -q 'STEP:升级 Xray 核心。'
   printf '%s' "${logged}" | grep -q 'WARN:升级后的配置校验失败，正在回滚 Xray 核心文件。'
+}
+
+run_diagnose_command_case() {
+  local output=""
+  local status=0
+
+  load_dashboard_context() { :; }
+  service_active_state() {
+    case "${1}" in
+      xray.service|haproxy.service|nginx.service|warp-svc.service|${CORE_HEALTH_TIMER_NAME}|${WARP_HEALTH_TIMER_NAME})
+        printf 'active'
+        ;;
+      *)
+        printf 'unknown'
+        ;;
+    esac
+  }
+  listening_port_text() { printf '运行中'; }
+  is_port_listening() { return 0; }
+  xray_config_check_state() { printf 'ok'; }
+  nginx_config_check_state() { printf 'ok'; }
+  haproxy_config_check_state() { printf 'ok'; }
+  local_tls_probe_state() { printf 'ok'; }
+  xray_config_check_text() { printf '通过'; }
+  nginx_config_check_text() { printf '通过'; }
+  haproxy_config_check_text() { printf '通过'; }
+  local_tls_probe_text() { printf '通过'; }
+  cert_expiry_text() { printf 'Jun  1 00:00:00 2026 GMT'; }
+  warp_exit_ip_text() { printf '203.0.113.99'; }
+  health_event_text() { printf 'ok'; }
+  latest_health_history_text() { printf 'latest history'; }
+
+  output="$(diagnose_cmd)"
+  printf '%s' "${output}" | grep -q 'Xray WARP 诊断'
+  printf '%s' "${output}" | grep -q '监听 443: 运行中'
+  printf '%s' "${output}" | grep -q '诊断摘要: 未发现关键问题'
+
+  service_active_state() { printf 'failed'; }
+  set +e
+  output="$(diagnose_cmd 2>&1)"
+  status=$?
+  set -e
+  [[ "${status}" -ne 0 ]]
+  printf '%s' "${output}" | grep -q '诊断摘要: 检测到'
+  printf '%s' "${output}" | grep -q '服务: xray 未运行'
 }

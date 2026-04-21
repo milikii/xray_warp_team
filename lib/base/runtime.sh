@@ -14,6 +14,7 @@ Description=Xray Service
 Documentation=https://github.com/XTLS/Xray-core
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -22,14 +23,145 @@ Group=xray
 Environment=XRAY_LOCATION_ASSET=${XRAY_ASSET_DIR}
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ExecStartPre=${XRAY_BIN} run -test -config ${XRAY_CONFIG_FILE}
 ExecStart=${XRAY_BIN} run -config ${XRAY_CONFIG_FILE}
-Restart=on-failure
-RestartSec=5s
+Restart=always
+RestartSec=3s
+TimeoutStartSec=30s
+TimeoutStopSec=15s
 LimitNOFILE=1048576
 
 [Install]
 WantedBy=multi-user.target
 EOF
+}
+
+write_core_health_helper() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+health_state_file='${HEALTH_STATE_FILE}'
+health_history_file='${HEALTH_HISTORY_FILE}'
+
+check_port() {
+  local port="\${1}"
+  ss -ltnH "( sport = :\${port} )" 2>/dev/null | grep -q .
+}
+
+write_health_state() {
+  local action="\${1}"
+  local reason="\${2}"
+  local tmp_file=""
+
+  mkdir -p "\$(dirname "\${health_state_file}")"
+  tmp_file="\$(mktemp "\$(dirname "\${health_state_file}")/.health-state.tmp.XXXXXX")"
+  if [[ -f "\${health_state_file}" ]]; then
+    grep -v '^CORE_HEALTH_' "\${health_state_file}" > "\${tmp_file}" 2>/dev/null || true
+  fi
+  {
+    printf 'CORE_HEALTH_LAST_CHECK_AT=%q\n' "\$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    printf 'CORE_HEALTH_LAST_ACTION=%q\n' "\${action}"
+    printf 'CORE_HEALTH_LAST_REASON=%q\n' "\${reason}"
+  } >> "\${tmp_file}"
+  mv -f "\${tmp_file}" "\${health_state_file}"
+  chmod 0640 "\${health_state_file}" 2>/dev/null || true
+}
+
+append_health_history() {
+  local action="\${1}"
+  local reason="\${2}"
+  local tmp_file=""
+
+  mkdir -p "\$(dirname "\${health_history_file}")"
+  tmp_file="\$(mktemp "\$(dirname "\${health_history_file}")/.health-history.tmp.XXXXXX")"
+  if [[ -f "\${health_history_file}" ]]; then
+    tail -n 49 "\${health_history_file}" > "\${tmp_file}" 2>/dev/null || true
+  fi
+  printf '%s | core | %s | %s\n' "\$(date '+%Y-%m-%d %H:%M:%S %Z')" "\${action}" "\${reason}" >> "\${tmp_file}"
+  mv -f "\${tmp_file}" "\${health_history_file}"
+  chmod 0640 "\${health_history_file}" 2>/dev/null || true
+}
+
+restart_all() {
+  systemctl restart xray >/dev/null 2>&1 || true
+  systemctl restart haproxy >/dev/null 2>&1 || true
+  systemctl restart nginx >/dev/null 2>&1 || true
+}
+
+if ! systemctl is-active --quiet xray || ! systemctl is-active --quiet haproxy || ! systemctl is-active --quiet nginx; then
+  restart_all
+  sleep 3
+  write_health_state "restarted" "service inactive"
+  append_health_history "restarted" "service inactive"
+  exit 0
+fi
+
+if ! check_port 443 || ! check_port 2443 || ! check_port 8001 || ! check_port ${NGINX_TLS_PORT}; then
+  restart_all
+  write_health_state "restarted" "required listening port missing"
+  append_health_history "restarted" "required listening port missing"
+  exit 0
+fi
+
+write_health_state "ok" "services and listening ports healthy"
+append_health_history "ok" "services and listening ports healthy"
+EOF
+
+  backup_path "${CORE_HEALTH_HELPER}"
+  install -m 0755 "${tmp_file}" "${CORE_HEALTH_HELPER}"
+  rm -f "${tmp_file}"
+}
+
+write_core_health_service() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+[Unit]
+Description=Check and recover Xray shared-ingress core services
+After=network-online.target xray.service haproxy.service nginx.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=${CORE_HEALTH_HELPER}
+EOF
+
+  backup_path "${CORE_HEALTH_SERVICE_FILE}"
+  install -m 0644 "${tmp_file}" "${CORE_HEALTH_SERVICE_FILE}"
+  rm -f "${tmp_file}"
+}
+
+write_core_health_timer() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<EOF
+[Unit]
+Description=Run Xray shared-ingress core health check periodically
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=3min
+Unit=${CORE_HEALTH_SERVICE_NAME}
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  backup_path "${CORE_HEALTH_TIMER_FILE}"
+  install -m 0644 "${tmp_file}" "${CORE_HEALTH_TIMER_FILE}"
+  rm -f "${tmp_file}"
+}
+
+write_core_health_monitor() {
+  write_core_health_helper
+  write_core_health_service
+  write_core_health_timer
 }
 
 service_exists() {
@@ -107,6 +239,12 @@ rollback_managed_runtime_state() {
     "${XRAY_CONFIG_FILE}"
     "${HAPROXY_CONFIG}"
     "${NGINX_CONFIG_FILE}"
+    "${WARP_RULES_FILE}"
+    "${HEALTH_STATE_FILE}"
+    "${HEALTH_HISTORY_FILE}"
+    "${CORE_HEALTH_HELPER}"
+    "${CORE_HEALTH_SERVICE_FILE}"
+    "${CORE_HEALTH_TIMER_FILE}"
   )
 
   if [[ "${include_tls_assets}" == "yes" ]]; then
@@ -136,6 +274,8 @@ restart_services() {
   systemctl restart xray
   systemctl restart haproxy
   systemctl restart nginx
+  systemctl enable --now "${CORE_HEALTH_TIMER_NAME}"
+  log_success "${CORE_HEALTH_TIMER_NAME} 已启动。"
 
   if [[ "${ENABLE_WARP}" == "yes" ]]; then
     systemctl enable --now warp-svc
@@ -171,6 +311,7 @@ restart_core_services() {
 }
 
 write_runtime_managed_files() {
+  write_warp_rules_file
   write_xray_config
   write_haproxy_config
   write_nginx_config

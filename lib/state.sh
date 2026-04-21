@@ -216,10 +216,17 @@ load_existing_state() {
   if [[ -f "${STATE_FILE}" ]]; then
     # shellcheck disable=SC1090
     . "${STATE_FILE}"
+    if [[ "${STATE_VERSION:-0}" != "${STATE_VERSION_CURRENT}" ]]; then
+      warn "检测到旧版本状态文件（${STATE_VERSION:-0} -> ${STATE_VERSION_CURRENT}），将按当前脚本默认值补全缺失字段。"
+    fi
   fi
   if [[ "${XHTTP_ECH_CONFIG_LIST:-}" == "https://1.1.1.1/dns-query" && "${XHTTP_ECH_FORCE_QUERY:-}" == "none" ]]; then
     XHTTP_ECH_CONFIG_LIST=""
     XHTTP_ECH_FORCE_QUERY=""
+  fi
+  if [[ -f "${HEALTH_STATE_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    . "${HEALTH_STATE_FILE}"
   fi
   load_warp_mdm_context
 }
@@ -343,44 +350,46 @@ write_state_kv() {
   printf '%s=%q\n' "${key}" "${value}"
 }
 
+state_file_text() {
+  # ------------------------------
+  # 状态文件统一走 shell 转义
+  # 避免密钥或路径里的特殊字符污染 source
+  # ------------------------------
+  write_state_kv "STATE_VERSION" "${STATE_VERSION_CURRENT}"
+  write_state_kv "SERVER_IP" "${SERVER_IP}"
+  write_state_kv "NODE_LABEL_PREFIX" "${NODE_LABEL_PREFIX}"
+  write_state_kv "REALITY_UUID" "${REALITY_UUID}"
+  write_state_kv "REALITY_SNI" "${REALITY_SNI}"
+  write_state_kv "REALITY_TARGET" "${REALITY_TARGET}"
+  write_state_kv "REALITY_SHORT_ID" "${REALITY_SHORT_ID}"
+  write_state_kv "REALITY_PRIVATE_KEY" "${REALITY_PRIVATE_KEY}"
+  write_state_kv "REALITY_PUBLIC_KEY" "${REALITY_PUBLIC_KEY}"
+  write_state_kv "XHTTP_UUID" "${XHTTP_UUID}"
+  write_state_kv "XHTTP_DOMAIN" "${XHTTP_DOMAIN}"
+  write_state_kv "XHTTP_PATH" "${XHTTP_PATH}"
+  write_state_kv "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}"
+  write_state_kv "XHTTP_VLESS_DECRYPTION" "${XHTTP_VLESS_DECRYPTION}"
+  write_state_kv "XHTTP_VLESS_ENCRYPTION" "${XHTTP_VLESS_ENCRYPTION}"
+  write_state_kv "TLS_ALPN" "${TLS_ALPN}"
+  write_state_kv "FINGERPRINT" "${FINGERPRINT}"
+  write_state_kv "ENABLE_WARP" "${ENABLE_WARP}"
+  write_state_kv "ENABLE_NET_OPT" "${ENABLE_NET_OPT}"
+  write_state_kv "WARP_PROXY_PORT" "${WARP_PROXY_PORT}"
+  write_state_kv "WARP_TEAM_NAME" "${WARP_TEAM_NAME}"
+  write_state_kv "WARP_CLIENT_ID" "${WARP_CLIENT_ID}"
+  write_state_kv "WARP_CLIENT_SECRET" "${WARP_CLIENT_SECRET}"
+  write_state_kv "CERT_MODE" "${CERT_MODE}"
+  write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID}"
+  write_state_kv "CF_CERT_VALIDITY" "${CF_CERT_VALIDITY}"
+  write_state_kv "ACME_EMAIL" "${ACME_EMAIL}"
+  write_state_kv "ACME_CA" "${ACME_CA}"
+  write_state_kv "CF_DNS_ACCOUNT_ID" "${CF_DNS_ACCOUNT_ID}"
+  write_state_kv "CF_DNS_ZONE_ID" "${CF_DNS_ZONE_ID}"
+  write_state_kv "XHTTP_ECH_CONFIG_LIST" "${XHTTP_ECH_CONFIG_LIST}"
+  write_state_kv "XHTTP_ECH_FORCE_QUERY" "${XHTTP_ECH_FORCE_QUERY}"
+}
+
 write_state_file() {
-  mkdir -p "${XRAY_CONFIG_DIR}"
-  {
-    # ------------------------------
-    # 状态文件统一走 shell 转义
-    # 避免密钥或路径里的特殊字符污染 source
-    # ------------------------------
-    write_state_kv "SERVER_IP" "${SERVER_IP}"
-    write_state_kv "NODE_LABEL_PREFIX" "${NODE_LABEL_PREFIX}"
-    write_state_kv "REALITY_UUID" "${REALITY_UUID}"
-    write_state_kv "REALITY_SNI" "${REALITY_SNI}"
-    write_state_kv "REALITY_TARGET" "${REALITY_TARGET}"
-    write_state_kv "REALITY_SHORT_ID" "${REALITY_SHORT_ID}"
-    write_state_kv "REALITY_PRIVATE_KEY" "${REALITY_PRIVATE_KEY}"
-    write_state_kv "REALITY_PUBLIC_KEY" "${REALITY_PUBLIC_KEY}"
-    write_state_kv "XHTTP_UUID" "${XHTTP_UUID}"
-    write_state_kv "XHTTP_DOMAIN" "${XHTTP_DOMAIN}"
-    write_state_kv "XHTTP_PATH" "${XHTTP_PATH}"
-    write_state_kv "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}"
-    write_state_kv "XHTTP_VLESS_DECRYPTION" "${XHTTP_VLESS_DECRYPTION}"
-    write_state_kv "XHTTP_VLESS_ENCRYPTION" "${XHTTP_VLESS_ENCRYPTION}"
-    write_state_kv "TLS_ALPN" "${TLS_ALPN}"
-    write_state_kv "FINGERPRINT" "${FINGERPRINT}"
-    write_state_kv "ENABLE_WARP" "${ENABLE_WARP}"
-    write_state_kv "ENABLE_NET_OPT" "${ENABLE_NET_OPT}"
-    write_state_kv "WARP_PROXY_PORT" "${WARP_PROXY_PORT}"
-    write_state_kv "WARP_TEAM_NAME" "${WARP_TEAM_NAME}"
-    write_state_kv "WARP_CLIENT_ID" "${WARP_CLIENT_ID}"
-    write_state_kv "WARP_CLIENT_SECRET" "${WARP_CLIENT_SECRET}"
-    write_state_kv "CERT_MODE" "${CERT_MODE}"
-    write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID}"
-    write_state_kv "CF_CERT_VALIDITY" "${CF_CERT_VALIDITY}"
-    write_state_kv "ACME_EMAIL" "${ACME_EMAIL}"
-    write_state_kv "ACME_CA" "${ACME_CA}"
-    write_state_kv "CF_DNS_ACCOUNT_ID" "${CF_DNS_ACCOUNT_ID}"
-    write_state_kv "CF_DNS_ZONE_ID" "${CF_DNS_ZONE_ID}"
-    write_state_kv "XHTTP_ECH_CONFIG_LIST" "${XHTTP_ECH_CONFIG_LIST}"
-    write_state_kv "XHTTP_ECH_FORCE_QUERY" "${XHTTP_ECH_FORCE_QUERY}"
-  } > "${STATE_FILE}"
+  write_generated_file_atomically "${STATE_FILE}" state_file_text
   chmod 0600 "${STATE_FILE}"
 }
