@@ -117,25 +117,30 @@ need_root() {
 }
 
 usage() {
+  local command_name=""
+
+  command_name="$(basename "${0}")"
   cat <<'EOF'
 xray-warp-team.sh v0.4.1
+EOF
+  cat <<EOF
 
 用法:
-  bash xray-warp-team.sh
-  bash xray-warp-team.sh install [参数]
-  bash xray-warp-team.sh upgrade
-  bash xray-warp-team.sh change-uuid [参数]
-  bash xray-warp-team.sh change-sni [参数]
-  bash xray-warp-team.sh change-path [参数]
-  bash xray-warp-team.sh change-label-prefix [参数]
-  bash xray-warp-team.sh change-warp [参数]
-  bash xray-warp-team.sh change-cert-mode [参数]
-  bash xray-warp-team.sh uninstall [--yes]
-  bash xray-warp-team.sh show-links
-  bash xray-warp-team.sh status [--raw]
-  bash xray-warp-team.sh restart
-  bash xray-warp-team.sh repair-perms
-  bash xray-warp-team.sh help
+  ${command_name}
+  ${command_name} install [参数]
+  ${command_name} upgrade
+  ${command_name} change-uuid [参数]
+  ${command_name} change-sni [参数]
+  ${command_name} change-path [参数]
+  ${command_name} change-label-prefix [参数]
+  ${command_name} change-warp [参数]
+  ${command_name} change-cert-mode [参数]
+  ${command_name} uninstall [--yes]
+  ${command_name} show-links
+  ${command_name} status [--raw]
+  ${command_name} restart
+  ${command_name} repair-perms
+  ${command_name} help
 
 安装参数:
   --non-interactive           非交互运行；缺少必要参数时直接失败。
@@ -223,21 +228,22 @@ xray-warp-team.sh v0.4.1
   --raw                       显示原始 systemctl 输出，而不是面板。
 
 示例:
-  bash xray-warp-team.sh
-  bash xray-warp-team.sh upgrade
-  bash xray-warp-team.sh repair-perms
-  bash xray-warp-team.sh change-uuid
-  bash xray-warp-team.sh change-sni --reality-sni www.stanford.edu
-  bash xray-warp-team.sh change-path --xhttp-path /assets/v3
-  bash xray-warp-team.sh change-label-prefix --node-label-prefix HKG
-  bash xray-warp-team.sh change-warp --disable-warp
-  bash xray-warp-team.sh change-cert-mode --cert-mode self-signed
-  bash xray-warp-team.sh uninstall --yes
-  bash xray-warp-team.sh install --non-interactive \
+  ${command_name}
+  ${command_name} upgrade
+  ${command_name} repair-perms
+  ${command_name} change-uuid
+  ${command_name} change-sni --reality-sni www.stanford.edu
+  ${command_name} change-path --xhttp-path /assets/v3
+  ${command_name} change-label-prefix --node-label-prefix HKG
+  ${command_name} change-warp --disable-warp
+  ${command_name} change-cert-mode --cert-mode self-signed
+  ${command_name} uninstall --yes
+  ${command_name} install --non-interactive \
     --server-ip 203.0.113.10 \
     --xhttp-domain cdn.example.com \
     --cert-mode self-signed \
     --enable-net-opt \
+    --enable-warp \
     --warp-team your-team \
     --warp-client-id xxxxxxxxx.access \
     --warp-client-secret xxxxxxxxx
@@ -1255,97 +1261,132 @@ prepare_install_inputs() {
   prompt_with_default NODE_LABEL_PREFIX "导出链接使用的节点名前缀" "$(default_node_label_prefix)"
   prompt_with_default REALITY_UUID "REALITY UUID" "$(random_uuid)"
   prompt_with_default REALITY_SNI "REALITY 可见 SNI" "${DEFAULT_REALITY_SNI}"
-  prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "${REALITY_SNI}:443"
+  prompt_with_default REALITY_TARGET "REALITY 目标地址 host:port" "$(default_reality_target_for_sni "${REALITY_SNI}")"
   prompt_with_default REALITY_SHORT_ID "REALITY 短 ID" "$(random_hex 8)"
   prompt_with_default XHTTP_UUID "XHTTP UUID" "$(random_uuid)"
   prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" ""
   prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
   prompt_yes_no XHTTP_VLESS_ENCRYPTION_ENABLED "是否启用 XHTTP CDN 的 VLESS Encryption？ [y/n]" "y"
-  XHTTP_VLESS_ENCRYPTION_ENABLED="$(printf '%s' "${XHTTP_VLESS_ENCRYPTION_ENABLED}" | tr 'A-Z' 'a-z')"
-  case "${XHTTP_VLESS_ENCRYPTION_ENABLED}" in
-    y|yes)
-      XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
-      ;;
-    n|no)
-      XHTTP_VLESS_ENCRYPTION_ENABLED="no"
-      ;;
-    *)
-      die "XHTTP_VLESS_ENCRYPTION_ENABLED 只能是 yes 或 no。"
-      ;;
-  esac
+  XHTTP_VLESS_ENCRYPTION_ENABLED="$(normalize_yes_no_value "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}")"
   prompt_with_default CERT_MODE "TLS 证书模式（自签名/self-signed，现有证书/existing，Cloudflare Origin CA/cf-origin-ca，ACME DNS/acme-dns-cf）" "self-signed"
-  CERT_MODE="$(normalize_cert_mode "${CERT_MODE}")"
-
-  case "${CERT_MODE}" in
-    self-signed|existing|cf-origin-ca|acme-dns-cf)
-      ;;
-    *)
-      die "不支持的证书模式：${CERT_MODE}。可用值：自签名/self-signed、现有证书/existing、Cloudflare Origin CA/cf-origin-ca、ACME DNS/acme-dns-cf。"
-      ;;
-  esac
-
-  if [[ "${CERT_MODE}" == "existing" ]]; then
-    prepare_existing_cert_inputs
-  fi
-
-  if [[ "${CERT_MODE}" == "cf-origin-ca" ]]; then
-    prompt_with_default CF_ZONE_ID "Cloudflare Zone ID" ""
-    prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA 有效期（天）" "${DEFAULT_CF_CERT_VALIDITY}"
-    prompt_secret CF_API_TOKEN "Cloudflare API 令牌"
-  fi
-
-  if [[ "${CERT_MODE}" == "acme-dns-cf" ]]; then
-    prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" ""
-    prompt_with_default ACME_CA "ACME CA" "${DEFAULT_ACME_CA}"
-    prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌"
-    if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-      read -r -p "Cloudflare Account ID（可选）: " CF_DNS_ACCOUNT_ID
-    fi
-    if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-      read -r -p "Cloudflare DNS API 使用的 Zone ID（可选）: " CF_DNS_ZONE_ID
-    fi
-  fi
+  CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
+  prompt_cert_mode_inputs
 
   prompt_yes_no ENABLE_NET_OPT "是否启用网络优化？ [y/n]" "y"
-  ENABLE_NET_OPT="$(printf '%s' "${ENABLE_NET_OPT}" | tr 'A-Z' 'a-z')"
-
-  case "${ENABLE_NET_OPT}" in
-    y|yes)
-      ENABLE_NET_OPT="yes"
-      ;;
-    n|no)
-      ENABLE_NET_OPT="no"
-      ;;
-    *)
-      die "ENABLE_NET_OPT 只能是 yes 或 no。"
-      ;;
-  esac
+  ENABLE_NET_OPT="$(normalize_yes_no_value "ENABLE_NET_OPT" "${ENABLE_NET_OPT}")"
 
   NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
 
   prompt_yes_no ENABLE_WARP "是否启用选择性 WARP 出站？ [y/n]" "y"
-  ENABLE_WARP="$(printf '%s' "${ENABLE_WARP}" | tr 'A-Z' 'a-z')"
-
-  case "${ENABLE_WARP}" in
-    y|yes)
-      ENABLE_WARP="yes"
-      prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust 团队名" ""
-      prompt_with_default WARP_CLIENT_ID "Cloudflare 服务令牌 Client ID" ""
-      prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret" 
-      prompt_with_default WARP_PROXY_PORT "本地 WARP SOCKS5 端口" "${DEFAULT_WARP_PROXY_PORT}"
-      ;;
-    n|no)
-      ENABLE_WARP="no"
-      ;;
-    *)
-      die "ENABLE_WARP 只能是 yes 或 no。"
-      ;;
-  esac
+  ENABLE_WARP="$(normalize_yes_no_value "ENABLE_WARP" "${ENABLE_WARP}")"
+  if [[ "${ENABLE_WARP}" == "yes" ]]; then
+    prompt_warp_settings
+  fi
 }
 
 default_reality_target_for_sni() {
   local sni="${1}"
   printf '%s:443' "${sni}"
+}
+
+normalize_yes_no_value() {
+  local field_name="${1}"
+  local raw_value="${2}"
+  local value=""
+
+  value="$(printf '%s' "${raw_value}" | tr 'A-Z' 'a-z')"
+  case "${value}" in
+    y|yes|enable|enabled)
+      printf 'yes'
+      ;;
+    n|no|disable|disabled)
+      printf 'no'
+      ;;
+    *)
+      die "${field_name} 只能是 yes 或 no。"
+      ;;
+  esac
+}
+
+normalize_warp_target_mode() {
+  local value=""
+
+  value="$(printf '%s' "${1}" | tr 'A-Z' 'a-z')"
+  case "${value}" in
+    yes|enable|enabled)
+      printf 'enable'
+      ;;
+    no|disable|disabled)
+      printf 'disable'
+      ;;
+    *)
+      die "WARP 操作只能是 enable 或 disable。"
+      ;;
+  esac
+}
+
+validate_cert_mode_value() {
+  local value=""
+
+  value="$(normalize_cert_mode "${1}")"
+  case "${value}" in
+    self-signed|existing|cf-origin-ca|acme-dns-cf)
+      printf '%s' "${value}"
+      ;;
+    *)
+      die "不支持的证书模式：${1}"
+      ;;
+  esac
+}
+
+prompt_warp_settings() {
+  prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust 团队名" "${WARP_TEAM_NAME:-}"
+  prompt_with_default WARP_CLIENT_ID "Cloudflare 服务令牌 Client ID" "${WARP_CLIENT_ID:-}"
+  prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
+  prompt_with_default WARP_PROXY_PORT "本地 WARP SOCKS5 端口" "${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
+}
+
+clear_existing_cert_inputs() {
+  CERT_SOURCE_FILE=""
+  KEY_SOURCE_FILE=""
+  CERT_SOURCE_PEM=""
+  KEY_SOURCE_PEM=""
+}
+
+clear_cf_origin_ca_settings() {
+  CF_ZONE_ID=""
+  CF_API_TOKEN=""
+  CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
+}
+
+clear_acme_dns_cf_settings() {
+  ACME_EMAIL=""
+  ACME_CA="${DEFAULT_ACME_CA}"
+  CF_DNS_TOKEN=""
+  CF_DNS_ACCOUNT_ID=""
+  CF_DNS_ZONE_ID=""
+}
+
+prompt_cf_origin_ca_inputs() {
+  prompt_with_default CF_ZONE_ID "Cloudflare Zone ID" "${CF_ZONE_ID:-}"
+  prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA 有效期（天）" "${CF_CERT_VALIDITY:-${DEFAULT_CF_CERT_VALIDITY}}"
+  prompt_secret CF_API_TOKEN "Cloudflare API 令牌"
+}
+
+prompt_optional_cloudflare_scope() {
+  if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
+    read -r -p "Cloudflare Account ID（可选）: " CF_DNS_ACCOUNT_ID
+  fi
+  if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
+    read -r -p "Cloudflare DNS API 使用的 Zone ID（可选）: " CF_DNS_ZONE_ID
+  fi
+}
+
+prompt_acme_dns_cf_inputs() {
+  prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}"
+  prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
+  prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌"
+  prompt_optional_cloudflare_scope
 }
 
 ensure_xhttp_path_format() {
@@ -1356,49 +1397,24 @@ ensure_xhttp_path_format() {
 prompt_cert_mode_inputs() {
   case "${CERT_MODE}" in
     self-signed)
-      CERT_SOURCE_FILE=""
-      KEY_SOURCE_FILE=""
-      CF_ZONE_ID=""
-      CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
-      ACME_EMAIL=""
-      ACME_CA="${DEFAULT_ACME_CA}"
-      CF_DNS_ACCOUNT_ID=""
-      CF_DNS_ZONE_ID=""
+      clear_existing_cert_inputs
+      clear_cf_origin_ca_settings
+      clear_acme_dns_cf_settings
       ;;
     existing)
       prepare_existing_cert_inputs
-      CF_ZONE_ID=""
-      CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
-      ACME_EMAIL=""
-      ACME_CA="${DEFAULT_ACME_CA}"
-      CF_DNS_ACCOUNT_ID=""
-      CF_DNS_ZONE_ID=""
+      clear_cf_origin_ca_settings
+      clear_acme_dns_cf_settings
       ;;
     cf-origin-ca)
-      CERT_SOURCE_FILE=""
-      KEY_SOURCE_FILE=""
-      prompt_with_default CF_ZONE_ID "Cloudflare Zone ID" "${CF_ZONE_ID:-}"
-      prompt_with_default CF_CERT_VALIDITY "Cloudflare Origin CA 有效期（天）" "${CF_CERT_VALIDITY:-${DEFAULT_CF_CERT_VALIDITY}}"
-      prompt_secret CF_API_TOKEN "Cloudflare API 令牌"
-      ACME_EMAIL=""
-      ACME_CA="${DEFAULT_ACME_CA}"
-      CF_DNS_ACCOUNT_ID=""
-      CF_DNS_ZONE_ID=""
+      clear_existing_cert_inputs
+      prompt_cf_origin_ca_inputs
+      clear_acme_dns_cf_settings
       ;;
     acme-dns-cf)
-      CERT_SOURCE_FILE=""
-      KEY_SOURCE_FILE=""
-      prompt_with_default ACME_EMAIL "acme.sh 账户邮箱" "${ACME_EMAIL:-}"
-      prompt_with_default ACME_CA "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
-      prompt_secret CF_DNS_TOKEN "Cloudflare DNS API 令牌"
-      if [[ -z "${CF_DNS_ACCOUNT_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-        read -r -p "Cloudflare Account ID（可选）: " CF_DNS_ACCOUNT_ID
-      fi
-      if [[ -z "${CF_DNS_ZONE_ID}" && "${NON_INTERACTIVE}" -eq 0 ]]; then
-        read -r -p "Cloudflare DNS API 使用的 Zone ID（可选）: " CF_DNS_ZONE_ID
-      fi
-      CF_ZONE_ID=""
-      CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
+      clear_existing_cert_inputs
+      clear_cf_origin_ca_settings
+      prompt_acme_dns_cf_inputs
       ;;
     *)
       die "不支持的证书模式：${CERT_MODE}"
@@ -1783,306 +1799,306 @@ install_network_optimization() {
   systemctl enable --now "${NET_SERVICE_NAME}" >/dev/null
 }
 
-write_xray_config() {
-  backup_path "${XRAY_CONFIG_FILE}"
-  generate_xhttp_vless_encryption_if_needed
-
-  if [[ "${ENABLE_WARP}" == "yes" ]]; then
-    cat > "${XRAY_CONFIG_FILE}" <<EOF
+xray_log_json() {
+  cat <<'EOF'
 {
-  "log": {
-    "loglevel": "warning",
-    "access": "/var/log/xray/access.log",
-    "error": "/var/log/xray/error.log"
-  },
-  "inbounds": [
-    {
-      "tag": "reality-vision",
-      "listen": "127.0.0.1",
-      "port": 2443,
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "${REALITY_UUID}",
-            "flow": "xtls-rprx-vision",
-            "email": "reality-vision"
-          }
-        ],
-        "decryption": "none",
-        "fallbacks": [
-          {
-            "dest": "${XHTTP_LOCAL_PORT}",
-            "xver": 0
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "raw",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "target": "${REALITY_TARGET}",
-          "xver": 0,
-          "serverNames": [
-            "${REALITY_SNI}"
-          ],
-          "privateKey": "${REALITY_PRIVATE_KEY}",
-          "shortIds": [
-            "${REALITY_SHORT_ID}"
-          ]
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ],
-        "metadataOnly": false,
-        "routeOnly": true
-      }
-    },
-    {
-      "tag": "xhttp-cdn",
-      "listen": "127.0.0.1",
-      "port": ${XHTTP_LOCAL_PORT},
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "${XHTTP_UUID}",
-            "email": "xhttp-cdn"
-          }
-        ],
-        "decryption": "${XHTTP_VLESS_DECRYPTION:-none}"
-      },
-      "streamSettings": {
-        "network": "xhttp",
-        "xhttpSettings": {
-          "host": "",
-          "path": "${XHTTP_PATH}",
-          "mode": "auto"
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ],
-        "metadataOnly": false,
-        "routeOnly": true
-      }
-    }
+  "loglevel": "warning",
+  "access": "/var/log/xray/access.log",
+  "error": "/var/log/xray/error.log"
+}
+EOF
+}
+
+xray_sniffing_json() {
+  cat <<'EOF'
+{
+  "enabled": true,
+  "destOverride": [
+    "http",
+    "tls",
+    "quic"
   ],
-  "routing": {
-    "domainStrategy": "AsIs",
-    "rules": [
+  "metadataOnly": false,
+  "routeOnly": true
+}
+EOF
+}
+
+xray_reality_inbound_json() {
+  local sniffing_json=""
+
+  sniffing_json="$(xray_sniffing_json)"
+  cat <<EOF
+{
+  "tag": "reality-vision",
+  "listen": "127.0.0.1",
+  "port": 2443,
+  "protocol": "vless",
+  "settings": {
+    "clients": [
       {
-        "type": "field",
-        "outboundTag": "direct",
-        "domain": [
-          "domain:telegram.org",
-          "domain:api.telegram.org",
-          "domain:t.me",
-          "domain:telegram.me",
-          "domain:core.telegram.org"
-        ]
-      },
+        "id": "${REALITY_UUID}",
+        "flow": "xtls-rprx-vision",
+        "email": "reality-vision"
+      }
+    ],
+    "decryption": "none",
+    "fallbacks": [
       {
-        "type": "field",
-        "outboundTag": "WARP",
-        "domain": [
-          "geosite:google",
-          "geosite:youtube",
-          "geosite:openai",
-          "geosite:netflix",
-          "geosite:disney",
-          "domain:gemini.google.com",
-          "domain:claude.ai",
-          "domain:anthropic.com",
-          "domain:api.anthropic.com",
-          "domain:console.anthropic.com",
-          "domain:statsig.anthropic.com",
-          "domain:sentry.io",
-          "domain:x.com",
-          "domain:twitter.com",
-          "domain:t.co",
-          "domain:twimg.com",
-          "domain:github.com",
-          "domain:api.github.com",
-          "domain:githubcopilot.com",
-          "domain:copilot-proxy.githubusercontent.com",
-          "domain:origin-tracker.githubusercontent.com",
-          "domain:copilot-telemetry.githubusercontent.com",
-          "domain:collector.github.com",
-          "domain:default.exp-tas.com"
-        ]
+        "dest": "${XHTTP_LOCAL_PORT}",
+        "xver": 0
       }
     ]
   },
-  "outbounds": [
-    {
-      "tag": "direct",
-      "protocol": "freedom"
-    },
-    {
-      "tag": "WARP",
-      "protocol": "socks",
-      "settings": {
-        "servers": [
-          {
-            "address": "127.0.0.1",
-            "port": ${WARP_PROXY_PORT},
-            "users": []
-          }
-        ]
-      }
-    },
-    {
-      "tag": "block",
-      "protocol": "blackhole"
+  "streamSettings": {
+    "network": "raw",
+    "security": "reality",
+    "realitySettings": {
+      "show": false,
+      "target": "${REALITY_TARGET}",
+      "xver": 0,
+      "serverNames": [
+        "${REALITY_SNI}"
+      ],
+      "privateKey": "${REALITY_PRIVATE_KEY}",
+      "shortIds": [
+        "${REALITY_SHORT_ID}"
+      ]
     }
-  ]
+  },
+  "sniffing": ${sniffing_json}
 }
 EOF
-  else
-    cat > "${XRAY_CONFIG_FILE}" <<EOF
+}
+
+xray_xhttp_inbound_json() {
+  local sniffing_json=""
+
+  sniffing_json="$(xray_sniffing_json)"
+  cat <<EOF
 {
-  "log": {
-    "loglevel": "warning",
-    "access": "/var/log/xray/access.log",
-    "error": "/var/log/xray/error.log"
+  "tag": "xhttp-cdn",
+  "listen": "127.0.0.1",
+  "port": ${XHTTP_LOCAL_PORT},
+  "protocol": "vless",
+  "settings": {
+    "clients": [
+      {
+        "id": "${XHTTP_UUID}",
+        "email": "xhttp-cdn"
+      }
+    ],
+    "decryption": "${XHTTP_VLESS_DECRYPTION:-none}"
   },
-  "inbounds": [
-    {
-      "tag": "reality-vision",
-      "listen": "127.0.0.1",
-      "port": 2443,
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "${REALITY_UUID}",
-            "flow": "xtls-rprx-vision",
-            "email": "reality-vision"
-          }
-        ],
-        "decryption": "none",
-        "fallbacks": [
-          {
-            "dest": "${XHTTP_LOCAL_PORT}",
-            "xver": 0
-          }
-        ]
-      },
-      "streamSettings": {
-        "network": "raw",
-        "security": "reality",
-        "realitySettings": {
-          "show": false,
-          "target": "${REALITY_TARGET}",
-          "xver": 0,
-          "serverNames": [
-            "${REALITY_SNI}"
-          ],
-          "privateKey": "${REALITY_PRIVATE_KEY}",
-          "shortIds": [
-            "${REALITY_SHORT_ID}"
-          ]
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ],
-        "metadataOnly": false,
-        "routeOnly": true
-      }
-    },
-    {
-      "tag": "xhttp-cdn",
-      "listen": "127.0.0.1",
-      "port": ${XHTTP_LOCAL_PORT},
-      "protocol": "vless",
-      "settings": {
-        "clients": [
-          {
-            "id": "${XHTTP_UUID}",
-            "email": "xhttp-cdn"
-          }
-        ],
-        "decryption": "${XHTTP_VLESS_DECRYPTION:-none}"
-      },
-      "streamSettings": {
-        "network": "xhttp",
-        "xhttpSettings": {
-          "host": "",
-          "path": "${XHTTP_PATH}",
-          "mode": "auto"
-        }
-      },
-      "sniffing": {
-        "enabled": true,
-        "destOverride": [
-          "http",
-          "tls",
-          "quic"
-        ],
-        "metadataOnly": false,
-        "routeOnly": true
-      }
+  "streamSettings": {
+    "network": "xhttp",
+    "xhttpSettings": {
+      "host": "",
+      "path": "${XHTTP_PATH}",
+      "mode": "auto"
     }
-  ],
+  },
+  "sniffing": ${sniffing_json}
+}
+EOF
+}
+
+xray_inbounds_json() {
+  cat <<EOF
+[
+  $(xray_reality_inbound_json),
+  $(xray_xhttp_inbound_json)
+]
+EOF
+}
+
+xray_direct_domains_json() {
+  cat <<'EOF'
+[
+  "domain:telegram.org",
+  "domain:api.telegram.org",
+  "domain:t.me",
+  "domain:telegram.me",
+  "domain:core.telegram.org"
+]
+EOF
+}
+
+xray_warp_domains_json() {
+  cat <<'EOF'
+[
+  "geosite:google",
+  "geosite:youtube",
+  "geosite:openai",
+  "geosite:netflix",
+  "geosite:disney",
+  "domain:gemini.google.com",
+  "domain:claude.ai",
+  "domain:anthropic.com",
+  "domain:api.anthropic.com",
+  "domain:console.anthropic.com",
+  "domain:statsig.anthropic.com",
+  "domain:sentry.io",
+  "domain:x.com",
+  "domain:twitter.com",
+  "domain:t.co",
+  "domain:twimg.com",
+  "domain:github.com",
+  "domain:api.github.com",
+  "domain:githubcopilot.com",
+  "domain:copilot-proxy.githubusercontent.com",
+  "domain:origin-tracker.githubusercontent.com",
+  "domain:copilot-telemetry.githubusercontent.com",
+  "domain:collector.github.com",
+  "domain:default.exp-tas.com"
+]
+EOF
+}
+
+xray_routing_rules_json() {
+  local direct_domains=""
+  local warp_domains=""
+
+  if [[ "${ENABLE_WARP}" != "yes" ]]; then
+    cat <<'EOF'
+[]
+EOF
+    return
+  fi
+
+  direct_domains="$(xray_direct_domains_json)"
+  warp_domains="$(xray_warp_domains_json)"
+  cat <<EOF
+[
+  {
+    "type": "field",
+    "outboundTag": "direct",
+    "domain": ${direct_domains}
+  },
+  {
+    "type": "field",
+    "outboundTag": "WARP",
+    "domain": ${warp_domains}
+  }
+]
+EOF
+}
+
+xray_direct_outbound_json() {
+  cat <<'EOF'
+{
+  "tag": "direct",
+  "protocol": "freedom"
+}
+EOF
+}
+
+xray_block_outbound_json() {
+  cat <<'EOF'
+{
+  "tag": "block",
+  "protocol": "blackhole"
+}
+EOF
+}
+
+xray_warp_outbound_json() {
+  cat <<EOF
+{
+  "tag": "WARP",
+  "protocol": "socks",
+  "settings": {
+    "servers": [
+      {
+        "address": "127.0.0.1",
+        "port": ${WARP_PROXY_PORT},
+        "users": []
+      }
+    ]
+  }
+}
+EOF
+}
+
+xray_outbounds_json() {
+  local direct_outbound=""
+  local block_outbound=""
+  local warp_outbound=""
+
+  direct_outbound="$(xray_direct_outbound_json)"
+  block_outbound="$(xray_block_outbound_json)"
+  if [[ "${ENABLE_WARP}" != "yes" ]]; then
+    cat <<EOF
+[
+  ${direct_outbound},
+  ${block_outbound}
+]
+EOF
+    return
+  fi
+
+  warp_outbound="$(xray_warp_outbound_json)"
+  cat <<EOF
+[
+  ${direct_outbound},
+  ${warp_outbound},
+  ${block_outbound}
+]
+EOF
+}
+
+write_xray_config() {
+  local log_json=""
+  local inbounds=""
+  local routing_rules=""
+  local outbounds=""
+
+  backup_path "${XRAY_CONFIG_FILE}"
+  generate_xhttp_vless_encryption_if_needed
+  log_json="$(xray_log_json)"
+  inbounds="$(xray_inbounds_json)"
+  routing_rules="$(xray_routing_rules_json)"
+  outbounds="$(xray_outbounds_json)"
+
+  cat > "${XRAY_CONFIG_FILE}" <<EOF
+{
+  "log": ${log_json},
+  "inbounds": ${inbounds},
   "routing": {
     "domainStrategy": "AsIs",
-    "rules": []
+    "rules": ${routing_rules}
   },
-  "outbounds": [
-    {
-      "tag": "direct",
-      "protocol": "freedom"
-    },
-    {
-      "tag": "block",
-      "protocol": "blackhole"
-    }
-  ]
+  "outbounds": ${outbounds}
 }
 EOF
-  fi
 
   ensure_managed_permissions
 }
 
-write_nginx_config() {
-  mkdir -p "${NGINX_CONF_DIR}"
-  backup_path "${NGINX_CONFIG_FILE}"
+nginx_proxy_headers_config() {
+  cat <<'EOF'
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+EOF
+}
 
-  cat > "${NGINX_CONFIG_FILE}" <<EOF
-server {
-    listen 127.0.0.1:${NGINX_TLS_PORT} ssl;
-    http2 on;
-    server_name ${XHTTP_DOMAIN};
+nginx_fallback_location_config() {
+  local proxy_headers=""
 
-    ssl_certificate ${TLS_CERT_FILE};
-    ssl_certificate_key ${TLS_KEY_FILE};
-
+  proxy_headers="$(nginx_proxy_headers_config)"
+  cat <<EOF
     location / {
         proxy_pass https://www.harvard.edu;
         proxy_set_header Host www.harvard.edu;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto \$scheme;
-        proxy_set_header X-Forwarded-Host \$host;
+${proxy_headers}
     }
+EOF
+}
 
+nginx_xhttp_location_config() {
+  cat <<EOF
     location ${XHTTP_PATH} {
         grpc_pass 127.0.0.1:${XHTTP_LOCAL_PORT};
         grpc_set_header Host \$host;
@@ -2091,14 +2107,40 @@ server {
         grpc_set_header X-Forwarded-Proto \$scheme;
         grpc_set_header X-Forwarded-Host \$host;
     }
+EOF
+}
+
+nginx_server_config() {
+  local fallback_location=""
+  local xhttp_location=""
+
+  fallback_location="$(nginx_fallback_location_config)"
+  xhttp_location="$(nginx_xhttp_location_config)"
+  cat <<EOF
+server {
+    listen 127.0.0.1:${NGINX_TLS_PORT} ssl;
+    http2 on;
+    server_name ${XHTTP_DOMAIN};
+
+    ssl_certificate ${TLS_CERT_FILE};
+    ssl_certificate_key ${TLS_KEY_FILE};
+
+${fallback_location}
+
+${xhttp_location}
 }
 EOF
 }
 
-write_haproxy_config() {
-  backup_path "${HAPROXY_CONFIG}"
+write_nginx_config() {
+  mkdir -p "${NGINX_CONF_DIR}"
+  backup_path "${NGINX_CONFIG_FILE}"
 
-  cat > "${HAPROXY_CONFIG}" <<EOF
+  nginx_server_config > "${NGINX_CONFIG_FILE}"
+}
+
+haproxy_global_config() {
+  cat <<'EOF'
 global
     log /dev/log local0
     log /dev/log local1 notice
@@ -2106,7 +2148,11 @@ global
     user haproxy
     group haproxy
     maxconn 20000
+EOF
+}
 
+haproxy_defaults_config() {
+  cat <<'EOF'
 defaults
     log global
     mode tcp
@@ -2114,7 +2160,11 @@ defaults
     timeout connect 5s
     timeout client 2m
     timeout server 2m
+EOF
+}
 
+haproxy_frontend_config() {
+  cat <<EOF
 frontend fe_tls_shared_443
     bind :443
     mode tcp
@@ -2123,15 +2173,42 @@ frontend fe_tls_shared_443
 
     use_backend be_xhttp_cdn if { req.ssl_sni -i ${XHTTP_DOMAIN} }
     default_backend be_reality_vision
+EOF
+}
 
+haproxy_xhttp_backend_config() {
+  cat <<EOF
 backend be_xhttp_cdn
     mode tcp
     server nginx_cdn 127.0.0.1:${NGINX_TLS_PORT} check
+EOF
+}
 
+haproxy_reality_backend_config() {
+  cat <<'EOF'
 backend be_reality_vision
     mode tcp
     server reality_vision 127.0.0.1:2443 check
 EOF
+}
+
+haproxy_config_text() {
+  cat <<EOF
+$(haproxy_global_config)
+
+$(haproxy_defaults_config)
+
+$(haproxy_frontend_config)
+
+$(haproxy_xhttp_backend_config)
+
+$(haproxy_reality_backend_config)
+EOF
+}
+
+write_haproxy_config() {
+  backup_path "${HAPROXY_CONFIG}"
+  haproxy_config_text > "${HAPROXY_CONFIG}"
 }
 
 write_xray_service() {
@@ -2159,12 +2236,6 @@ LimitNOFILE=1048576
 [Install]
 WantedBy=multi-user.target
 EOF
-}
-
-retire_haproxy_if_present() {
-  if service_exists "haproxy.service"; then
-    systemctl disable --now haproxy >/dev/null 2>&1 || systemctl stop haproxy >/dev/null 2>&1 || true
-  fi
 }
 
 install_warp() {
@@ -2279,12 +2350,39 @@ restart_services() {
   fi
 }
 
+finalize_installation() {
+  validate_configs
+  restart_services
+  write_state_file
+  write_output_file
+}
+
 restart_core_services() {
   ensure_xray_user
   ensure_managed_permissions
   systemctl restart xray
   systemctl restart haproxy
   systemctl restart nginx
+}
+
+write_runtime_managed_files() {
+  write_xray_config
+  write_haproxy_config
+  write_nginx_config
+}
+
+apply_managed_files() {
+  local include_tls_assets="${1:-no}"
+
+  if [[ "${include_tls_assets}" == "yes" ]]; then
+    write_tls_assets
+  fi
+
+  write_runtime_managed_files
+  validate_configs
+  restart_core_services
+  write_state_file
+  write_output_file
 }
 
 install_self_command() {
@@ -2315,24 +2413,325 @@ cleanup_previous_acme_cert() {
 }
 
 apply_managed_update() {
-  write_tls_assets
-  write_xray_config
-  write_haproxy_config
-  write_nginx_config
-  validate_configs
-  restart_core_services
-  write_state_file
-  write_output_file
+  apply_managed_files "yes"
 }
 
 apply_managed_runtime_update() {
-  write_xray_config
-  write_haproxy_config
-  write_nginx_config
-  validate_configs
-  restart_core_services
-  write_state_file
-  write_output_file
+  apply_managed_files "no"
+}
+
+handle_change_common_arg() {
+  case "${1}" in
+    --non-interactive)
+      NON_INTERACTIVE=1
+      return 0
+      ;;
+    --help|-h|help)
+      usage
+      exit 0
+      ;;
+  esac
+
+  return 1
+}
+
+require_option_value() {
+  local option_name="${1}"
+
+  shift
+  [[ $# -gt 0 ]] || die "参数 ${option_name} 需要值。"
+}
+
+assign_option_value() {
+  local var_name="${1}"
+  local option_name="${2}"
+
+  shift 2
+  require_option_value "${option_name}" "$@"
+  printf -v "${var_name}" '%s' "${1}"
+}
+
+apply_optional_override() {
+  local var_name="${1}"
+  local value="${2-}"
+
+  [[ -n "${value}" ]] || return 0
+  printf -v "${var_name}" '%s' "${value}"
+}
+
+resolve_change_value() {
+  local var_name="${1}"
+  local prompt_text="${2}"
+  local default_value="${3}"
+  local overridden="${4}"
+  local explicit_value="${5:-}"
+
+  if [[ "${overridden}" -eq 1 ]]; then
+    printf -v "${var_name}" '%s' "${explicit_value}"
+    return
+  fi
+
+  printf -v "${var_name}" '%s' ""
+  prompt_with_default "${var_name}" "${prompt_text}" "${default_value}"
+}
+
+resolve_cert_mode_change_targets() {
+  local old_cert_mode="${1}"
+  local old_xhttp_domain="${2}"
+  local cert_mode_overridden="${3}"
+  local xhttp_domain_overridden="${4}"
+  local new_cert_mode="${5:-}"
+  local new_xhttp_domain="${6:-}"
+
+  resolve_change_value CERT_MODE "新的证书模式 (self-signed/existing/cf-origin-ca/acme-dns-cf)" "${old_cert_mode}" "${cert_mode_overridden}" "${new_cert_mode}"
+  CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
+  resolve_change_value XHTTP_DOMAIN "XHTTP CDN 域名" "${old_xhttp_domain}" "${xhttp_domain_overridden}" "${new_xhttp_domain}"
+}
+
+apply_request_literal_spec() {
+  local -n request_ref="${1}"
+  local option="${2}"
+  local spec="${3}"
+  local spec_option=""
+  local request_key=""
+  local request_value=""
+
+  IFS=':' read -r spec_option request_key request_value <<< "${spec}"
+  [[ "${option}" == "${spec_option}" ]] || return 1
+  request_ref["${request_key}"]="${request_value}"
+  return 0
+}
+
+apply_request_value_spec() {
+  local -n request_ref="${1}"
+  local option="${2}"
+  local spec="${3}"
+  local spec_option=""
+  local request_key=""
+  local override_key=""
+
+  shift 3
+  IFS=':' read -r spec_option request_key override_key <<< "${spec}"
+  [[ "${option}" == "${spec_option}" ]] || return 1
+  require_option_value "${option}" "$@"
+  request_ref["${request_key}"]="${1}"
+  [[ -n "${override_key}" ]] && request_ref["${override_key}"]="1"
+  return 0
+}
+
+parse_request_args_by_specs() {
+  local request_name="${1}"
+  local -n request_ref="${request_name}"
+  local -n literal_specs_ref="${2}"
+  local -n value_specs_ref="${3}"
+  local unknown_arg_message="${4}"
+  local consumed=0
+  local spec=""
+
+  shift 4
+  while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then
+      shift
+      continue
+    fi
+
+    consumed=0
+    for spec in "${literal_specs_ref[@]}"; do
+      if apply_request_literal_spec "${request_name}" "${1}" "${spec}"; then
+        consumed=1
+        break
+      fi
+    done
+
+    if [[ "${consumed}" -eq 0 ]]; then
+      for spec in "${value_specs_ref[@]}"; do
+        if apply_request_value_spec "${request_name}" "${1}" "${spec}" "${@:2}"; then
+          consumed=2
+          break
+        fi
+      done
+    fi
+
+    [[ "${consumed}" -gt 0 ]] || die "${unknown_arg_message}${1}"
+    shift "${consumed}"
+  done
+}
+
+apply_request_overrides() {
+  local -n request_ref="${1}"
+  local spec=""
+  local request_key=""
+  local target_var=""
+
+  shift
+  for spec in "$@"; do
+    IFS=':' read -r request_key target_var <<< "${spec}"
+    apply_optional_override "${target_var}" "${request_ref[${request_key}]}"
+  done
+}
+
+init_change_warp_request() {
+  local -n request_ref="${1}"
+
+  request_ref=(
+    [target_mode]=""
+    [warp_team_name]=""
+    [warp_client_id]=""
+    [warp_client_secret]=""
+    [warp_proxy_port]=""
+  )
+}
+
+parse_change_warp_args() {
+  local request_name="${1}"
+  local literal_specs=(
+    "--enable-warp:target_mode:enable"
+    "--disable-warp:target_mode:disable"
+  )
+  local value_specs=(
+    "--warp-team:warp_team_name"
+    "--warp-client-id:warp_client_id"
+    "--warp-client-secret:warp_client_secret"
+    "--warp-proxy-port:warp_proxy_port"
+  )
+
+  parse_request_args_by_specs "${request_name}" literal_specs value_specs "未知的 change-warp 参数：" "${@:2}"
+}
+
+apply_warp_change_request() {
+  local request_name="${1}"
+
+  apply_request_overrides "${request_name}" \
+    "warp_team_name:WARP_TEAM_NAME" \
+    "warp_client_id:WARP_CLIENT_ID" \
+    "warp_client_secret:WARP_CLIENT_SECRET" \
+    "warp_proxy_port:WARP_PROXY_PORT"
+}
+
+resolve_change_warp_target_mode() {
+  local requested_mode="${1:-}"
+
+  if [[ -z "${requested_mode}" ]]; then
+    if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+      die "change-warp 在非交互模式下必须显式传入 --enable-warp 或 --disable-warp。"
+    fi
+
+    read -r -p "请选择 WARP 操作 [enable/disable] [${ENABLE_WARP:-yes}]: " requested_mode
+    requested_mode="${requested_mode:-${ENABLE_WARP:-yes}}"
+  fi
+
+  normalize_warp_target_mode "${requested_mode}"
+}
+
+run_change_warp_action() {
+  local target_mode="${1}"
+
+  case "${target_mode}" in
+    enable)
+      ENABLE_WARP="yes"
+      prompt_warp_settings
+      install_warp
+      apply_managed_runtime_update
+      finish_managed_change "WARP 分流已启用。"
+      ;;
+    disable)
+      ENABLE_WARP="no"
+      apply_managed_runtime_update
+      stop_and_disable_service_if_present "warp-svc.service"
+      finish_managed_change "WARP 分流已禁用。"
+      ;;
+    *)
+      die "WARP 操作只能是 enable 或 disable。"
+      ;;
+  esac
+}
+
+init_change_cert_mode_request() {
+  local -n request_ref="${1}"
+
+  request_ref=(
+    [cert_mode_overridden]="0"
+    [xhttp_domain_overridden]="0"
+    [cert_mode]=""
+    [xhttp_domain]=""
+    [cert_source_file]=""
+    [key_source_file]=""
+    [cert_source_pem]=""
+    [key_source_pem]=""
+    [cf_zone_id]=""
+    [cf_api_token]=""
+    [cf_cert_validity]=""
+    [acme_email]=""
+    [acme_ca]=""
+    [cf_dns_token]=""
+    [cf_dns_account_id]=""
+    [cf_dns_zone_id]=""
+  )
+}
+
+parse_change_cert_mode_args() {
+  local request_name="${1}"
+  local literal_specs=()
+  local value_specs=(
+    "--cert-mode:cert_mode:cert_mode_overridden"
+    "--xhttp-domain:xhttp_domain:xhttp_domain_overridden"
+    "--cert-file:cert_source_file"
+    "--key-file:key_source_file"
+    "--cert-pem:cert_source_pem"
+    "--key-pem:key_source_pem"
+    "--cf-zone-id:cf_zone_id"
+    "--cf-api-token:cf_api_token"
+    "--cf-cert-validity:cf_cert_validity"
+    "--acme-email:acme_email"
+    "--acme-ca:acme_ca"
+    "--cf-dns-token:cf_dns_token"
+    "--cf-dns-account-id:cf_dns_account_id"
+    "--cf-dns-zone-id:cf_dns_zone_id"
+  )
+
+  parse_request_args_by_specs "${request_name}" literal_specs value_specs "未知的 change-cert-mode 参数：" "${@:2}"
+}
+
+apply_cert_mode_change_request() {
+  local request_name="${1}"
+  local -n request_ref="${request_name}"
+  local old_cert_mode="${2}"
+  local old_xhttp_domain="${3}"
+
+  resolve_cert_mode_change_targets \
+    "${old_cert_mode}" \
+    "${old_xhttp_domain}" \
+    "${request_ref[cert_mode_overridden]}" \
+    "${request_ref[xhttp_domain_overridden]}" \
+    "${request_ref[cert_mode]}" \
+    "${request_ref[xhttp_domain]}"
+  apply_request_overrides "${request_name}" \
+    "cert_source_file:CERT_SOURCE_FILE" \
+    "key_source_file:KEY_SOURCE_FILE" \
+    "cert_source_pem:CERT_SOURCE_PEM" \
+    "key_source_pem:KEY_SOURCE_PEM" \
+    "cf_zone_id:CF_ZONE_ID" \
+    "cf_api_token:CF_API_TOKEN" \
+    "cf_cert_validity:CF_CERT_VALIDITY" \
+    "acme_email:ACME_EMAIL" \
+    "acme_ca:ACME_CA" \
+    "cf_dns_token:CF_DNS_TOKEN" \
+    "cf_dns_account_id:CF_DNS_ACCOUNT_ID" \
+    "cf_dns_zone_id:CF_DNS_ZONE_ID"
+}
+
+begin_managed_change() {
+  need_root
+  start_backup_session
+  load_current_install_context
+}
+
+finish_managed_change() {
+  local message="${1}"
+
+  log "${message}"
+  log "备份目录：${BACKUP_DIR}"
+  show_links
 }
 
 upgrade_cmd() {
@@ -2380,85 +2779,123 @@ path_to_uri_component() {
   uri_encode "${1}"
 }
 
+write_state_kv() {
+  local key="${1}"
+  local value="${2-}"
+
+  printf '%s=%q\n' "${key}" "${value}"
+}
+
 write_state_file() {
   mkdir -p "${XRAY_CONFIG_DIR}"
-cat > "${STATE_FILE}" <<EOF
-SERVER_IP='${SERVER_IP}'
-NODE_LABEL_PREFIX='${NODE_LABEL_PREFIX}'
-REALITY_UUID='${REALITY_UUID}'
-REALITY_SNI='${REALITY_SNI}'
-REALITY_TARGET='${REALITY_TARGET}'
-REALITY_SHORT_ID='${REALITY_SHORT_ID}'
-REALITY_PRIVATE_KEY='${REALITY_PRIVATE_KEY}'
-REALITY_PUBLIC_KEY='${REALITY_PUBLIC_KEY}'
-XHTTP_UUID='${XHTTP_UUID}'
-XHTTP_DOMAIN='${XHTTP_DOMAIN}'
-XHTTP_PATH='${XHTTP_PATH}'
-XHTTP_VLESS_ENCRYPTION_ENABLED='${XHTTP_VLESS_ENCRYPTION_ENABLED}'
-XHTTP_VLESS_DECRYPTION='${XHTTP_VLESS_DECRYPTION}'
-XHTTP_VLESS_ENCRYPTION='${XHTTP_VLESS_ENCRYPTION}'
-TLS_ALPN='${TLS_ALPN}'
-FINGERPRINT='${FINGERPRINT}'
-ENABLE_WARP='${ENABLE_WARP}'
-ENABLE_NET_OPT='${ENABLE_NET_OPT}'
-WARP_PROXY_PORT='${WARP_PROXY_PORT}'
-WARP_TEAM_NAME='${WARP_TEAM_NAME}'
-WARP_CLIENT_ID='${WARP_CLIENT_ID}'
-WARP_CLIENT_SECRET='${WARP_CLIENT_SECRET}'
-CERT_MODE='${CERT_MODE}'
-CF_ZONE_ID='${CF_ZONE_ID}'
-CF_CERT_VALIDITY='${CF_CERT_VALIDITY}'
-ACME_EMAIL='${ACME_EMAIL}'
-ACME_CA='${ACME_CA}'
-CF_DNS_ACCOUNT_ID='${CF_DNS_ACCOUNT_ID}'
-CF_DNS_ZONE_ID='${CF_DNS_ZONE_ID}'
-XHTTP_ECH_CONFIG_LIST='${XHTTP_ECH_CONFIG_LIST}'
-XHTTP_ECH_FORCE_QUERY='${XHTTP_ECH_FORCE_QUERY}'
-EOF
+  {
+    # ------------------------------
+    # 状态文件统一走 shell 转义
+    # 避免密钥或路径里的特殊字符污染 source
+    # ------------------------------
+    write_state_kv "SERVER_IP" "${SERVER_IP}"
+    write_state_kv "NODE_LABEL_PREFIX" "${NODE_LABEL_PREFIX}"
+    write_state_kv "REALITY_UUID" "${REALITY_UUID}"
+    write_state_kv "REALITY_SNI" "${REALITY_SNI}"
+    write_state_kv "REALITY_TARGET" "${REALITY_TARGET}"
+    write_state_kv "REALITY_SHORT_ID" "${REALITY_SHORT_ID}"
+    write_state_kv "REALITY_PRIVATE_KEY" "${REALITY_PRIVATE_KEY}"
+    write_state_kv "REALITY_PUBLIC_KEY" "${REALITY_PUBLIC_KEY}"
+    write_state_kv "XHTTP_UUID" "${XHTTP_UUID}"
+    write_state_kv "XHTTP_DOMAIN" "${XHTTP_DOMAIN}"
+    write_state_kv "XHTTP_PATH" "${XHTTP_PATH}"
+    write_state_kv "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}"
+    write_state_kv "XHTTP_VLESS_DECRYPTION" "${XHTTP_VLESS_DECRYPTION}"
+    write_state_kv "XHTTP_VLESS_ENCRYPTION" "${XHTTP_VLESS_ENCRYPTION}"
+    write_state_kv "TLS_ALPN" "${TLS_ALPN}"
+    write_state_kv "FINGERPRINT" "${FINGERPRINT}"
+    write_state_kv "ENABLE_WARP" "${ENABLE_WARP}"
+    write_state_kv "ENABLE_NET_OPT" "${ENABLE_NET_OPT}"
+    write_state_kv "WARP_PROXY_PORT" "${WARP_PROXY_PORT}"
+    write_state_kv "WARP_TEAM_NAME" "${WARP_TEAM_NAME}"
+    write_state_kv "WARP_CLIENT_ID" "${WARP_CLIENT_ID}"
+    write_state_kv "WARP_CLIENT_SECRET" "${WARP_CLIENT_SECRET}"
+    write_state_kv "CERT_MODE" "${CERT_MODE}"
+    write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID}"
+    write_state_kv "CF_CERT_VALIDITY" "${CF_CERT_VALIDITY}"
+    write_state_kv "ACME_EMAIL" "${ACME_EMAIL}"
+    write_state_kv "ACME_CA" "${ACME_CA}"
+    write_state_kv "CF_DNS_ACCOUNT_ID" "${CF_DNS_ACCOUNT_ID}"
+    write_state_kv "CF_DNS_ZONE_ID" "${CF_DNS_ZONE_ID}"
+    write_state_kv "XHTTP_ECH_CONFIG_LIST" "${XHTTP_ECH_CONFIG_LIST}"
+    write_state_kv "XHTTP_ECH_FORCE_QUERY" "${XHTTP_ECH_FORCE_QUERY}"
+  } > "${STATE_FILE}"
   chmod 0600 "${STATE_FILE}"
 }
 
-write_output_file() {
-  local xhttp_path_component=""
-  local xhttp_ech_component=""
-  local xhttp_vlessenc_component=""
-  local cf_ssl_mode="Full (strict)"
-  local reality_label=""
-  local xhttp_label=""
-  local xhttp_split_label=""
-  local xhttp_uri=""
-  local xhttp_split_uri=""
-  local xhttp_encryption_value="none"
-  local split_extra_json=""
-  local split_extra_component=""
-
-  xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
-  xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
-  xhttp_vlessenc_component="$(uri_encode "${XHTTP_VLESS_ENCRYPTION}")"
-  reality_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-REALITY"
-  xhttp_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-XHTTP-CDN"
-  xhttp_split_label="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")-XHTTP-SPLIT-CDN-REALITY"
-
-  if [[ "${CERT_MODE}" == "self-signed" ]]; then
-    cf_ssl_mode="Full"
+xhttp_vless_status_text() {
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then
+    printf '已启用'
+    return
   fi
 
-  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
-    xhttp_encryption_value="${xhttp_vlessenc_component}"
+  printf '未启用'
+}
+
+xhttp_vless_enabled_text() {
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then
+    printf '是'
+    return
   fi
 
-  xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_encryption_value}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
-  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
-    xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_vlessenc_component}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
-  fi
+  printf '否'
+}
+
+xhttp_ech_status_text() {
   if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
-    xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=none&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
-    if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
-      xhttp_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_vlessenc_component}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&ech=${xhttp_ech_component}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}#${xhttp_label}"
-    fi
+    printf '是'
+    return
   fi
 
-  split_extra_json="$(jq -cn \
+  printf '否'
+}
+
+xhttp_uri_encryption_value() {
+  local encoded_encryption="${1}"
+
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    printf '%s' "${encoded_encryption}"
+    return
+  fi
+
+  printf 'none'
+}
+
+build_xhttp_uri() {
+  local label="${1}"
+  local path_component="${2}"
+  local encoded_encryption="${3}"
+  local ech_component="${4:-}"
+  local extra_component="${5:-}"
+  local ech_query=""
+  local extra_query=""
+  local encryption_value=""
+
+  encryption_value="$(xhttp_uri_encryption_value "${encoded_encryption}")"
+  [[ -n "${ech_component}" ]] && ech_query="&ech=${ech_component}"
+  [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
+
+  printf 'vless://%s@%s:443?mode=auto&path=%s&security=tls&alpn=%s&encryption=%s&insecure=0&host=%s&fp=%s&type=xhttp&allowInsecure=0&sni=%s%s%s#%s' \
+    "${XHTTP_UUID}" \
+    "${XHTTP_DOMAIN}" \
+    "${path_component}" \
+    "${TLS_ALPN}" \
+    "${encryption_value}" \
+    "${XHTTP_DOMAIN}" \
+    "${FINGERPRINT}" \
+    "${XHTTP_DOMAIN}" \
+    "${ech_query}" \
+    "${extra_query}" \
+    "${label}"
+}
+
+build_xhttp_split_extra_json() {
+  jq -cn \
     --arg address "${SERVER_IP}" \
     --arg server_name "${REALITY_SNI}" \
     --arg fingerprint "${FINGERPRINT}" \
@@ -2484,16 +2921,40 @@ write_output_file() {
           mode: "auto"
         }
       }
-    }')"
-  split_extra_component="$(uri_encode "${split_extra_json}")"
-  xhttp_split_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_encryption_value}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}&extra=${split_extra_component}#${xhttp_split_label}"
-  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
-    xhttp_split_uri="vless://${XHTTP_UUID}@${XHTTP_DOMAIN}:443?mode=auto&path=${xhttp_path_component}&security=tls&alpn=${TLS_ALPN}&encryption=${xhttp_vlessenc_component}&insecure=0&host=${XHTTP_DOMAIN}&fp=${FINGERPRINT}&type=xhttp&allowInsecure=0&sni=${XHTTP_DOMAIN}&extra=${split_extra_component}#${xhttp_split_label}"
+    }'
+}
+
+prefixed_node_label() {
+  local suffix="${1}"
+  printf '%s-%s' "$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")" "${suffix}"
+}
+
+cloudflare_ssl_mode_text() {
+  if [[ "${CERT_MODE}" == "self-signed" ]]; then
+    printf 'Full'
+    return
   fi
 
-  cat > "${OUTPUT_FILE}" <<EOF
-# Xray WARP Team 部署信息
+  printf 'Full (strict)'
+}
 
+build_reality_uri() {
+  local label="${1}"
+
+  printf 'vless://%s@%s:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=tcp&headerType=none#%s' \
+    "${REALITY_UUID}" \
+    "${SERVER_IP}" \
+    "${REALITY_SNI}" \
+    "${FINGERPRINT}" \
+    "${REALITY_PUBLIC_KEY}" \
+    "${REALITY_SHORT_ID}" \
+    "${label}"
+}
+
+output_reality_block() {
+  local reality_uri="${1}"
+
+  cat <<EOF
 ## 节点 1
 - 类型: VLESS + REALITY + Vision
 - 节点名前缀: ${NODE_LABEL_PREFIX}
@@ -2507,37 +2968,65 @@ write_output_file() {
 - 指纹: ${FINGERPRINT}
 
 链接:
-vless://${REALITY_UUID}@${SERVER_IP}:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${REALITY_SNI}&fp=${FINGERPRINT}&pbk=${REALITY_PUBLIC_KEY}&sid=${REALITY_SHORT_ID}&type=tcp&headerType=none#${reality_label}
+${reality_uri}
+EOF
+}
 
-## 节点 2
-- 类型: VLESS + XHTTP + TLS + CDN
+output_xhttp_block() {
+  local title="${1}"
+
+  cat <<EOF
+## ${title}
 - 地址: ${XHTTP_DOMAIN}
 - 端口: 443
 - UUID: ${XHTTP_UUID}
+EOF
+}
+
+output_xhttp_shared_details() {
+  cat <<EOF
+- 路径: ${XHTTP_PATH}
+- VLESS Encryption: $(xhttp_vless_status_text)
+EOF
+}
+
+output_xhttp_cdn_block() {
+  local uri="${1}"
+
+  cat <<EOF
+$(output_xhttp_block "节点 2")
+- 类型: VLESS + XHTTP + TLS + CDN
 - SNI: ${XHTTP_DOMAIN}
 - 主机名: ${XHTTP_DOMAIN}
 - ALPN: ${TLS_ALPN}
-- 路径: ${XHTTP_PATH}
 - 模式: auto
 - 指纹: ${FINGERPRINT}
-- VLESS Encryption: $(if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then printf '已启用'; else printf '未启用'; fi)
+$(output_xhttp_shared_details)
 
 链接:
-${xhttp_uri}
+${uri}
+EOF
+}
 
-## 节点 3
+output_xhttp_split_block() {
+  local uri="${1}"
+
+  cat <<EOF
+$(output_xhttp_block "节点 3")
 - 类型: 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality
-- 地址: ${XHTTP_DOMAIN}
-- 端口: 443
-- UUID: ${XHTTP_UUID}
 - 上行: XHTTP + TLS + CDN
 - 下行: XHTTP + Reality
-- 路径: ${XHTTP_PATH}
-- VLESS Encryption: $(if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then printf '已启用'; else printf '未启用'; fi)
+$(output_xhttp_shared_details)
 
 链接:
-${xhttp_split_uri}
+${uri}
+EOF
+}
 
+output_runtime_summary_block() {
+  local cf_ssl_mode="${1}"
+
+  cat <<EOF
 ## Cloudflare DNS 设置
 - 请将 ${XHTTP_DOMAIN} 解析到此服务器 IP。
 - 请为 ${XHTTP_DOMAIN} 打开橙云代理。
@@ -2554,19 +3043,59 @@ ${xhttp_split_uri}
 - 本地 SOCKS5 端口: ${WARP_PROXY_PORT}
 
 ## XHTTP ECH
-- 已启用: $(if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then printf '是'; else printf '否'; fi)
+- 已启用: $(xhttp_ech_status_text)
 - DoH / ECH 查询: ${XHTTP_ECH_CONFIG_LIST:-未设置}
 - 强制查询模式: ${XHTTP_ECH_FORCE_QUERY:-未设置}
 - 说明: 默认不启用 ECH，导出的两个 XHTTP 节点分享链接也不会带 ech= 参数，避免额外的 DNS / DoH 查询。
 
 ## XHTTP VLESS Encryption
-- 已启用: $(if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" ]]; then printf '是'; else printf '否'; fi)
+- 已启用: $(xhttp_vless_enabled_text)
 - 说明: 默认开启，用于给 XHTTP 相关节点增加一层 VLESS 端到端加密。
 
 ## 网络优化
 - 已启用: ${ENABLE_NET_OPT}
 - Sysctl 文件: ${NET_SYSCTL_CONF}
 - 服务名: ${NET_SERVICE_NAME}
+EOF
+}
+
+write_output_file() {
+  local xhttp_path_component=""
+  local xhttp_ech_component=""
+  local xhttp_vlessenc_component=""
+  local reality_label=""
+  local xhttp_label=""
+  local xhttp_split_label=""
+  local reality_uri=""
+  local xhttp_uri=""
+  local xhttp_split_uri=""
+  local split_extra_json=""
+  local split_extra_component=""
+  local cf_ssl_mode=""
+
+  xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
+  xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
+  xhttp_vlessenc_component="$(uri_encode "${XHTTP_VLESS_ENCRYPTION}")"
+  reality_label="$(prefixed_node_label "REALITY")"
+  xhttp_label="$(prefixed_node_label "XHTTP-CDN")"
+  xhttp_split_label="$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")"
+  reality_uri="$(build_reality_uri "${reality_label}")"
+  xhttp_uri="$(build_xhttp_uri "${xhttp_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}")"
+  split_extra_json="$(build_xhttp_split_extra_json)"
+  split_extra_component="$(uri_encode "${split_extra_json}")"
+  xhttp_split_uri="$(build_xhttp_uri "${xhttp_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "" "${split_extra_component}")"
+  cf_ssl_mode="$(cloudflare_ssl_mode_text)"
+
+  cat > "${OUTPUT_FILE}" <<EOF
+# Xray WARP Team 部署信息
+
+$(output_reality_block "${reality_uri}")
+
+$(output_xhttp_cdn_block "${xhttp_uri}")
+
+$(output_xhttp_split_block "${xhttp_split_uri}")
+
+$(output_runtime_summary_block "${cf_ssl_mode}")
 EOF
 }
 
@@ -2577,13 +3106,18 @@ change_uuid_cmd() {
   local new_xhttp_uuid=""
 
   while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then
+      shift
+      continue
+    fi
+
     case "${1}" in
       --reality-uuid)
-        new_reality_uuid="${2}"
+        assign_option_value new_reality_uuid "$@"
         shift
         ;;
       --xhttp-uuid)
-        new_xhttp_uuid="${2}"
+        assign_option_value new_xhttp_uuid "$@"
         shift
         ;;
       --reality-only)
@@ -2591,10 +3125,6 @@ change_uuid_cmd() {
         ;;
       --xhttp-only)
         rotate_reality=0
-        ;;
-      --help|-h|help)
-        usage
-        exit 0
         ;;
       *)
         die "未知的 change-uuid 参数：${1}"
@@ -2607,9 +3137,7 @@ change_uuid_cmd() {
     die "没有需要修改的内容。请使用默认行为，或传入 --reality-only / --xhttp-only。"
   fi
 
-  need_root
-  start_backup_session
-  load_current_install_context
+  begin_managed_change
 
   if [[ "${rotate_reality}" -eq 1 ]]; then
     REALITY_UUID="${new_reality_uuid:-$(random_uuid)}"
@@ -2625,34 +3153,25 @@ change_uuid_cmd() {
   write_state_file
   write_output_file
 
-  log "UUID 轮换完成。"
-  log "备份目录：${BACKUP_DIR}"
-  show_links
+  finish_managed_change "UUID 轮换完成。"
 }
 
 change_sni_cmd() {
   local old_reality_sni=""
+  local new_reality_sni=""
   local sni_overridden=0
 
-  need_root
-  start_backup_session
-  load_current_install_context
-
-  old_reality_sni="${REALITY_SNI}"
-
   while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then
+      shift
+      continue
+    fi
+
     case "${1}" in
-      --non-interactive)
-        NON_INTERACTIVE=1
-        ;;
       --reality-sni)
-        REALITY_SNI="${2}"
+        assign_option_value new_reality_sni "$@"
         sni_overridden=1
         shift
-        ;;
-      --help|-h|help)
-        usage
-        exit 0
         ;;
       *)
         die "未知的 change-sni 参数：${1}"
@@ -2661,38 +3180,32 @@ change_sni_cmd() {
     shift
   done
 
-  if [[ "${sni_overridden}" -eq 0 ]]; then
-    REALITY_SNI=""
-    prompt_with_default REALITY_SNI "新的 REALITY 可见 SNI" "${old_reality_sni}"
-  fi
-  REALITY_TARGET="127.0.0.1:${NGINX_FALLBACK_PORT}"
+  begin_managed_change
+  old_reality_sni="${REALITY_SNI}"
+
+  resolve_change_value REALITY_SNI "新的 REALITY 可见 SNI" "${old_reality_sni}" "${sni_overridden}" "${new_reality_sni}"
+  REALITY_TARGET="$(default_reality_target_for_sni "${REALITY_SNI}")"
 
   apply_managed_runtime_update
-  log "REALITY SNI 已更新。"
-  log "备份目录：${BACKUP_DIR}"
-  show_links
+  finish_managed_change "REALITY SNI 已更新。"
 }
 
 change_path_cmd() {
+  local old_xhttp_path=""
+  local new_xhttp_path=""
   local path_overridden=0
 
-  need_root
-  start_backup_session
-  load_current_install_context
-
   while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then
+      shift
+      continue
+    fi
+
     case "${1}" in
-      --non-interactive)
-        NON_INTERACTIVE=1
-        ;;
       --xhttp-path)
-        XHTTP_PATH="${2}"
+        assign_option_value new_xhttp_path "$@"
         path_overridden=1
         shift
-        ;;
-      --help|-h|help)
-        usage
-        exit 0
         ;;
       *)
         die "未知的 change-path 参数：${1}"
@@ -2701,38 +3214,32 @@ change_path_cmd() {
     shift
   done
 
-  if [[ "${path_overridden}" -eq 0 ]]; then
-    XHTTP_PATH=""
-    prompt_with_default XHTTP_PATH "新的 XHTTP 路径" "$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')"
-  fi
+  begin_managed_change
+  old_xhttp_path="${XHTTP_PATH}"
+
+  resolve_change_value XHTTP_PATH "新的 XHTTP 路径" "${old_xhttp_path}" "${path_overridden}" "${new_xhttp_path}"
   ensure_xhttp_path_format
 
   apply_managed_runtime_update
-  log "XHTTP 路径已更新。"
-  log "备份目录：${BACKUP_DIR}"
-  show_links
+  finish_managed_change "XHTTP 路径已更新。"
 }
 
 change_label_prefix_cmd() {
+  local old_node_label_prefix=""
+  local new_node_label_prefix=""
   local prefix_overridden=0
 
-  need_root
-  start_backup_session
-  load_current_install_context
-
   while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then
+      shift
+      continue
+    fi
+
     case "${1}" in
-      --non-interactive)
-        NON_INTERACTIVE=1
-        ;;
       --node-label-prefix)
-        NODE_LABEL_PREFIX="${2}"
+        assign_option_value new_node_label_prefix "$@"
         prefix_overridden=1
         shift
-        ;;
-      --help|-h|help)
-        usage
-        exit 0
         ;;
       *)
         die "未知的 change-label-prefix 参数：${1}"
@@ -2741,224 +3248,47 @@ change_label_prefix_cmd() {
     shift
   done
 
-  if [[ "${prefix_overridden}" -eq 0 ]]; then
-    NODE_LABEL_PREFIX=""
-    prompt_with_default NODE_LABEL_PREFIX "新的节点名前缀" "$(default_node_label_prefix)"
-  fi
+  begin_managed_change
+  old_node_label_prefix="${NODE_LABEL_PREFIX}"
 
+  resolve_change_value NODE_LABEL_PREFIX "新的节点名前缀" "${old_node_label_prefix}" "${prefix_overridden}" "${new_node_label_prefix}"
   NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
 
   write_state_file
   write_output_file
 
-  log "节点名前缀已更新。"
-  log "备份目录：${BACKUP_DIR}"
-  show_links
+  finish_managed_change "节点名前缀已更新。"
 }
 
 change_warp_cmd() {
-  local target_mode=""
+  local -A request=()
 
-  need_root
+  init_change_warp_request request
+  parse_change_warp_args request "$@"
   ensure_debian_family
-  start_backup_session
-  load_current_install_context
+  begin_managed_change
 
-  while [[ $# -gt 0 ]]; do
-    case "${1}" in
-      --non-interactive)
-        NON_INTERACTIVE=1
-        ;;
-      --enable-warp)
-        target_mode="enable"
-        ;;
-      --disable-warp)
-        target_mode="disable"
-        ;;
-      --warp-team)
-        WARP_TEAM_NAME="${2}"
-        shift
-        ;;
-      --warp-client-id)
-        WARP_CLIENT_ID="${2}"
-        shift
-        ;;
-      --warp-client-secret)
-        WARP_CLIENT_SECRET="${2}"
-        shift
-        ;;
-      --warp-proxy-port)
-        WARP_PROXY_PORT="${2}"
-        shift
-        ;;
-      --help|-h|help)
-        usage
-        exit 0
-        ;;
-      *)
-        die "未知的 change-warp 参数：${1}"
-        ;;
-    esac
-    shift
-  done
-
-  if [[ -z "${target_mode}" ]]; then
-    if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
-      die "change-warp 在非交互模式下必须显式传入 --enable-warp 或 --disable-warp。"
-    fi
-
-    read -r -p "请选择 WARP 操作 [enable/disable] [${ENABLE_WARP:-yes}]: " target_mode
-    target_mode="${target_mode:-${ENABLE_WARP:-yes}}"
-    case "${target_mode}" in
-      yes|enable|enabled)
-        target_mode="enable"
-        ;;
-      no|disable|disabled)
-        target_mode="disable"
-        ;;
-      *)
-        die "WARP 操作只能是 enable 或 disable。"
-        ;;
-    esac
-  fi
-
-  case "${target_mode}" in
-    enable)
-      ENABLE_WARP="yes"
-      prompt_with_default WARP_TEAM_NAME "Cloudflare Zero Trust 团队名" "${WARP_TEAM_NAME:-}"
-      prompt_with_default WARP_CLIENT_ID "Cloudflare 服务令牌 Client ID" "${WARP_CLIENT_ID:-}"
-      prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
-      prompt_with_default WARP_PROXY_PORT "本地 WARP SOCKS5 端口" "${WARP_PROXY_PORT:-${DEFAULT_WARP_PROXY_PORT}}"
-
-      install_warp
-      apply_managed_runtime_update
-      log "WARP 分流已启用。"
-      ;;
-    disable)
-      ENABLE_WARP="no"
-      apply_managed_runtime_update
-      stop_and_disable_service_if_present "warp-svc.service"
-      log "WARP 分流已禁用。"
-      ;;
-    *)
-      die "WARP 操作只能是 enable 或 disable。"
-      ;;
-  esac
-
-  log "备份目录：${BACKUP_DIR}"
-  show_links
+  apply_warp_change_request request
+  run_change_warp_action "$(resolve_change_warp_target_mode "${request[target_mode]}")"
 }
 
 change_cert_mode_cmd() {
   local old_cert_mode=""
   local old_xhttp_domain=""
-  local mode_overridden=0
-  local domain_overridden=0
+  local -A request=()
 
-  need_root
-  start_backup_session
-  load_current_install_context
-
+  init_change_cert_mode_request request
+  parse_change_cert_mode_args request "$@"
+  begin_managed_change
   old_cert_mode="${CERT_MODE}"
   old_xhttp_domain="${XHTTP_DOMAIN}"
 
-  while [[ $# -gt 0 ]]; do
-    case "${1}" in
-      --non-interactive)
-        NON_INTERACTIVE=1
-        ;;
-      --cert-mode)
-        CERT_MODE="${2}"
-        mode_overridden=1
-        shift
-        ;;
-      --xhttp-domain)
-        XHTTP_DOMAIN="${2}"
-        domain_overridden=1
-        shift
-        ;;
-      --cert-file)
-        CERT_SOURCE_FILE="${2}"
-        shift
-        ;;
-      --key-file)
-        KEY_SOURCE_FILE="${2}"
-        shift
-        ;;
-      --cert-pem)
-        CERT_SOURCE_PEM="${2}"
-        shift
-        ;;
-      --key-pem)
-        KEY_SOURCE_PEM="${2}"
-        shift
-        ;;
-      --cf-zone-id)
-        CF_ZONE_ID="${2}"
-        shift
-        ;;
-      --cf-api-token)
-        CF_API_TOKEN="${2}"
-        shift
-        ;;
-      --cf-cert-validity)
-        CF_CERT_VALIDITY="${2}"
-        shift
-        ;;
-      --acme-email)
-        ACME_EMAIL="${2}"
-        shift
-        ;;
-      --acme-ca)
-        ACME_CA="${2}"
-        shift
-        ;;
-      --cf-dns-token)
-        CF_DNS_TOKEN="${2}"
-        shift
-        ;;
-      --cf-dns-account-id)
-        CF_DNS_ACCOUNT_ID="${2}"
-        shift
-        ;;
-      --cf-dns-zone-id)
-        CF_DNS_ZONE_ID="${2}"
-        shift
-        ;;
-      --help|-h|help)
-        usage
-        exit 0
-        ;;
-      *)
-        die "未知的 change-cert-mode 参数：${1}"
-        ;;
-    esac
-    shift
-  done
-
-  if [[ "${mode_overridden}" -eq 0 ]]; then
-    CERT_MODE=""
-    prompt_with_default CERT_MODE "新的证书模式 (self-signed/existing/cf-origin-ca/acme-dns-cf)" "${old_cert_mode}"
-  fi
-  case "${CERT_MODE}" in
-    self-signed|existing|cf-origin-ca|acme-dns-cf)
-      ;;
-    *)
-      die "不支持的证书模式：${CERT_MODE}"
-      ;;
-  esac
-
-  if [[ "${domain_overridden}" -eq 0 ]]; then
-    XHTTP_DOMAIN=""
-    prompt_with_default XHTTP_DOMAIN "XHTTP CDN 域名" "${old_xhttp_domain}"
-  fi
+  apply_cert_mode_change_request request "${old_cert_mode}" "${old_xhttp_domain}"
   prompt_cert_mode_inputs
   apply_managed_update
   cleanup_previous_acme_cert "${old_cert_mode}" "${old_xhttp_domain}"
 
-  log "证书模式已更新。"
-  log "备份目录：${BACKUP_DIR}"
-  show_links
+  finish_managed_change "证书模式已更新。"
 }
 
 show_links() {
@@ -3095,15 +3425,8 @@ uninstall_cmd() {
   log "已安装的软件包已保留。"
 }
 
-main_menu() {
-  local choice=""
-
-  while true; do
-    if [[ -t 1 ]]; then
-      clear >/dev/null 2>&1 || true
-    fi
-    show_dashboard
-    cat <<'EOF'
+show_main_menu() {
+  cat <<'EOF'
   1. 安装或重装
   2. 查看节点链接
   3. 刷新状态面板
@@ -3121,262 +3444,55 @@ main_menu() {
   15. 帮助
   0. 退出
 EOF
-    read -r -p "请选择: " choice
-    case "${choice}" in
-      1) install_cmd ;;
-      2) show_links ;;
-      3) status_cmd ;;
-      4) restart_cmd ;;
-      5) upgrade_cmd ;;
-      6) change_uuid_cmd ;;
-      7) change_sni_cmd ;;
-      8) change_path_cmd ;;
-      9) change_label_prefix_cmd ;;
-      10) change_warp_cmd ;;
-      11) change_cert_mode_cmd ;;
-      12) repair_perms_cmd ;;
-      13) uninstall_cmd ;;
-      14) status_raw_cmd ;;
-      15) usage ;;
-      0) exit 0 ;;
-      *) warn "未知的菜单项：${choice}" ;;
-    esac
-    if [[ "${choice}" != "0" ]]; then
-      printf '\n'
-      read -r -p "按回车继续..." _
-    fi
-  done
 }
 
-parse_install_args() {
-  while [[ $# -gt 0 ]]; do
-    case "${1}" in
-      --non-interactive)
-        NON_INTERACTIVE=1
-        ;;
-      --server-ip)
-        SERVER_IP="${2}"
-        shift
-        ;;
-      --node-label-prefix)
-        NODE_LABEL_PREFIX="${2}"
-        shift
-        ;;
-      --reality-uuid)
-        REALITY_UUID="${2}"
-        shift
-        ;;
-      --reality-sni)
-        REALITY_SNI="${2}"
-        shift
-        ;;
-      --reality-target)
-        REALITY_TARGET="${2}"
-        shift
-        ;;
-      --reality-short-id)
-        REALITY_SHORT_ID="${2}"
-        shift
-        ;;
-      --reality-private-key)
-        REALITY_PRIVATE_KEY="${2}"
-        shift
-        ;;
-      --xhttp-uuid)
-        XHTTP_UUID="${2}"
-        shift
-        ;;
-      --xhttp-domain)
-        XHTTP_DOMAIN="${2}"
-        shift
-        ;;
-      --xhttp-path)
-        XHTTP_PATH="${2}"
-        shift
-        ;;
-      --enable-xhttp-vless-encryption)
-        XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
-        ;;
-      --disable-xhttp-vless-encryption)
-        XHTTP_VLESS_ENCRYPTION_ENABLED="no"
-        ;;
-      --cert-mode)
-        CERT_MODE="${2}"
-        shift
-        ;;
-      --cert-file)
-        CERT_SOURCE_FILE="${2}"
-        shift
-        ;;
-      --key-file)
-        KEY_SOURCE_FILE="${2}"
-        shift
-        ;;
-      --cert-pem)
-        CERT_SOURCE_PEM="${2}"
-        shift
-        ;;
-      --key-pem)
-        KEY_SOURCE_PEM="${2}"
-        shift
-        ;;
-      --cf-zone-id)
-        CF_ZONE_ID="${2}"
-        shift
-        ;;
-      --cf-api-token)
-        CF_API_TOKEN="${2}"
-        shift
-        ;;
-      --cf-cert-validity)
-        CF_CERT_VALIDITY="${2}"
-        shift
-        ;;
-      --acme-email)
-        ACME_EMAIL="${2}"
-        shift
-        ;;
-      --acme-ca)
-        ACME_CA="${2}"
-        shift
-        ;;
-      --cf-dns-token)
-        CF_DNS_TOKEN="${2}"
-        shift
-        ;;
-      --cf-dns-account-id)
-        CF_DNS_ACCOUNT_ID="${2}"
-        shift
-        ;;
-      --cf-dns-zone-id)
-        CF_DNS_ZONE_ID="${2}"
-        shift
-        ;;
-      --enable-warp)
-        ENABLE_WARP="yes"
-        ;;
-      --disable-warp)
-        ENABLE_WARP="no"
-        ;;
-      --enable-net-opt)
-        ENABLE_NET_OPT="yes"
-        ;;
-      --disable-net-opt)
-        ENABLE_NET_OPT="no"
-        ;;
-      --warp-team)
-        WARP_TEAM_NAME="${2}"
-        shift
-        ;;
-      --warp-client-id)
-        WARP_CLIENT_ID="${2}"
-        shift
-        ;;
-      --warp-client-secret)
-        WARP_CLIENT_SECRET="${2}"
-        shift
-        ;;
-      --warp-proxy-port)
-        WARP_PROXY_PORT="${2}"
-        shift
-        ;;
-      --help|-h|help)
-        usage
-        exit 0
-        ;;
-      *)
-        die "未知的 install 参数：${1}"
-        ;;
-    esac
-    shift
-  done
+pause_after_menu_action() {
+  printf '\n'
+  read -r -p "按回车继续..." _
 }
 
-install_cmd() {
-  need_root
-  ensure_debian_family
-
-  start_backup_session
-
-  parse_install_args "$@"
-  prepare_install_inputs
-  install_packages
-  install_self_command
-  install_xray
-  ensure_xray_bind_capability
-  ensure_xray_user
-  generate_reality_keys_if_needed
-  write_tls_assets
-  write_xray_config
-  write_haproxy_config
-  write_nginx_config
-  write_xray_service
-  install_network_optimization
-  install_warp
-  retire_haproxy_if_present
-  validate_configs
-  restart_services
-  write_state_file
-  write_output_file
-
-  log "部署完成。"
-  log "备份目录：${BACKUP_DIR}"
-  log "管理命令：${SELF_COMMAND_PATH}"
-  log "节点链接已写入：${OUTPUT_FILE}"
-  show_links
-}
-
-main() {
+run_cli_command() {
   local command="${1:-menu}"
+
+  if [[ $# -gt 0 ]]; then
+    shift
+  fi
 
   case "${command}" in
     menu)
-      if [[ $# -gt 0 ]]; then
-        shift
-      fi
       main_menu
       ;;
     install)
-      shift || true
       install_cmd "$@"
       ;;
     upgrade)
-      shift || true
       upgrade_cmd "$@"
       ;;
     change-uuid)
-      shift || true
       change_uuid_cmd "$@"
       ;;
     change-sni)
-      shift || true
       change_sni_cmd "$@"
       ;;
     change-path)
-      shift || true
       change_path_cmd "$@"
       ;;
     change-label-prefix)
-      shift || true
       change_label_prefix_cmd "$@"
       ;;
     change-warp)
-      shift || true
       change_warp_cmd "$@"
       ;;
     change-cert-mode)
-      shift || true
       change_cert_mode_cmd "$@"
       ;;
     uninstall)
-      shift || true
       uninstall_cmd "$@"
       ;;
     show-links)
       show_links
       ;;
     status)
-      shift || true
       status_cmd "$@"
       ;;
     restart)
@@ -3392,6 +3508,209 @@ main() {
       die "未知命令：${command}"
       ;;
   esac
+}
+
+run_menu_choice() {
+  case "${1}" in
+    1) run_cli_command install ;;
+    2) run_cli_command show-links ;;
+    3) run_cli_command status ;;
+    4) run_cli_command restart ;;
+    5) run_cli_command upgrade ;;
+    6) run_cli_command change-uuid ;;
+    7) run_cli_command change-sni ;;
+    8) run_cli_command change-path ;;
+    9) run_cli_command change-label-prefix ;;
+    10) run_cli_command change-warp ;;
+    11) run_cli_command change-cert-mode ;;
+    12) run_cli_command repair-perms ;;
+    13) run_cli_command uninstall ;;
+    14) run_cli_command status --raw ;;
+    15) run_cli_command help ;;
+    *)
+      warn "未知的菜单项：${1}"
+      return 1
+      ;;
+  esac
+}
+
+main_menu() {
+  local choice=""
+
+  while true; do
+    if [[ -t 1 ]]; then
+      clear >/dev/null 2>&1 || true
+    fi
+    show_dashboard
+    show_main_menu
+    read -r -p "请选择: " choice
+    if [[ "${choice}" == "0" ]]; then
+      exit 0
+    fi
+    run_menu_choice "${choice}" || true
+    pause_after_menu_action
+  done
+}
+
+parse_install_flag_arg() {
+  case "${1}" in
+    --non-interactive)
+      NON_INTERACTIVE=1
+      ;;
+    --enable-xhttp-vless-encryption)
+      XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+      ;;
+    --disable-xhttp-vless-encryption)
+      XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+      ;;
+    --enable-warp)
+      ENABLE_WARP="yes"
+      ;;
+    --disable-warp)
+      ENABLE_WARP="no"
+      ;;
+    --enable-net-opt)
+      ENABLE_NET_OPT="yes"
+      ;;
+    --disable-net-opt)
+      ENABLE_NET_OPT="no"
+      ;;
+    --help|-h|help)
+      usage
+      exit 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+parse_install_core_value_arg() {
+  case "${1}" in
+    --server-ip) assign_option_value SERVER_IP "$@" ;;
+    --node-label-prefix) assign_option_value NODE_LABEL_PREFIX "$@" ;;
+    --reality-uuid) assign_option_value REALITY_UUID "$@" ;;
+    --reality-sni) assign_option_value REALITY_SNI "$@" ;;
+    --reality-target) assign_option_value REALITY_TARGET "$@" ;;
+    --reality-short-id) assign_option_value REALITY_SHORT_ID "$@" ;;
+    --reality-private-key) assign_option_value REALITY_PRIVATE_KEY "$@" ;;
+    --xhttp-uuid) assign_option_value XHTTP_UUID "$@" ;;
+    --xhttp-domain) assign_option_value XHTTP_DOMAIN "$@" ;;
+    --xhttp-path) assign_option_value XHTTP_PATH "$@" ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+parse_install_cert_value_arg() {
+  case "${1}" in
+    --cert-mode) assign_option_value CERT_MODE "$@" ;;
+    --cert-file) assign_option_value CERT_SOURCE_FILE "$@" ;;
+    --key-file) assign_option_value KEY_SOURCE_FILE "$@" ;;
+    --cert-pem) assign_option_value CERT_SOURCE_PEM "$@" ;;
+    --key-pem) assign_option_value KEY_SOURCE_PEM "$@" ;;
+    --cf-zone-id) assign_option_value CF_ZONE_ID "$@" ;;
+    --cf-api-token) assign_option_value CF_API_TOKEN "$@" ;;
+    --cf-cert-validity) assign_option_value CF_CERT_VALIDITY "$@" ;;
+    --acme-email) assign_option_value ACME_EMAIL "$@" ;;
+    --acme-ca) assign_option_value ACME_CA "$@" ;;
+    --cf-dns-token) assign_option_value CF_DNS_TOKEN "$@" ;;
+    --cf-dns-account-id) assign_option_value CF_DNS_ACCOUNT_ID "$@" ;;
+    --cf-dns-zone-id) assign_option_value CF_DNS_ZONE_ID "$@" ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+parse_install_warp_value_arg() {
+  case "${1}" in
+    --warp-team) assign_option_value WARP_TEAM_NAME "$@" ;;
+    --warp-client-id) assign_option_value WARP_CLIENT_ID "$@" ;;
+    --warp-client-secret) assign_option_value WARP_CLIENT_SECRET "$@" ;;
+    --warp-proxy-port) assign_option_value WARP_PROXY_PORT "$@" ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+parse_install_value_arg() {
+  if parse_install_core_value_arg "$@"; then
+    return 0
+  fi
+  if parse_install_cert_value_arg "$@"; then
+    return 0
+  fi
+  if parse_install_warp_value_arg "$@"; then
+    return 0
+  fi
+
+  return 1
+}
+
+parse_install_args() {
+  while [[ $# -gt 0 ]]; do
+    if parse_install_flag_arg "${1}"; then
+      shift
+      continue
+    fi
+    if parse_install_value_arg "$@"; then
+      shift 2
+      continue
+    fi
+
+    die "未知的 install 参数：${1}"
+  done
+}
+
+prepare_install_command() {
+  need_root
+  ensure_debian_family
+  start_backup_session
+  parse_install_args "$@"
+  prepare_install_inputs
+}
+
+install_xray_runtime() {
+  install_packages
+  install_self_command
+  install_xray
+  ensure_xray_bind_capability
+  ensure_xray_user
+  generate_reality_keys_if_needed
+}
+
+write_install_managed_files() {
+  write_tls_assets
+  write_xray_config
+  write_haproxy_config
+  write_nginx_config
+  write_xray_service
+}
+
+install_optional_components() {
+  install_network_optimization
+  install_warp
+}
+
+install_cmd() {
+  prepare_install_command "$@"
+  install_xray_runtime
+  write_install_managed_files
+  install_optional_components
+  finalize_installation
+
+  log "部署完成。"
+  log "备份目录：${BACKUP_DIR}"
+  log "管理命令：${SELF_COMMAND_PATH}"
+  log "节点链接已写入：${OUTPUT_FILE}"
+  show_links
+}
+
+main() {
+  run_cli_command "$@"
 }
 
 main "$@"

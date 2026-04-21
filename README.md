@@ -22,7 +22,10 @@ xray-warp-team.sh
 /usr/local/sbin/xray-warp-team
 ```
 
-后续维护统一使用这个命令。
+命令约定：
+
+- 第一次安装：`bash xray-warp-team.sh`
+- 安装完成后的维护：`xray-warp-team`
 
 ## 当前脚本架构
 
@@ -118,6 +121,7 @@ bash xray-warp-team.sh install --non-interactive \
   --cert-mode existing \
   --cert-file /etc/ssl/cloudflare/cert.pem \
   --key-file /etc/ssl/cloudflare/key.pem \
+  --enable-warp \
   --warp-team your-team \
   --warp-client-id xxxxxxxxx.access \
   --warp-client-secret xxxxxxxxx
