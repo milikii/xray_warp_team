@@ -2451,11 +2451,18 @@ assign_option_value() {
   printf -v "${var_name}" '%s' "${1}"
 }
 
+request_value_presence_key() {
+  printf '%s__set' "${1}"
+}
+
 apply_optional_override() {
   local var_name="${1}"
   local value="${2-}"
+  local overridden="${3:-0}"
 
-  [[ -n "${value}" ]] || return 0
+  if [[ "${overridden}" != "1" && -z "${value}" ]]; then
+    return 0
+  fi
   printf -v "${var_name}" '%s' "${value}"
 }
 
@@ -2515,7 +2522,10 @@ apply_request_value_spec() {
   [[ "${option}" == "${spec_option}" ]] || return 1
   require_option_value "${option}" "$@"
   request_ref["${request_key}"]="${1}"
-  [[ -n "${override_key}" ]] && request_ref["${override_key}"]="1"
+  if [[ -z "${override_key}" ]]; then
+    override_key="$(request_value_presence_key "${request_key}")"
+  fi
+  request_ref["${override_key}"]="1"
   return 0
 }
 
@@ -2562,11 +2572,15 @@ apply_request_overrides() {
   local spec=""
   local request_key=""
   local target_var=""
+  local override_key=""
 
   shift
   for spec in "$@"; do
-    IFS=':' read -r request_key target_var <<< "${spec}"
-    apply_optional_override "${target_var}" "${request_ref[${request_key}]}"
+    IFS=':' read -r request_key target_var override_key <<< "${spec}"
+    if [[ -z "${override_key}" ]]; then
+      override_key="$(request_value_presence_key "${request_key}")"
+    fi
+    apply_optional_override "${target_var}" "${request_ref[${request_key}]-}" "${request_ref[${override_key}]-0}"
   done
 }
 
@@ -3184,7 +3198,6 @@ change_sni_cmd() {
   old_reality_sni="${REALITY_SNI}"
 
   resolve_change_value REALITY_SNI "新的 REALITY 可见 SNI" "${old_reality_sni}" "${sni_overridden}" "${new_reality_sni}"
-  REALITY_TARGET="$(default_reality_target_for_sni "${REALITY_SNI}")"
 
   apply_managed_runtime_update
   finish_managed_change "REALITY SNI 已更新。"

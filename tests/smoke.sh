@@ -283,6 +283,14 @@ run_change_helper_case() {
   [[ "${CERT_SOURCE_FILE}" == "old-cert.pem" ]]
   apply_optional_override CERT_SOURCE_FILE "new-cert.pem"
   [[ "${CERT_SOURCE_FILE}" == "new-cert.pem" ]]
+  apply_optional_override CERT_SOURCE_FILE "" "1"
+  [[ -z "${CERT_SOURCE_FILE}" ]]
+
+  CF_DNS_ACCOUNT_ID="old-account"
+  cert_request[cf_dns_account_id]=""
+  cert_request["$(request_value_presence_key "cf_dns_account_id")"]="1"
+  apply_request_overrides cert_request "cf_dns_account_id:CF_DNS_ACCOUNT_ID"
+  [[ -z "${CF_DNS_ACCOUNT_ID}" ]]
 
   CERT_MODE="existing"
   XHTTP_DOMAIN="cdn.old.example.com"
@@ -326,7 +334,7 @@ run_change_command_case() {
   start_backup_session() { BACKUP_DIR="/tmp/change-backup"; }
   load_current_install_context() {
     REALITY_SNI="old.example.com"
-    REALITY_TARGET="old.example.com:443"
+    REALITY_TARGET="www.harvard.edu:443"
     XHTTP_PATH="/old"
     NODE_LABEL_PREFIX="HKG"
     CERT_MODE="existing"
@@ -358,7 +366,7 @@ run_change_command_case() {
   change_sni_cmd --non-interactive --reality-sni new.example.com
   [[ "${runtime_updated}" -eq 1 ]]
   [[ "${runtime_sni}" == "new.example.com" ]]
-  [[ "${runtime_target}" == "new.example.com:443" ]]
+  [[ "${runtime_target}" == "www.harvard.edu:443" ]]
   [[ "${shown_links}" -eq 1 ]]
 
   NON_INTERACTIVE=0
