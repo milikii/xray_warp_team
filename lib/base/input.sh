@@ -23,9 +23,12 @@ EOF
   ${command_name} change-path [参数]
   ${command_name} change-label-prefix [参数]
   ${command_name} change-warp [参数]
+  ${command_name} change-warp-rules [参数]
   ${command_name} change-cert-mode [参数]
+  ${command_name} renew-cert [参数]
   ${command_name} uninstall [--yes]
-  ${command_name} show-links
+  ${command_name} show-links [--qr]
+  ${command_name} diagnose
   ${command_name} status [--raw]
   ${command_name} restart
   ${command_name} repair-perms
@@ -63,7 +66,7 @@ EOF
   --disable-net-opt           禁用网络优化。
   --warp-team VALUE           Cloudflare Zero Trust 团队名。
   --warp-client-id VALUE      服务令牌 Client ID。
-  --warp-client-secret VALUE  服务令牌 Client Secret。
+  --warp-client-secret VALUE  服务令牌 Client Secret；支持直接传值、@文件路径或环境变量 WARP_CLIENT_SECRET。
   --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口，默认 40000。
 
 变更 UUID 参数:
@@ -90,13 +93,35 @@ EOF
   --disable-warp              禁用 WARP 分流。
   --warp-team VALUE           Cloudflare Zero Trust 团队名。
   --warp-client-id VALUE      服务令牌 Client ID。
-  --warp-client-secret VALUE  服务令牌 Client Secret。
+  --warp-client-secret VALUE  服务令牌 Client Secret；支持直接传值、@文件路径或环境变量 WARP_CLIENT_SECRET。
   --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口。
+
+变更 WARP 分流规则参数:
+  --non-interactive           非交互运行。
+  --add-domain VALUE          新增一个域名规则；裸域名会自动转成 domain: 前缀。
+  --del-domain VALUE          删除一个域名规则；支持裸域名或 domain:/geosite: 形式。
+  --reset-defaults            恢复脚本默认的 WARP 分流规则集合。
+  --list                      只打印当前生效的 WARP 分流规则，不做修改。
 
 变更证书模式参数:
   --non-interactive           非交互运行。
   --cert-mode VALUE           新证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
   --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
+  --cert-file VALUE           existing 模式使用的证书文件。
+  --key-file VALUE            existing 模式使用的私钥文件。
+  --cert-pem VALUE            existing 模式直接传入证书 PEM 内容。
+  --key-pem VALUE             existing 模式直接传入私钥 PEM 内容。
+  --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
+  --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
+  --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期。
+  --acme-email VALUE          acme.sh 注册邮箱。
+  --acme-ca VALUE             acme.sh 使用的 CA。
+  --cf-dns-token VALUE        acme dns_cf 模式使用的 Cloudflare DNS API 令牌。
+  --cf-dns-account-id VALUE   acme dns_cf 模式使用的 Cloudflare Account ID，可选。
+  --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
+
+续期证书参数:
+  --non-interactive           非交互运行。
   --cert-file VALUE           existing 模式使用的证书文件。
   --key-file VALUE            existing 模式使用的私钥文件。
   --cert-pem VALUE            existing 模式直接传入证书 PEM 内容。
@@ -116,16 +141,25 @@ EOF
 状态参数:
   --raw                       显示原始 systemctl 输出，而不是面板。
 
+诊断命令:
+  diagnose                    一次性输出服务、端口、配置、TLS 与最近自恢复信息。
+
+链接参数:
+  --qr                        额外输出分享链接二维码；需要系统已安装 qrencode。
+
 示例:
   ${command_name}
   ${command_name} upgrade
   ${command_name} repair-perms
+  ${command_name} diagnose
   ${command_name} change-uuid
   ${command_name} change-sni --reality-sni www.stanford.edu
   ${command_name} change-path --xhttp-path /assets/v3
   ${command_name} change-label-prefix --node-label-prefix HKG
   ${command_name} change-warp --disable-warp
+  ${command_name} change-warp-rules --add-domain chat.openai.com
   ${command_name} change-cert-mode --cert-mode self-signed
+  ${command_name} renew-cert
   ${command_name} uninstall --yes
   ${command_name} install --non-interactive \
     --server-ip 203.0.113.10 \
@@ -168,11 +202,31 @@ prompt_with_default() {
   printf -v "${var_name}" '%s' "${current_value}"
 }
 
+resolve_value_source() {
+  local var_name="${1}"
+  local env_name="${2:-${var_name}}"
+  local current_value=""
+  local file_path=""
+
+  current_value="${!var_name:-}"
+  if [[ -z "${current_value}" && -n "${!env_name:-}" ]]; then
+    printf -v "${var_name}" '%s' "${!env_name}"
+    current_value="${!var_name}"
+  fi
+
+  if [[ "${current_value}" == @* ]]; then
+    file_path="${current_value#@}"
+    [[ -f "${file_path}" ]] || die "${var_name} 指向的文件不存在：${file_path}"
+    printf -v "${var_name}" '%s' "$(<"${file_path}")"
+  fi
+}
+
 prompt_secret() {
   local var_name="${1}"
   local prompt_text="${2}"
   local current_value=""
 
+  resolve_value_source "${var_name}"
   current_value="${!var_name:-}"
   if [[ -n "${current_value}" ]]; then
     return

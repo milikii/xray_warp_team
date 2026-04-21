@@ -149,32 +149,15 @@ xray_direct_domains_json() {
 }
 
 xray_warp_domains_json() {
-  jq -cn '[
-    "geosite:google",
-    "geosite:youtube",
-    "geosite:openai",
-    "geosite:netflix",
-    "geosite:disney",
-    "domain:gemini.google.com",
-    "domain:claude.ai",
-    "domain:anthropic.com",
-    "domain:api.anthropic.com",
-    "domain:console.anthropic.com",
-    "domain:statsig.anthropic.com",
-    "domain:sentry.io",
-    "domain:x.com",
-    "domain:twitter.com",
-    "domain:t.co",
-    "domain:twimg.com",
-    "domain:github.com",
-    "domain:api.github.com",
-    "domain:githubcopilot.com",
-    "domain:copilot-proxy.githubusercontent.com",
-    "domain:origin-tracker.githubusercontent.com",
-    "domain:copilot-telemetry.githubusercontent.com",
-    "domain:collector.github.com",
-    "domain:default.exp-tas.com"
-  ]'
+  local rules=()
+  local line=""
+
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    rules+=("${line}")
+  done < <(current_warp_rules_text)
+
+  jq -cn '$ARGS.positional' --args "${rules[@]}"
 }
 
 xray_routing_rules_json() {

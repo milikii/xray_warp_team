@@ -144,3 +144,127 @@ change_cert_mode_cmd() {
 
   finish_managed_change "证书模式已更新。"
 }
+
+renew_cert_cmd() {
+  local -A request=()
+
+  init_change_cert_mode_request request
+  parse_change_cert_mode_args request "$@"
+
+  if [[ "${request[cert_mode_overridden]}" == "1" || "${request[xhttp_domain_overridden]}" == "1" ]]; then
+    die "renew-cert 不支持修改证书模式或 XHTTP 域名；如需切换请使用 change-cert-mode。"
+  fi
+
+  begin_managed_change
+  apply_request_overrides request \
+    "cert_source_file:CERT_SOURCE_FILE" \
+    "key_source_file:KEY_SOURCE_FILE" \
+    "cert_source_pem:CERT_SOURCE_PEM" \
+    "key_source_pem:KEY_SOURCE_PEM" \
+    "cf_zone_id:CF_ZONE_ID" \
+    "cf_api_token:CF_API_TOKEN" \
+    "cf_cert_validity:CF_CERT_VALIDITY" \
+    "acme_email:ACME_EMAIL" \
+    "acme_ca:ACME_CA" \
+    "cf_dns_token:CF_DNS_TOKEN" \
+    "cf_dns_account_id:CF_DNS_ACCOUNT_ID" \
+    "cf_dns_zone_id:CF_DNS_ZONE_ID"
+  resolve_install_input_sources
+  prompt_cert_mode_inputs
+  validate_install_inputs
+  log_step "刷新 TLS 证书资产。"
+  apply_managed_update
+
+  finish_managed_change "证书已续期。"
+}
+
+change_warp_rules_cmd() {
+  local add_rules=()
+  local del_rules=()
+  local current_rules=()
+  local new_rules=()
+  local line=""
+  local list_only=0
+  local reset_defaults=0
+  local rule=""
+  local skip_rule=0
+
+  while [[ $# -gt 0 ]]; do
+    if handle_change_common_arg "${1}"; then
+      shift
+      continue
+    fi
+
+    case "${1}" in
+      --add-domain)
+        require_option_value "${1}" "${@:2}"
+        add_rules+=("$(normalize_warp_rule_value "${2}")")
+        shift 2
+        ;;
+      --del-domain)
+        require_option_value "${1}" "${@:2}"
+        del_rules+=("$(normalize_warp_rule_value "${2}")")
+        shift 2
+        ;;
+      --reset-defaults)
+        reset_defaults=1
+        shift
+        ;;
+      --list)
+        list_only=1
+        shift
+        ;;
+      *)
+        die "未知的 change-warp-rules 参数：${1}"
+        ;;
+    esac
+  done
+
+  begin_managed_change
+  if [[ "${list_only}" -eq 1 ]]; then
+    current_warp_rules_text
+    return
+  fi
+
+  if [[ "${reset_defaults}" -eq 1 ]]; then
+    WARP_RULES_TEXT="$(default_warp_rules_text)"
+  else
+    while IFS= read -r line; do
+      [[ -n "${line}" ]] || continue
+      current_rules+=("${line}")
+    done < <(current_warp_rules_text)
+
+    for line in "${current_rules[@]}"; do
+      skip_rule=0
+      for rule in "${del_rules[@]}"; do
+        if [[ "${line}" == "${rule}" ]]; then
+          skip_rule=1
+          break
+        fi
+      done
+      if [[ "${skip_rule}" -eq 0 ]]; then
+        new_rules+=("${line}")
+      fi
+    done
+
+    for rule in "${add_rules[@]}"; do
+      skip_rule=0
+      for line in "${new_rules[@]}"; do
+        if [[ "${line}" == "${rule}" ]]; then
+          skip_rule=1
+          break
+        fi
+      done
+      if [[ "${skip_rule}" -eq 0 ]]; then
+        new_rules+=("${rule}")
+      fi
+    done
+
+    [[ "${#new_rules[@]}" -gt 0 ]] || die "WARP 分流规则不能为空。"
+    WARP_RULES_TEXT="$(printf '%s\n' "${new_rules[@]}")"
+  fi
+
+  log_step "更新 WARP 分流规则。"
+  apply_managed_runtime_update
+  finish_managed_change "WARP 分流规则已更新。"
+}

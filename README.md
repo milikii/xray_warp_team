@@ -98,6 +98,11 @@ xray-warp-team.sh
 - Service Token 的 `Client ID`
 - Service Token 的 `Client Secret`
 
+敏感参数建议不要直接写在 shell history 里。当前脚本已经支持：
+
+- 直接用环境变量，例如：`WARP_CLIENT_SECRET=xxx bash xray-warp-team.sh install ...`
+- 用 `@文件路径` 读取，例如：`--warp-client-secret @/root/secret.txt`
+
 ## 快速开始
 
 拉脚本并运行：
@@ -133,6 +138,24 @@ bash xray-warp-team.sh install --non-interactive \
   --warp-client-secret xxxxxxxxx
 ```
 
+等价的更安全写法：
+
+```bash
+export WARP_CLIENT_SECRET=xxxxxxxxx
+bash xray-warp-team.sh install --non-interactive \
+  --server-ip 203.0.113.10 \
+  --node-label-prefix HKG \
+  --reality-sni reality.example.com \
+  --xhttp-domain cdn.example.com \
+  --xhttp-path /assets/v3 \
+  --cert-mode existing \
+  --cert-file /etc/ssl/cloudflare/cert.pem \
+  --key-file /etc/ssl/cloudflare/key.pem \
+  --enable-warp \
+  --warp-team your-team \
+  --warp-client-id xxxxxxxxx.access
+```
+
 如果你明确不需要 WARP：
 
 ```bash
@@ -159,6 +182,9 @@ bash xray-warp-team.sh install --non-interactive \
 - `TLS` 证书和私钥先写 staging，再校验匹配后替换正式文件
 - 配置校验或服务重启失败时，会自动回滚最近一次托管变更
 - 安装、升级、校验、重启、回滚都会输出阶段日志，便于直接判断卡在哪一步
+- 状态文件带 `STATE_VERSION`，脚本读取旧版本状态文件时会给出提示
+- 安装前会做预检：443 端口占用、CDN 域名解析、Cloudflare Token 在线校验（在相关模式下）
+- 启用 WARP 时会额外安装一个健康检查 timer，定期验证本地 WARP SOCKS5 是否可用
 
 ## 安装完成后会得到什么
 
@@ -280,6 +306,47 @@ xray-warp-team change-warp --enable-warp \
   --warp-proxy-port 40000
 ```
 
+启用后还会自动安装：
+
+- `/usr/local/sbin/xray-warp-team-warp-health.sh`
+- `xray-warp-team-warp-health.service`
+- `xray-warp-team-warp-health.timer`
+
+它会定期探测本地 WARP SOCKS5 是否还能正常获取出口 IP；如果失败，会自动执行 `mdm refresh + restart warp-svc`。
+
+### 维护 WARP 分流规则
+
+查看当前生效规则：
+
+```bash
+xray-warp-team change-warp-rules --list
+```
+
+新增一个域名：
+
+```bash
+xray-warp-team change-warp-rules --add-domain chat.openai.com
+```
+
+删除一个域名：
+
+```bash
+xray-warp-team change-warp-rules --del-domain github.com
+```
+
+恢复到脚本默认规则集合：
+
+```bash
+xray-warp-team change-warp-rules --reset-defaults
+```
+
+说明：
+
+- 裸域名会自动转成 `domain:` 规则
+- 也可以直接传 `geosite:xxx`
+- 规则会写入 `/usr/local/etc/xray/warp-domains.list`
+- 更新后会自动重写 `xray` 配置并走现有校验 / 重启 / 回滚流程
+
 ## 证书模式
 
 ### 1. self-signed
@@ -378,16 +445,58 @@ bash xray-warp-team.sh install \
 xray-warp-team status
 ```
 
+当前状态面板除了 systemd 状态，还会额外显示：
+
+- `443 / 2443 / 8001 / 8443` 监听情况
+- 当前证书到期时间
+- `WARP` 出口 IP 探测结果
+- 当前 `WARP` 规则数量
+- 最近一次备份目录
+- `xray-warp-team-warp-health.timer` 的运行状态
+- 最近一次核心 / WARP 自恢复结果
+- 最近一条自恢复历史记录
+- 近 1 小时 / 24 小时的核心与 WARP 自恢复次数
+- 一个简化的稳定性信号：`稳定 / 观察中 / 高风险`
+
 ### 查看原始 systemd 输出
 
 ```bash
 xray-warp-team status --raw
 ```
 
+### 一次性运行服务端诊断
+
+```bash
+xray-warp-team diagnose
+```
+
+这个命令会集中输出：
+
+- `xray / haproxy / nginx / warp-svc` 当前状态
+- 关键监听端口 `443 / 2443 / 8001 / 8443`
+- `Xray / nginx / haproxy` 配置自检结果
+- 本地 `TLS` 握手探测结果
+- 最近一次核心 / WARP 自恢复信息
+- 最近一条自恢复历史记录
+- 近 1 小时 / 24 小时恢复次数
+- 稳定性信号
+
+并且：
+
+- 如果关键服务、关键监听端口、配置自检或本地 TLS 探测失败，`diagnose` 会以非 0 退出
+- 可以直接拿它做脚本化巡检或外层监控
+- 失败时会额外输出按 `服务 / 端口 / 配置 / 连接 / WARP` 分类的摘要，减少排障噪音
+
 ### 查看节点链接
 
 ```bash
 xray-warp-team show-links
+```
+
+如果系统里装了 `qrencode`，也可以直接输出二维码：
+
+```bash
+xray-warp-team show-links --qr
 ```
 
 ### 修改 REALITY 域名 / SNI
@@ -426,6 +535,8 @@ xray-warp-team change-uuid --reality-only
 xray-warp-team change-uuid --xhttp-only
 ```
 
+`change-*` 命令现在都会输出阶段日志；如果应用新配置后校验失败或重启失败，会自动回滚最近一次托管变更。
+
 ### 开关 WARP
 
 ```bash
@@ -436,12 +547,37 @@ xray-warp-team change-warp --disable-warp
 xray-warp-team change-warp --enable-warp
 ```
 
+### 修改 WARP 分流规则
+
+```bash
+xray-warp-team change-warp-rules --add-domain chat.openai.com
+```
+
 ### 切换证书模式
 
 ```bash
 xray-warp-team change-cert-mode --cert-mode existing \
   --cert-file /etc/ssl/cloudflare/cert.pem \
   --key-file /etc/ssl/cloudflare/key.pem
+```
+
+### 续期 / 刷新当前证书
+
+```bash
+xray-warp-team renew-cert
+```
+
+说明：
+
+- `self-signed`：重新生成一张新的自签名证书
+- `existing`：需要重新提供证书来源，例如 `--cert-file/--key-file` 或 `--cert-pem/--key-pem`
+- `cf-origin-ca`：重新向 Cloudflare Origin CA 申请
+- `acme-dns-cf`：重新执行 `acme.sh` 的申请 / 安装流程
+
+敏感参数仍建议优先使用环境变量或 `@文件路径`：
+
+```bash
+CF_DNS_TOKEN=xxxxxxxx xray-warp-team renew-cert --non-interactive
 ```
 
 ### 升级 Xray 核心
@@ -588,6 +724,17 @@ xray-warp-team status
 - `/etc/sysctl.d/98-xray-warp-team-net.conf`
 - `/usr/local/sbin/xray-warp-team-net-optimize.sh`
 - `xray-warp-team-net-optimize.service`
+
+## 客户端导出
+
+当前输出文件除了原始 `vless://` 分享链接，也会直接附带：
+
+- `Clash Meta / Mihomo` 的结构化片段（`REALITY`、`XHTTP-CDN`）
+- `sing-box` 的 `outbound` JSON 片段（`REALITY`、`XHTTP-CDN`）
+
+说明：
+
+- `XHTTP-SPLIT` 节点的客户端兼容差异更大，所以当前仍然建议直接使用脚本生成的原始分享链接导入
 
 ## 参考
 

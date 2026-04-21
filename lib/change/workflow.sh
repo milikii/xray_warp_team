@@ -58,6 +58,8 @@ run_change_warp_action() {
       ENABLE_WARP="no"
       apply_managed_runtime_update
       stop_and_disable_service_if_present "warp-svc.service"
+      stop_and_disable_service_if_present "${WARP_HEALTH_TIMER_NAME}"
+      stop_and_disable_service_if_present "${WARP_HEALTH_SERVICE_NAME}"
       finish_managed_change "WARP 分流已禁用。"
       ;;
     *)

@@ -116,8 +116,10 @@ prepare_install_command() {
   ensure_debian_family
   start_backup_session
   parse_install_args "$@"
+  resolve_install_input_sources
   prepare_install_inputs
   validate_install_inputs
+  run_install_preflight_checks
 }
 
 install_xray_runtime() {
@@ -135,6 +137,7 @@ write_install_managed_files() {
   write_haproxy_config
   write_nginx_config
   write_xray_service
+  write_core_health_monitor
 }
 
 install_optional_components() {
