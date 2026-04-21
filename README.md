@@ -22,6 +22,12 @@ xray-warp-team.sh
 /usr/local/sbin/xray-warp-team
 ```
 
+对应的脚本 bundle 会放到：
+
+```bash
+/usr/local/lib/xray-warp-team
+```
+
 命令约定：
 
 - 第一次安装：`bash xray-warp-team.sh`
@@ -143,10 +149,23 @@ bash xray-warp-team.sh install --non-interactive \
   --disable-xhttp-vless-encryption
 ```
 
+## 当前脚本的运行保证
+
+当前版本已经补上的几个关键行为：
+
+- 持久化管理命令不是单文件裸拷贝，而是 `wrapper + bundle` 结构
+- `Xray` 核心仍然优先安装最新版本，但会同时下载 release 的 `.dgst` 并校验 `SHA256`
+- `Xray / nginx / haproxy` 托管配置使用临时文件生成后再原子替换
+- `TLS` 证书和私钥先写 staging，再校验匹配后替换正式文件
+- 配置校验或服务重启失败时，会自动回滚最近一次托管变更
+- 安装、升级、校验、重启、回滚都会输出阶段日志，便于直接判断卡在哪一步
+
 ## 安装完成后会得到什么
 
 脚本会托管：
 
+- `/usr/local/sbin/xray-warp-team`
+- `/usr/local/lib/xray-warp-team`
 - `/usr/local/etc/xray/config.json`
 - `/etc/nginx/conf.d/xray-warp-team.conf`
 - `/etc/systemd/system/xray.service`
@@ -431,6 +450,12 @@ xray-warp-team change-cert-mode --cert-mode existing \
 xray-warp-team upgrade
 ```
 
+说明：
+
+- 仍然优先跟随 `XTLS/Xray-core` 最新 release
+- 下载 zip 后会校验对应 `.dgst` 里的 `SHA256`
+- 如果升级后的配置校验失败，或 `xray` 重启失败，会自动回滚 `xray` 二进制和资源文件
+
 ### 重启服务
 
 ```bash
@@ -457,13 +482,19 @@ xray-warp-team repair-perms
 - 修正证书目录和证书文件
 - 修正 `/var/log/xray`
 - 修正 `access.log / error.log`
-- 尝试重启 `xray` 与 `nginx`
+- 尝试重启 `xray`、`haproxy` 与 `nginx`
 
 ### 卸载脚本托管文件
 
 ```bash
 xray-warp-team uninstall --yes
 ```
+
+说明：
+
+- 会删除脚本托管的配置、证书、systemd unit、bundle 和输出文件
+- 不会卸载已经装上的软件包
+- 每次卸载前会先把托管文件备份到本次 `BACKUP_DIR`
 
 ## 常见问题
 
@@ -533,6 +564,15 @@ xray-warp-team uninstall --yes
 xray-warp-team repair-perms
 xray-warp-team status
 ```
+
+如果刚做过 `install`、`change-*`、`upgrade`，也建议顺手看一下终端里最后几条 `[步骤] / [完成] / [警告]` 输出。当前脚本已经会明确告诉你失败是出在：
+
+- 下载和校验 `Xray` 核心
+- `Xray` 配置校验
+- `nginx` 配置校验
+- `haproxy` 配置校验
+- 服务重启
+- 自动回滚
 
 ## 网络优化说明
 
