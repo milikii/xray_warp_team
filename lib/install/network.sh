@@ -143,7 +143,7 @@ EOF
 install_network_optimization() {
   local cc=""
 
-  [[ "${ENABLE_NET_OPT}" == "yes" ]] || return
+  [[ "${ENABLE_NET_OPT}" == "yes" ]] || return 0
 
   cc="$(available_cc)"
   if ! printf ' %s ' "${cc}" | grep -q ' bbr '; then

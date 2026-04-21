@@ -190,8 +190,8 @@ set_cloudflare_ssl_mode_strict() {
   local response=""
   local success=""
 
-  [[ -n "${CF_ZONE_ID}" ]] || return
-  [[ -n "${CF_API_TOKEN}" ]] || return
+  [[ -n "${CF_ZONE_ID}" ]] || return 0
+  [[ -n "${CF_API_TOKEN}" ]] || return 0
 
   response="$(curl -fsSL -X PATCH "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/settings/ssl" \
     -H 'Content-Type: application/json' \

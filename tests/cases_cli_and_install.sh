@@ -280,6 +280,14 @@ EOF
   printf '%s' "${output}" | grep -q 'WARP 分流规则不能包含空白字符'
 }
 
+run_optional_component_skip_case() {
+  ENABLE_NET_OPT="no"
+  ENABLE_WARP="no"
+
+  install_network_optimization
+  install_warp
+}
+
 run_cert_mode_input_case() {
   NON_INTERACTIVE=1
 

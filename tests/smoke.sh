@@ -40,6 +40,7 @@ main() {
   run_install_parse_case
   run_preflight_token_verify_case
   run_warp_rule_normalize_case
+  run_optional_component_skip_case
   run_cert_mode_input_case
   run_change_command_case
   run_change_warp_enable_rollback_case

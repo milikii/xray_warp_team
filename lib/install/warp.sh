@@ -201,7 +201,7 @@ install_warp_health_monitor() {
 install_warp() {
   local repo_codename=""
 
-  [[ "${ENABLE_WARP}" == "yes" ]] || return
+  [[ "${ENABLE_WARP}" == "yes" ]] || return 0
 
   # shellcheck disable=SC1091
   . /etc/os-release
