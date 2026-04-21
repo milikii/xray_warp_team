@@ -19,6 +19,7 @@ main() {
   run_state_context_case
   run_state_version_case
   run_health_history_count_without_python_case
+  run_runtime_context_reset_case
   run_usage_case
   run_install_self_command_case
   run_value_source_case

@@ -165,6 +165,47 @@ load_warp_mdm_context() {
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(warp_mdm_value 'proxy_port')}"
 }
 
+reset_loaded_runtime_context() {
+  REALITY_UUID=""
+  REALITY_SNI=""
+  REALITY_TARGET=""
+  REALITY_SHORT_ID=""
+  REALITY_PRIVATE_KEY=""
+  REALITY_PUBLIC_KEY=""
+  XHTTP_UUID=""
+  XHTTP_DOMAIN=""
+  XHTTP_PATH=""
+  XHTTP_VLESS_ENCRYPTION_ENABLED=""
+  XHTTP_VLESS_DECRYPTION=""
+  XHTTP_VLESS_ENCRYPTION=""
+  TLS_ALPN=""
+  SERVER_IP=""
+  NODE_LABEL_PREFIX=""
+  FINGERPRINT=""
+  ENABLE_WARP=""
+  ENABLE_NET_OPT=""
+  WARP_PROXY_PORT=""
+  WARP_TEAM_NAME=""
+  WARP_CLIENT_ID=""
+  WARP_CLIENT_SECRET=""
+  WARP_RULES_TEXT=""
+  CERT_MODE=""
+  CF_ZONE_ID=""
+  CF_CERT_VALIDITY=""
+  ACME_EMAIL=""
+  ACME_CA=""
+  CF_DNS_ACCOUNT_ID=""
+  CF_DNS_ZONE_ID=""
+  XHTTP_ECH_CONFIG_LIST=""
+  XHTTP_ECH_FORCE_QUERY=""
+  CORE_HEALTH_LAST_CHECK_AT=""
+  CORE_HEALTH_LAST_ACTION=""
+  CORE_HEALTH_LAST_REASON=""
+  WARP_HEALTH_LAST_CHECK_AT=""
+  WARP_HEALTH_LAST_ACTION=""
+  WARP_HEALTH_LAST_REASON=""
+}
+
 nginx_server_name() {
   local path_hint="${1}"
 
@@ -213,6 +254,8 @@ nginx_server_name() {
 }
 
 load_existing_state() {
+  reset_loaded_runtime_context
+
   if [[ -f "${STATE_FILE}" ]]; then
     # shellcheck disable=SC1090
     . "${STATE_FILE}"
@@ -297,7 +340,7 @@ load_managed_runtime_context() {
 load_dashboard_context() {
   load_existing_state
 
-  [[ -f "${XRAY_CONFIG_FILE}" ]] || return
+  [[ -f "${XRAY_CONFIG_FILE}" ]] || return 0
   load_managed_runtime_context
 }
 

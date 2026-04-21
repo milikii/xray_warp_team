@@ -196,6 +196,28 @@ EOF
   unset -f python3
 }
 
+run_runtime_context_reset_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  WARP_MDM_FILE="${workdir}/missing-mdm.xml"
+  HEALTH_STATE_FILE="${workdir}/missing-health.env"
+
+  REALITY_UUID="stale-reality"
+  XHTTP_DOMAIN="stale.example.com"
+  ENABLE_WARP="yes"
+  WARP_RULES_TEXT="domain:stale.example.com"
+  CORE_HEALTH_LAST_ACTION="restarted"
+
+  load_dashboard_context
+  [[ -z "${REALITY_UUID}" ]]
+  [[ -z "${XHTTP_DOMAIN}" ]]
+  [[ -z "${ENABLE_WARP}" ]]
+  [[ -z "${WARP_RULES_TEXT}" ]]
+  [[ -z "${CORE_HEALTH_LAST_ACTION}" ]]
+}
+
 run_managed_apply_case() {
   local tls_calls=0
   local runtime_calls=0
