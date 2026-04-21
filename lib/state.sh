@@ -10,7 +10,10 @@ config_jq_read() {
 
   [[ -f "${XRAY_CONFIG_FILE}" ]] || return 0
   if ! command -v jq >/dev/null 2>&1; then
-    warn "当前系统缺少 jq，无法读取托管配置：${XRAY_CONFIG_FILE}"
+    if [[ "${STATE_JQ_MISSING_WARNED:-0}" != "1" ]]; then
+      warn "当前系统缺少 jq，无法读取托管配置：${XRAY_CONFIG_FILE}"
+      STATE_JQ_MISSING_WARNED="1"
+    fi
     return 0
   fi
 
@@ -179,6 +182,7 @@ reset_loaded_runtime_context() {
   WARP_HEALTH_LAST_CHECK_AT=""
   WARP_HEALTH_LAST_ACTION=""
   WARP_HEALTH_LAST_REASON=""
+  STATE_JQ_MISSING_WARNED=""
 }
 
 nginx_server_name() {
