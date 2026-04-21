@@ -485,6 +485,8 @@ run_install_flow_case() {
   local steps=()
   local logged=""
   local shown=0
+  local rolled_runtime=0
+  local rolled_optional=0
 
   load_functions
   stub_side_effects
@@ -500,6 +502,12 @@ run_install_flow_case() {
   }
   install_optional_components() {
     steps+=("optional")
+  }
+  rollback_managed_runtime_state() {
+    rolled_runtime=$((rolled_runtime + 1))
+  }
+  rollback_optional_component_state() {
+    rolled_optional=$((rolled_optional + 1))
   }
   finalize_installation() {
     steps+=("finalize")
@@ -522,4 +530,19 @@ run_install_flow_case() {
   printf '%s' "${logged}" | grep -q 'STEP:校验并启动托管服务。'
   printf '%s' "${logged}" | grep -q '部署完成。'
   printf '%s' "${logged}" | grep -q '管理命令：'
+
+  steps=()
+  logged=""
+  shown=0
+  rolled_runtime=0
+  rolled_optional=0
+  install_optional_components() {
+    return 1
+  }
+
+  if install_cmd --non-interactive; then
+    return 1
+  fi
+  [[ "${rolled_runtime}" -eq 1 ]]
+  [[ "${rolled_optional}" -eq 1 ]]
 }

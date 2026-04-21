@@ -153,7 +153,11 @@ install_cmd() {
   log_step "写入托管配置文件。"
   write_install_managed_files
   log_step "安装可选组件。"
-  install_optional_components
+  if ! install_optional_components; then
+    rollback_managed_runtime_state "yes" "yes"
+    rollback_optional_component_state
+    return 1
+  fi
   log_step "校验并启动托管服务。"
   finalize_installation
 
