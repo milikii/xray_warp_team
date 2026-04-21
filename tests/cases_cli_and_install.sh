@@ -154,6 +154,15 @@ EOF
 
   hash_value="$(parse_xray_dgst_sha256 "${dgst_file}" "Xray-linux-64.zip")"
   [[ "${hash_value}" == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ]]
+
+  cat > "${dgst_file}" <<'EOF'
+Xray-linux-64.zip
+sha256: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+sha512: deadbeef
+EOF
+
+  hash_value="$(parse_xray_dgst_sha256 "${dgst_file}" "Xray-linux-64.zip")"
+  [[ "${hash_value}" == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ]]
 }
 
 run_install_xray_checksum_failure_case() {
@@ -298,6 +307,38 @@ run_optional_component_skip_case() {
 
   install_network_optimization
   install_warp
+}
+
+run_install_draft_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  INSTALL_DRAFT_FILE="${workdir}/install-draft.env"
+  SERVER_IP="203.0.113.10"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_SNI="reality.example.com"
+  XHTTP_DOMAIN="cdn.example.com"
+  ENABLE_WARP="yes"
+  WARP_CLIENT_SECRET="secret-value"
+
+  write_install_draft_file
+
+  SERVER_IP=""
+  NODE_LABEL_PREFIX=""
+  REALITY_SNI=""
+  XHTTP_DOMAIN=""
+  ENABLE_WARP=""
+  WARP_CLIENT_SECRET=""
+  load_install_draft_file
+  [[ "${SERVER_IP}" == "203.0.113.10" ]]
+  [[ "${NODE_LABEL_PREFIX}" == "HKG" ]]
+  [[ "${REALITY_SNI}" == "reality.example.com" ]]
+  [[ "${XHTTP_DOMAIN}" == "cdn.example.com" ]]
+  [[ "${ENABLE_WARP}" == "yes" ]]
+  [[ "${WARP_CLIENT_SECRET}" == "secret-value" ]]
+
+  clear_install_draft_file
+  [[ ! -f "${INSTALL_DRAFT_FILE}" ]]
 }
 
 run_cert_mode_input_case() {

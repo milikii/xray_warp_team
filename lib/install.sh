@@ -32,34 +32,13 @@ parse_xray_dgst_sha256() {
   local asset_name="${2}"
   local value=""
 
-  value="$(awk -v asset="${asset_name}" '
-    {
-      line=$0
-      lower=line
-      gsub(/[A-Z]/, "", lower)
-    }
-    index(tolower($0), "sha256") && index($0, asset) {
-      if (match($0, /[0-9a-fA-F]{64}/)) {
-        print substr($0, RSTART, RLENGTH)
-        exit
-      }
-    }
-    index($0, asset) {
-      if (match($0, /[0-9a-fA-F]{64}/)) {
-        print substr($0, RSTART, RLENGTH)
-        exit
-      }
-    }
-    /^[0-9a-fA-F]{64}([[:space:]]|$)/ {
-      print substr($1, 1, 64)
-      exit
-    }
-    /^sha256:[0-9a-fA-F]{64}$/ {
-      sub(/^sha256:/, "", $0)
-      print
-      exit
-    }
-  ' "${dgst_file}")"
+  value="$(grep -Fi "${asset_name}" "${dgst_file}" 2>/dev/null | grep -Eo '[0-9a-fA-F]{64}' | head -n 1 || true)"
+  if [[ -z "${value}" ]]; then
+    value="$(grep -Ei 'sha256' "${dgst_file}" 2>/dev/null | grep -Eo '[0-9a-fA-F]{64}' | head -n 1 || true)"
+  fi
+  if [[ -z "${value}" ]]; then
+    value="$(grep -Eo '[0-9a-fA-F]{64}' "${dgst_file}" 2>/dev/null | head -n 1 || true)"
+  fi
 
   printf '%s' "${value,,}"
 }
@@ -252,6 +231,53 @@ generate_xhttp_vless_encryption_if_needed() {
 
   [[ -n "${XHTTP_VLESS_DECRYPTION}" ]] || die "生成 XHTTP 的 VLESS decryption 失败。"
   [[ -n "${XHTTP_VLESS_ENCRYPTION}" ]] || die "生成 XHTTP 的 VLESS encryption 失败。"
+}
+
+install_draft_file_text() {
+  write_state_kv "SERVER_IP" "${SERVER_IP-}"
+  write_state_kv "NODE_LABEL_PREFIX" "${NODE_LABEL_PREFIX-}"
+  write_state_kv "REALITY_UUID" "${REALITY_UUID-}"
+  write_state_kv "REALITY_SNI" "${REALITY_SNI-}"
+  write_state_kv "REALITY_TARGET" "${REALITY_TARGET-}"
+  write_state_kv "REALITY_SHORT_ID" "${REALITY_SHORT_ID-}"
+  write_state_kv "REALITY_PRIVATE_KEY" "${REALITY_PRIVATE_KEY-}"
+  write_state_kv "XHTTP_UUID" "${XHTTP_UUID-}"
+  write_state_kv "XHTTP_DOMAIN" "${XHTTP_DOMAIN-}"
+  write_state_kv "XHTTP_PATH" "${XHTTP_PATH-}"
+  write_state_kv "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED-}"
+  write_state_kv "CERT_MODE" "${CERT_MODE-}"
+  write_state_kv "CERT_SOURCE_FILE" "${CERT_SOURCE_FILE-}"
+  write_state_kv "KEY_SOURCE_FILE" "${KEY_SOURCE_FILE-}"
+  write_state_kv "CERT_SOURCE_PEM" "${CERT_SOURCE_PEM-}"
+  write_state_kv "KEY_SOURCE_PEM" "${KEY_SOURCE_PEM-}"
+  write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID-}"
+  write_state_kv "CF_API_TOKEN" "${CF_API_TOKEN-}"
+  write_state_kv "CF_CERT_VALIDITY" "${CF_CERT_VALIDITY-}"
+  write_state_kv "ACME_EMAIL" "${ACME_EMAIL-}"
+  write_state_kv "ACME_CA" "${ACME_CA-}"
+  write_state_kv "CF_DNS_TOKEN" "${CF_DNS_TOKEN-}"
+  write_state_kv "CF_DNS_ACCOUNT_ID" "${CF_DNS_ACCOUNT_ID-}"
+  write_state_kv "CF_DNS_ZONE_ID" "${CF_DNS_ZONE_ID-}"
+  write_state_kv "ENABLE_WARP" "${ENABLE_WARP-}"
+  write_state_kv "ENABLE_NET_OPT" "${ENABLE_NET_OPT-}"
+  write_state_kv "WARP_TEAM_NAME" "${WARP_TEAM_NAME-}"
+  write_state_kv "WARP_CLIENT_ID" "${WARP_CLIENT_ID-}"
+  write_state_kv "WARP_CLIENT_SECRET" "${WARP_CLIENT_SECRET-}"
+  write_state_kv "WARP_PROXY_PORT" "${WARP_PROXY_PORT-}"
+}
+
+load_install_draft_file() {
+  [[ -f "${INSTALL_DRAFT_FILE}" ]] || return 0
+  load_shell_kv_file "${INSTALL_DRAFT_FILE}"
+}
+
+write_install_draft_file() {
+  write_generated_file_atomically "${INSTALL_DRAFT_FILE}" install_draft_file_text
+  chmod 0600 "${INSTALL_DRAFT_FILE}"
+}
+
+clear_install_draft_file() {
+  rm -f "${INSTALL_DRAFT_FILE}"
 }
 
 prepare_install_inputs() {

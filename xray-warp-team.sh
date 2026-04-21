@@ -122,6 +122,7 @@ NET_SERVICE_FILE="/etc/systemd/system/${NET_SERVICE_NAME}"
 ACME_HOME="/root/.acme.sh"
 ACME_SH_BIN="${ACME_HOME}/acme.sh"
 ACME_RELOAD_HELPER="/usr/local/sbin/xray-warp-team-cert-reload.sh"
+INSTALL_DRAFT_FILE="/root/.xray-warp-team-install-draft.env"
 
 NON_INTERACTIVE=0
 ENABLE_WARP=""

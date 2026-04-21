@@ -29,6 +29,7 @@ main() {
   run_install_validation_case
   run_xray_digest_parse_case
   run_install_xray_checksum_failure_case
+  run_install_draft_case
   run_service_config_helper_case
   run_managed_apply_case
   run_managed_rollback_case

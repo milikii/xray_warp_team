@@ -115,9 +115,11 @@ prepare_install_command() {
   need_root
   ensure_debian_family
   start_backup_session
+  load_install_draft_file
   parse_install_args "$@"
   resolve_install_input_sources
   prepare_install_inputs
+  write_install_draft_file
   validate_install_inputs
   run_install_preflight_checks
 }
@@ -174,6 +176,7 @@ install_cmd() {
     return 1
   fi
 
+  clear_install_draft_file
   log "部署完成。"
   log "备份目录：${BACKUP_DIR}"
   log "管理命令：${SELF_COMMAND_PATH}"
