@@ -391,7 +391,7 @@ write_tls_assets() {
   stage_cert_file="$(tls_stage_cert_file)"
   stage_key_file="$(tls_stage_key_file)"
   cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"
-  trap 'cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"' RETURN
+  trap 'cleanup_tls_stage_files "${stage_cert_file}" "${stage_key_file}"' RETURN EXIT
 
   case "${CERT_MODE}" in
     existing)
@@ -420,7 +420,7 @@ write_tls_assets() {
     set_cloudflare_ssl_mode_strict
   fi
 
-  trap - RETURN
+  trap - RETURN EXIT
 }
 
 cleanup_previous_acme_cert() {

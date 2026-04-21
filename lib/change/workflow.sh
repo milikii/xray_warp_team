@@ -50,8 +50,14 @@ run_change_warp_action() {
     enable)
       ENABLE_WARP="yes"
       prompt_warp_settings
-      install_warp
-      apply_managed_runtime_update
+      if ! install_warp; then
+        rollback_optional_component_state
+        return 1
+      fi
+      if ! apply_managed_runtime_update; then
+        rollback_optional_component_state
+        return 1
+      fi
       finish_managed_change "WARP 分流已启用。"
       ;;
     disable)

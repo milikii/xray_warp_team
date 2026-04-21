@@ -260,6 +260,41 @@ rollback_managed_runtime_state() {
   attempt_runtime_service_recovery
 }
 
+rollback_optional_component_state() {
+  local paths=()
+
+  if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
+    stop_and_disable_service_if_present "${WARP_HEALTH_TIMER_NAME}"
+    stop_and_disable_service_if_present "${WARP_HEALTH_SERVICE_NAME}"
+    stop_and_disable_service_if_present "warp-svc.service"
+    paths+=(
+      "${WARP_MDM_FILE}"
+      "${WARP_HEALTH_HELPER}"
+      "${WARP_HEALTH_SERVICE_FILE}"
+      "${WARP_HEALTH_TIMER_FILE}"
+    )
+  fi
+
+  if [[ "${ENABLE_NET_OPT:-no}" == "yes" ]]; then
+    stop_and_disable_service_if_present "${NET_SERVICE_NAME}"
+    paths+=(
+      "${NET_SYSCTL_CONF}"
+      "${NET_HELPER_PATH}"
+      "${NET_SERVICE_FILE}"
+    )
+  fi
+
+  [[ "${#paths[@]}" -gt 0 ]] || return 0
+
+  warn "检测到可选组件应用失败，正在回滚 WARP / 网络优化托管文件。"
+  rollback_managed_paths "${paths[@]}"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+
+  if [[ "${ENABLE_NET_OPT:-no}" == "yes" ]]; then
+    sysctl --system >/dev/null 2>&1 || true
+  fi
+}
+
 restart_services() {
   log_step "重载 systemd 并重启核心服务。"
   ensure_xray_user
@@ -286,11 +321,13 @@ restart_services() {
 finalize_installation() {
   if ! validate_configs; then
     rollback_managed_runtime_state "yes" "yes"
+    rollback_optional_component_state
     return 1
   fi
 
   if ! restart_services; then
     rollback_managed_runtime_state "yes" "yes"
+    rollback_optional_component_state
     return 1
   fi
 

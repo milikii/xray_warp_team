@@ -334,6 +334,39 @@ run_managed_rollback_case() {
   [[ "$(cat "${NGINX_CONFIG_FILE}")" == "old-nginx" ]]
 }
 
+run_optional_component_rollback_case() {
+  local stopped=()
+  local rolled=()
+  local sysctl_calls=0
+  local warned=""
+
+  ENABLE_WARP="yes"
+  ENABLE_NET_OPT="yes"
+  stop_and_disable_service_if_present() {
+    stopped+=("${1}")
+  }
+  rollback_managed_paths() {
+    rolled=("$@")
+  }
+  systemctl() { :; }
+  sysctl() {
+    sysctl_calls=$((sysctl_calls + 1))
+  }
+  warn() {
+    warned+="${1}"$'\n'
+  }
+
+  rollback_optional_component_state
+  [[ " ${stopped[*]} " == *" warp-svc.service "* ]]
+  [[ " ${stopped[*]} " == *" ${WARP_HEALTH_TIMER_NAME} "* ]]
+  [[ " ${stopped[*]} " == *" ${NET_SERVICE_NAME} "* ]]
+  [[ " ${rolled[*]} " == *" ${WARP_MDM_FILE} "* ]]
+  [[ " ${rolled[*]} " == *" ${NET_SYSCTL_CONF} "* ]]
+  [[ "${sysctl_calls}" -eq 1 ]]
+  printf '%s' "${warned}" | grep -q '可选组件应用失败'
+  load_functions
+}
+
 run_install_rollback_helper_case() {
   local workdir=""
 
@@ -487,6 +520,7 @@ run_restart_optional_service_case() {
   [[ " ${restarted[*]} " == *" warp-svc.service "* ]]
   [[ " ${restarted[*]} " == *" ${WARP_HEALTH_TIMER_NAME} "* ]]
   [[ " ${restarted[*]} " == *" ${NET_SERVICE_NAME} "* ]]
+  load_functions
 }
 
 run_change_helper_case() {
@@ -663,6 +697,36 @@ run_change_command_case() {
   [[ "${runtime_updated}" -eq 0 ]]
   [[ "${shown_links}" -eq 0 ]]
   [[ "${output}" == *"domain:chat.openai.com"* ]]
+}
+
+run_change_warp_enable_rollback_case() {
+  local rolled_back=0
+  local status=0
+
+  parse_change_warp_args() {
+    local -n request_ref="${1}"
+    request_ref[target_mode]="enable"
+  }
+  ensure_debian_family() { :; }
+  begin_managed_change() { :; }
+  apply_warp_change_request() { :; }
+  prompt_warp_settings() { :; }
+  install_warp() { :; }
+  apply_managed_runtime_update() {
+    return 1
+  }
+  rollback_optional_component_state() {
+    rolled_back=$((rolled_back + 1))
+  }
+
+  set +e
+  change_warp_cmd --enable-warp >/dev/null 2>&1
+  status=$?
+  set -e
+
+  [[ "${status}" -ne 0 ]]
+  [[ "${rolled_back}" -eq 1 ]]
+  load_functions
 }
 
 run_renew_cert_command_case() {

@@ -28,6 +28,7 @@ main() {
   run_service_config_helper_case
   run_managed_apply_case
   run_managed_rollback_case
+  run_optional_component_rollback_case
   run_install_rollback_helper_case
   run_tls_stage_failure_case
   run_warp_xml_escape_case
@@ -38,6 +39,7 @@ main() {
   run_preflight_token_verify_case
   run_cert_mode_input_case
   run_change_command_case
+  run_change_warp_enable_rollback_case
   run_renew_cert_command_case
   run_upgrade_command_case
   run_diagnose_command_case
