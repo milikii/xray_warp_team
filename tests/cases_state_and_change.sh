@@ -196,6 +196,22 @@ EOF
   unset -f python3
 }
 
+run_state_file_decode_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  cat > "${STATE_FILE}" <<'EOF'
+STATE_VERSION=1
+WARP_CLIENT_SECRET=sec\'ret\ 0\ \[\]
+XHTTP_ECH_CONFIG_LIST=$'line1\nline2'
+EOF
+
+  load_existing_state
+  [[ "${WARP_CLIENT_SECRET}" == "sec'ret 0 []" ]]
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == $'line1\nline2' ]]
+}
+
 run_runtime_context_reset_case() {
   local workdir=""
 

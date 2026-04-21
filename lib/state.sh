@@ -5,124 +5,16 @@
 # 负责状态文件、托管输出、配置回填
 # ------------------------------
 
-config_fallback_string_in_tag() {
-  local tag="${1}"
-  local key="${2}"
-
-  awk -v tag="${tag}" -v key="${key}" '
-    index($0, "\"tag\": \"" tag "\"") {inside=1}
-    inside && $0 ~ /"tag":/ && index($0, "\"tag\": \"" tag "\"") == 0 {exit}
-    inside && index($0, "\"" key "\"") {
-      line=$0
-      if (line ~ /:[[:space:]]*"/) {
-        sub(/.*:[[:space:]]*"/, "", line)
-        sub(/".*/, "", line)
-        print line
-        exit
-      }
-      if (line ~ /:[[:space:]]*[0-9]+/) {
-        sub(/.*:[[:space:]]*/, "", line)
-        sub(/,.*/, "", line)
-        print line
-        exit
-      }
-    }
-  ' "${XRAY_CONFIG_FILE}" 2>/dev/null || true
-}
-
-config_fallback_first_array_value_in_tag() {
-  local tag="${1}"
-  local key="${2}"
-
-  awk -v tag="${tag}" -v key="${key}" '
-    index($0, "\"tag\": \"" tag "\"") {inside=1}
-    inside && $0 ~ /"tag":/ && index($0, "\"tag\": \"" tag "\"") == 0 {exit}
-    inside && index($0, "\"" key "\"") {want=1; next}
-    want {
-      line=$0
-      if (line ~ /"/) {
-        sub(/^[^"]*"/, "", line)
-        sub(/".*/, "", line)
-        print line
-        exit
-      }
-      if ($0 ~ /\]/) {
-        exit
-      }
-    }
-  ' "${XRAY_CONFIG_FILE}" 2>/dev/null || true
-}
-
-config_fallback_has_outbound_tag() {
-  local tag="${1}"
-
-  grep -q "\"tag\": \"${tag}\"" "${XRAY_CONFIG_FILE}" 2>/dev/null
-}
-
-config_fallback_outbound_port() {
-  local tag="${1}"
-
-  awk -v tag="${tag}" '
-    index($0, "\"tag\": \"" tag "\"") {inside=1}
-    inside && $0 ~ /"tag":/ && index($0, "\"tag\": \"" tag "\"") == 0 {exit}
-    inside && index($0, "\"port\"") {
-      line=$0
-      if (line ~ /:[[:space:]]*[0-9]+/) {
-        sub(/.*:[[:space:]]*/, "", line)
-        sub(/,.*/, "", line)
-        print line
-        exit
-      }
-    }
-  ' "${XRAY_CONFIG_FILE}" 2>/dev/null || true
-}
-
 config_jq_read() {
   local filter="${1}"
 
   [[ -f "${XRAY_CONFIG_FILE}" ]] || return 0
-  if command -v jq >/dev/null 2>&1; then
-    jq -r "${filter} // empty" "${XRAY_CONFIG_FILE}" 2>/dev/null || true
-    return
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "当前系统缺少 jq，无法读取托管配置：${XRAY_CONFIG_FILE}"
+    return 0
   fi
 
-  case "${filter}" in
-    '.inbounds[] | select(.tag=="reality-vision") | .settings.clients[0].id')
-      config_fallback_string_in_tag "reality-vision" "id"
-      ;;
-    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.serverNames[0]')
-      config_fallback_first_array_value_in_tag "reality-vision" "serverNames"
-      ;;
-    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.target')
-      config_fallback_string_in_tag "reality-vision" "target"
-      ;;
-    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.shortIds[0]')
-      config_fallback_first_array_value_in_tag "reality-vision" "shortIds"
-      ;;
-    '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.privateKey')
-      config_fallback_string_in_tag "reality-vision" "privateKey"
-      ;;
-    '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')
-      config_fallback_string_in_tag "xhttp-cdn" "id"
-      ;;
-    '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.xhttpSettings.path')
-      config_fallback_string_in_tag "xhttp-cdn" "path"
-      ;;
-    '.inbounds[] | select(.tag=="xhttp-cdn") | .streamSettings.tlsSettings.alpn[0]')
-      config_fallback_first_array_value_in_tag "xhttp-cdn" "alpn"
-      ;;
-    '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.decryption')
-      config_fallback_string_in_tag "xhttp-cdn" "decryption"
-      ;;
-    '.outbounds[] | select(.tag=="WARP") | .tag')
-      if config_fallback_has_outbound_tag "WARP"; then
-        printf 'WARP'
-      fi
-      ;;
-    '.outbounds[] | select(.tag=="WARP") | .settings.servers[0].port')
-      config_fallback_outbound_port "WARP"
-      ;;
-  esac
+  jq -r "${filter} // empty" "${XRAY_CONFIG_FILE}" 2>/dev/null || true
 }
 
 output_field_value() {
@@ -163,6 +55,89 @@ load_warp_mdm_context() {
   WARP_CLIENT_ID="${WARP_CLIENT_ID:-$(warp_mdm_value 'auth_client_id')}"
   WARP_CLIENT_SECRET="${WARP_CLIENT_SECRET:-$(warp_mdm_value 'auth_client_secret')}"
   WARP_PROXY_PORT="${WARP_PROXY_PORT:-$(warp_mdm_value 'proxy_port')}"
+}
+
+state_file_key_allowed() {
+  case "${1}" in
+    STATE_VERSION|SERVER_IP|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|WARP_PROXY_PORT|WARP_TEAM_NAME|WARP_CLIENT_ID|WARP_CLIENT_SECRET|WARP_RULES_TEXT|CERT_MODE|CF_ZONE_ID|CF_CERT_VALIDITY|ACME_EMAIL|ACME_CA|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|CORE_HEALTH_LAST_CHECK_AT|CORE_HEALTH_LAST_ACTION|CORE_HEALTH_LAST_REASON|WARP_HEALTH_LAST_CHECK_AT|WARP_HEALTH_LAST_ACTION|WARP_HEALTH_LAST_REASON)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+decode_simple_shell_word() {
+  local raw="${1-}"
+  local decoded=""
+  local char=""
+  local index=0
+
+  while [[ "${index}" -lt "${#raw}" ]]; do
+    char="${raw:index:1}"
+    if [[ "${char}" == '\' && $((index + 1)) -lt "${#raw}" ]]; then
+      decoded+="${raw:index+1:1}"
+      index=$((index + 2))
+      continue
+    fi
+
+    decoded+="${char}"
+    index=$((index + 1))
+  done
+
+  printf '%s' "${decoded}"
+}
+
+decode_ansi_c_shell_word() {
+  local raw="${1}"
+  local decoded=""
+
+  eval "decoded=${raw}"
+  printf '%s' "${decoded}"
+}
+
+decode_state_value() {
+  local raw="${1-}"
+
+  if [[ "${raw}" == "''" ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  if [[ "${raw}" == \'*\' ]]; then
+    printf '%s' "${raw:1:${#raw}-2}"
+    return
+  fi
+
+  if [[ "${raw}" == \$\'*\' ]]; then
+    decode_ansi_c_shell_word "${raw}"
+    return
+  fi
+
+  decode_simple_shell_word "${raw}"
+}
+
+load_shell_kv_file() {
+  local file_path="${1}"
+  local line=""
+  local key=""
+  local raw_value=""
+  local decoded_value=""
+
+  [[ -f "${file_path}" ]] || return 0
+
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    [[ -n "${line}" ]] || continue
+    [[ "${line}" != \#* ]] || continue
+    [[ "${line}" == *=* ]] || continue
+
+    key="${line%%=*}"
+    raw_value="${line#*=}"
+    state_file_key_allowed "${key}" || continue
+    decoded_value="$(decode_state_value "${raw_value}")"
+    printf -v "${key}" '%s' "${decoded_value}"
+  done < "${file_path}"
 }
 
 reset_loaded_runtime_context() {
@@ -257,8 +232,7 @@ load_existing_state() {
   reset_loaded_runtime_context
 
   if [[ -f "${STATE_FILE}" ]]; then
-    # shellcheck disable=SC1090
-    . "${STATE_FILE}"
+    load_shell_kv_file "${STATE_FILE}"
     if [[ "${STATE_VERSION:-0}" != "${STATE_VERSION_CURRENT}" ]]; then
       warn "检测到旧版本状态文件（${STATE_VERSION:-0} -> ${STATE_VERSION_CURRENT}），将按当前脚本默认值补全缺失字段。"
     fi
@@ -268,8 +242,7 @@ load_existing_state() {
     XHTTP_ECH_FORCE_QUERY=""
   fi
   if [[ -f "${HEALTH_STATE_FILE}" ]]; then
-    # shellcheck disable=SC1090
-    . "${HEALTH_STATE_FILE}"
+    load_shell_kv_file "${HEALTH_STATE_FILE}"
   fi
   load_warp_mdm_context
 }
