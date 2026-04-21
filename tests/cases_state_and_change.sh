@@ -98,18 +98,18 @@ EOF
 EOF
 
   cat > "${HEALTH_STATE_FILE}" <<'EOF'
-CORE_HEALTH_LAST_CHECK_AT='2026-04-21 12:00:00 UTC'
+CORE_HEALTH_LAST_CHECK_AT='2026-04-21T12:00:00Z'
 CORE_HEALTH_LAST_ACTION='ok'
 CORE_HEALTH_LAST_REASON='services healthy'
-WARP_HEALTH_LAST_CHECK_AT='2026-04-21 12:05:00 UTC'
+WARP_HEALTH_LAST_CHECK_AT='2026-04-21T12:05:00Z'
 WARP_HEALTH_LAST_ACTION='restarted'
 WARP_HEALTH_LAST_REASON='warp socks5 probe failed'
 EOF
 
   cat > "${HEALTH_HISTORY_FILE}" <<'EOF'
-2026-04-21 12:00:00 UTC | core | ok | services healthy
-2026-04-21 12:10:00 UTC | core | restarted | service inactive
-2026-04-21 12:05:00 UTC | warp | restarted | warp socks5 probe failed
+2026-04-21T12:00:00Z | core | ok | services healthy
+2026-04-21T12:10:00Z | core | restarted | service inactive
+2026-04-21T12:05:00Z | warp | restarted | warp socks5 probe failed
 EOF
 
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
@@ -133,8 +133,8 @@ EOF
   [[ -z "${XHTTP_ECH_FORCE_QUERY}" ]]
   [[ "${CORE_HEALTH_LAST_ACTION}" == "ok" ]]
   [[ "${WARP_HEALTH_LAST_ACTION}" == "restarted" ]]
-  [[ "$(latest_health_history_text)" == "2026-04-21 12:05:00 UTC | warp | restarted | warp socks5 probe failed" ]]
-  HEALTH_HISTORY_NOW='2026-04-21 12:30:00 UTC'
+  [[ "$(latest_health_history_text)" == "2026-04-21T12:05:00Z | warp | restarted | warp socks5 probe failed" ]]
+  HEALTH_HISTORY_NOW='2026-04-21T12:30:00Z'
   [[ "$(health_history_count_text 1 core)" == "1" ]]
   [[ "$(health_history_count_text 1 warp)" == "1" ]]
   [[ "$(health_history_count_text 24 core)" == "1" ]]
@@ -180,16 +180,16 @@ run_health_history_count_without_python_case() {
   prepare_workspace "${workdir}"
   HEALTH_HISTORY_FILE="${workdir}/health-history.log"
   cat > "${HEALTH_HISTORY_FILE}" <<'EOF'
-2026-04-21 12:00:00 UTC | core | ok | services healthy
-2026-04-21 12:10:00 UTC | core | restarted | service inactive
-2026-04-21 12:05:00 UTC | warp | restarted | warp probe failed
+2026-04-21T12:00:00Z | core | ok | services healthy
+2026-04-21T12:10:00Z | core | restarted | service inactive
+2026-04-21T12:05:00Z | warp | restarted | warp probe failed
 EOF
 
   python3() {
     return 99
   }
 
-  HEALTH_HISTORY_NOW='2026-04-21 12:30:00 UTC'
+  HEALTH_HISTORY_NOW='2026-04-21T12:30:00Z'
   [[ "$(health_history_count_text 1 core)" == "1" ]]
   [[ "$(health_history_count_text 1 warp)" == "1" ]]
   [[ "$(health_history_count_text 24 core)" == "1" ]]
@@ -449,11 +449,44 @@ run_warp_health_monitor_case() {
   assert_contains "health_state_file='${HEALTH_STATE_FILE}'" "${WARP_HEALTH_HELPER}"
   assert_contains "health_history_file='${HEALTH_HISTORY_FILE}'" "${WARP_HEALTH_HELPER}"
   assert_contains 'dirname "${health_state_file}"' "${WARP_HEALTH_HELPER}"
-  assert_contains '$(date '\''+%Y-%m-%d %H:%M:%S %Z'\'')' "${WARP_HEALTH_HELPER}"
+  assert_contains '$(date -u '\''+%Y-%m-%dT%H:%M:%SZ'\'')' "${WARP_HEALTH_HELPER}"
   assert_contains 'curl --socks5-hostname "127.0.0.1:${proxy_port}"' "${WARP_HEALTH_HELPER}"
   assert_contains "ExecStart=${WARP_HEALTH_HELPER}" "${WARP_HEALTH_SERVICE_FILE}"
   assert_contains 'OnUnitActiveSec=5min' "${WARP_HEALTH_TIMER_FILE}"
   assert_contains "Unit=${WARP_HEALTH_SERVICE_NAME}" "${WARP_HEALTH_TIMER_FILE}"
+}
+
+run_restart_optional_service_case() {
+  local restarted=()
+
+  load_dashboard_context() {
+    ENABLE_WARP="no"
+    ENABLE_NET_OPT="no"
+  }
+  restart_service_if_present() {
+    restarted+=("${1}")
+  }
+  log() { :; }
+
+  restart_cmd
+  [[ " ${restarted[*]} " == *" xray.service "* ]]
+  [[ " ${restarted[*]} " == *" haproxy.service "* ]]
+  [[ " ${restarted[*]} " == *" nginx.service "* ]]
+  [[ " ${restarted[*]} " == *" ${CORE_HEALTH_TIMER_NAME} "* ]]
+  [[ " ${restarted[*]} " != *" warp-svc.service "* ]]
+  [[ " ${restarted[*]} " != *" ${WARP_HEALTH_TIMER_NAME} "* ]]
+  [[ " ${restarted[*]} " != *" ${NET_SERVICE_NAME} "* ]]
+
+  restarted=()
+  load_dashboard_context() {
+    ENABLE_WARP="yes"
+    ENABLE_NET_OPT="yes"
+  }
+
+  restart_cmd
+  [[ " ${restarted[*]} " == *" warp-svc.service "* ]]
+  [[ " ${restarted[*]} " == *" ${WARP_HEALTH_TIMER_NAME} "* ]]
+  [[ " ${restarted[*]} " == *" ${NET_SERVICE_NAME} "* ]]
 }
 
 run_change_helper_case() {
@@ -554,6 +587,7 @@ run_change_helper_case() {
 }
 
 run_change_command_case() {
+  local output=""
   local runtime_updated=0
   local runtime_sni=""
   local runtime_target=""
@@ -619,6 +653,16 @@ run_change_command_case() {
   [[ "${rules_written}" == *$'domain:chat.openai.com'* ]]
   [[ "${rules_written}" != *$'domain:github.com'* ]]
   [[ "${shown_links}" -eq 3 ]]
+
+  load_existing_state() {
+    WARP_RULES_TEXT=$'geosite:google\ndomain:chat.openai.com'
+  }
+  runtime_updated=0
+  shown_links=0
+  output="$(change_warp_rules_cmd --list)"
+  [[ "${runtime_updated}" -eq 0 ]]
+  [[ "${shown_links}" -eq 0 ]]
+  [[ "${output}" == *"domain:chat.openai.com"* ]]
 }
 
 run_renew_cert_command_case() {

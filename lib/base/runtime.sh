@@ -63,7 +63,7 @@ write_health_state() {
     grep -v '^CORE_HEALTH_' "\${health_state_file}" > "\${tmp_file}" 2>/dev/null || true
   fi
   {
-    printf 'CORE_HEALTH_LAST_CHECK_AT=%q\n' "\$(date '+%Y-%m-%d %H:%M:%S %Z')"
+    printf 'CORE_HEALTH_LAST_CHECK_AT=%q\n' "\$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
     printf 'CORE_HEALTH_LAST_ACTION=%q\n' "\${action}"
     printf 'CORE_HEALTH_LAST_REASON=%q\n' "\${reason}"
   } >> "\${tmp_file}"
@@ -81,7 +81,7 @@ append_health_history() {
   if [[ -f "\${health_history_file}" ]]; then
     tail -n 49 "\${health_history_file}" > "\${tmp_file}" 2>/dev/null || true
   fi
-  printf '%s | core | %s | %s\n' "\$(date '+%Y-%m-%d %H:%M:%S %Z')" "\${action}" "\${reason}" >> "\${tmp_file}"
+  printf '%s | core | %s | %s\n' "\$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\${action}" "\${reason}" >> "\${tmp_file}"
   mv -f "\${tmp_file}" "\${health_history_file}"
   chmod 0640 "\${health_history_file}" 2>/dev/null || true
 }

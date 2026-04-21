@@ -182,7 +182,7 @@ run_service_config_helper_case() {
   assert_contains "health_state_file='${HEALTH_STATE_FILE}'" "${CORE_HEALTH_HELPER}"
   assert_contains "health_history_file='${workdir}/health-history.log'" "${CORE_HEALTH_HELPER}"
   assert_contains 'dirname "${health_state_file}"' "${CORE_HEALTH_HELPER}"
-  assert_contains '$(date '\''+%Y-%m-%d %H:%M:%S %Z'\'')' "${CORE_HEALTH_HELPER}"
+  assert_contains '$(date -u '\''+%Y-%m-%dT%H:%M:%SZ'\'')' "${CORE_HEALTH_HELPER}"
   assert_contains "ExecStart=${CORE_HEALTH_HELPER}" "${CORE_HEALTH_SERVICE_FILE}"
   assert_contains 'OnUnitActiveSec=3min' "${CORE_HEALTH_TIMER_FILE}"
   assert_contains "Unit=${CORE_HEALTH_SERVICE_NAME}" "${CORE_HEALTH_TIMER_FILE}"

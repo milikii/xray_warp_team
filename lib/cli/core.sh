@@ -55,6 +55,24 @@ xray_managed_service_units() {
     "${NET_SERVICE_NAME}"
 }
 
+restart_service_units() {
+  printf '%s\n' \
+    "xray.service" \
+    "haproxy.service" \
+    "nginx.service" \
+    "${CORE_HEALTH_TIMER_NAME}"
+
+  if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
+    printf '%s\n' \
+      "warp-svc.service" \
+      "${WARP_HEALTH_TIMER_NAME}"
+  fi
+
+  if [[ "${ENABLE_NET_OPT:-no}" == "yes" ]]; then
+    printf '%s\n' "${NET_SERVICE_NAME}"
+  fi
+}
+
 restart_service_if_present() {
   local unit_name="${1}"
 
@@ -205,9 +223,10 @@ diagnose_cmd() {
 restart_cmd() {
   local unit_name=""
 
+  load_dashboard_context
   while IFS= read -r unit_name; do
     restart_service_if_present "${unit_name}"
-  done < <(xray_managed_service_units)
+  done < <(restart_service_units)
   log "服务已重启。"
 }
 

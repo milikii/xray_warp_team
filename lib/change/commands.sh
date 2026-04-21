@@ -220,12 +220,15 @@ change_warp_rules_cmd() {
     esac
   done
 
-  begin_managed_change
   if [[ "${list_only}" -eq 1 ]]; then
+    [[ "${#add_rules[@]}" -eq 0 && "${#del_rules[@]}" -eq 0 && "${reset_defaults}" -eq 0 ]] \
+      || die "--list 不能和修改参数一起使用。"
+    load_existing_state
     current_warp_rules_text
     return
   fi
 
+  begin_managed_change
   if [[ "${reset_defaults}" -eq 1 ]]; then
     WARP_RULES_TEXT="$(default_warp_rules_text)"
   else

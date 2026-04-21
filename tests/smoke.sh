@@ -32,6 +32,7 @@ main() {
   run_tls_stage_failure_case
   run_warp_xml_escape_case
   run_warp_health_monitor_case
+  run_restart_optional_service_case
   run_change_helper_case
   run_install_parse_case
   run_preflight_token_verify_case
