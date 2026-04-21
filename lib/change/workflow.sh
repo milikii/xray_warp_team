@@ -81,6 +81,16 @@ begin_managed_change() {
   load_current_install_context
 }
 
+begin_managed_output_change() {
+  need_root
+  start_backup_session
+  log_step "读取当前托管输出状态。"
+  [[ -f "${STATE_FILE}" ]] || die "找不到当前状态文件：${STATE_FILE}"
+  load_existing_state
+  load_output_runtime_context
+  normalize_runtime_defaults
+}
+
 finish_managed_change() {
   local message="${1}"
   log_success "${message}"
@@ -122,7 +132,17 @@ run_single_value_change_cmd() {
     shift
   done
 
-  begin_managed_change
+  case "${apply_mode}" in
+    runtime)
+      begin_managed_change
+      ;;
+    output)
+      begin_managed_output_change
+      ;;
+    *)
+      die "未知的变更应用模式：${apply_mode}"
+      ;;
+  esac
   current_value="${state_ref}"
   resolve_change_value "${state_var_name}" "${prompt_text}" "${current_value}" "${overridden}" "${new_value}"
 
@@ -142,9 +162,6 @@ run_single_value_change_cmd() {
       log_step "刷新状态与输出文件。"
       write_state_file
       write_output_file
-      ;;
-    *)
-      die "未知的变更应用模式：${apply_mode}"
       ;;
   esac
 

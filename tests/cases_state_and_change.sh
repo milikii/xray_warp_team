@@ -673,6 +673,9 @@ run_change_command_case() {
     WARP_PROXY_PORT="40000"
     WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
   }
+  begin_managed_output_change() {
+    NODE_LABEL_PREFIX="HKG"
+  }
   apply_managed_runtime_update() {
     runtime_updated=1
     runtime_sni="${REALITY_SNI}"
@@ -707,12 +710,53 @@ run_change_command_case() {
   [[ "${written_prefix}" == "HKG" ]]
   [[ "${shown_links}" -eq 2 ]]
 
+  load_current_install_context() {
+    return 99
+  }
+  begin_managed_output_change() {
+    NODE_LABEL_PREFIX="LAX"
+    SERVER_IP="203.0.113.30"
+    REALITY_UUID="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    REALITY_SNI="reality.example.com"
+    REALITY_PUBLIC_KEY="public-key"
+    REALITY_SHORT_ID="abcd1234"
+    XHTTP_UUID="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    XHTTP_DOMAIN="cdn.example.com"
+    XHTTP_PATH="/edge"
+    XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+    XHTTP_VLESS_ENCRYPTION=""
+    XHTTP_VLESS_DECRYPTION="none"
+    TLS_ALPN="h2"
+    FINGERPRINT="chrome"
+    ENABLE_WARP="no"
+    ENABLE_NET_OPT="no"
+    CERT_MODE="existing"
+  }
+  NON_INTERACTIVE=0
+  change_label_prefix_cmd --non-interactive --node-label-prefix nrt
+  [[ "${written_prefix}" == "NRT" ]]
+
+  load_current_install_context() {
+    REALITY_SNI="old.example.com"
+    REALITY_TARGET="www.harvard.edu:443"
+    XHTTP_PATH="/old"
+    NODE_LABEL_PREFIX="HKG"
+    CERT_MODE="existing"
+    XHTTP_DOMAIN="cdn.old.example.com"
+    ENABLE_WARP="no"
+    WARP_TEAM_NAME="old-team"
+    WARP_CLIENT_ID="old-id"
+    WARP_CLIENT_SECRET="old-secret"
+    WARP_PROXY_PORT="40000"
+    WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
+  }
+
   NON_INTERACTIVE=0
   change_warp_rules_cmd --non-interactive --add-domain chat.openai.com --del-domain github.com
   [[ "${runtime_updated}" -eq 1 ]]
   [[ "${rules_written}" == *$'domain:chat.openai.com'* ]]
   [[ "${rules_written}" != *$'domain:github.com'* ]]
-  [[ "${shown_links}" -eq 3 ]]
+  [[ "${shown_links}" -eq 4 ]]
 
   load_existing_state() {
     WARP_RULES_TEXT=$'geosite:google\ndomain:chat.openai.com'
