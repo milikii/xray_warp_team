@@ -16,6 +16,7 @@ run_usage_case() {
 run_install_self_command_case() {
   local workdir=""
   local output=""
+  local source_bundle=""
 
   workdir="$(mktemp -d)"
   SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team"
@@ -32,6 +33,18 @@ run_install_self_command_case() {
   output="$("${SELF_COMMAND_PATH}" help)"
   [[ "${output}" == *$'\n  xray-warp-team help'* ]]
   [[ "${output}" == *$'\n  xray-warp-team install [参数]'* ]]
+
+  source_bundle="${workdir}/source-bundle"
+  cp -a "${SELF_INSTALL_DIR}" "${source_bundle}"
+  SELF_INSTALL_DIR="${source_bundle}"
+  SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team-reinstall"
+  SCRIPT_SELF="${source_bundle}/xray-warp-team.sh"
+  SCRIPT_ROOT="${source_bundle}"
+
+  install_self_command
+  [[ -x "${SELF_COMMAND_PATH}" ]]
+  [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
+  [[ -f "${SELF_INSTALL_DIR}/lib/ui/output.sh" ]]
 }
 
 run_install_validation_case() {

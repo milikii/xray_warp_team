@@ -636,6 +636,8 @@ install_self_command() {
   local source_real=""
   local source_root=""
   local target_entry="${SELF_INSTALL_DIR}/xray-warp-team.sh"
+  local staging_dir=""
+  local source_bundle_root=""
 
   if [[ ! -f "${source_path}" ]]; then
     warn "无法写入持久化管理命令，因为当前脚本路径不可用。"
@@ -645,6 +647,14 @@ install_self_command() {
   source_real="$(readlink -f "${source_path}" 2>/dev/null || printf '%s' "${source_path}")"
   source_root="$(cd "$(dirname "${source_real}")" && pwd)"
   [[ -d "${source_root}/lib" ]] || die "当前脚本目录缺少 lib/，无法安装持久化管理命令。"
+  source_bundle_root="${source_root}"
+
+  if [[ "${source_root}" == "${SELF_INSTALL_DIR}" ]]; then
+    staging_dir="$(mktemp -d)"
+    install -m 0755 "${source_root}/xray-warp-team.sh" "${staging_dir}/xray-warp-team.sh"
+    cp -a "${source_root}/lib" "${staging_dir}/lib"
+    source_bundle_root="${staging_dir}"
+  fi
 
   backup_path "${SELF_INSTALL_DIR}"
   backup_path "${SELF_COMMAND_PATH}"
@@ -652,8 +662,9 @@ install_self_command() {
   rm -rf "${SELF_INSTALL_DIR}"
   install -d -m 0755 "${SELF_INSTALL_DIR}"
   install -d -m 0755 "$(dirname "${SELF_COMMAND_PATH}")"
-  install -m 0755 "${source_root}/xray-warp-team.sh" "${target_entry}"
-  cp -a "${source_root}/lib" "${SELF_INSTALL_DIR}/lib"
+  install -m 0755 "${source_bundle_root}/xray-warp-team.sh" "${target_entry}"
+  cp -a "${source_bundle_root}/lib" "${SELF_INSTALL_DIR}/lib"
+  [[ -n "${staging_dir}" ]] && rm -rf "${staging_dir}"
 
   cat > "${SELF_COMMAND_PATH}" <<EOF
 #!/usr/bin/env bash
