@@ -69,7 +69,7 @@ bootstrap_script_root_if_needed() {
 
 bootstrap_script_root_if_needed "$@"
 
-SCRIPT_VERSION="0.4.1"
+SCRIPT_VERSION="0.4.2"
 STATE_VERSION_CURRENT="1"
 DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"

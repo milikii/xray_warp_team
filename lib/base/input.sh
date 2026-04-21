@@ -9,9 +9,7 @@ usage() {
   local command_name=""
 
   command_name="${XRAY_WARP_TEAM_COMMAND_NAME:-$(basename "${0}")}"
-  cat <<'EOF'
-xray-warp-team.sh v0.4.1
-EOF
+  printf 'xray-warp-team.sh v%s\n' "${SCRIPT_VERSION}"
   cat <<EOF
 
 用法:
