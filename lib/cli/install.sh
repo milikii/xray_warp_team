@@ -116,6 +116,7 @@ prepare_install_command() {
   ensure_debian_family
   start_backup_session
   load_install_draft_file
+  install_draft_session_begin
   parse_install_args "$@"
   resolve_install_input_sources
   prepare_install_inputs
@@ -155,12 +156,14 @@ install_cmd() {
   log_step "安装 Xray 运行时。"
   if ! install_xray_runtime; then
     rollback_install_runtime_state
+    install_draft_session_abort
     return 1
   fi
   log_step "写入托管配置文件。"
   if ! write_install_managed_files; then
     rollback_managed_runtime_state "yes" "yes"
     rollback_install_runtime_state
+    install_draft_session_abort
     return 1
   fi
   log_step "安装可选组件。"
@@ -168,15 +171,17 @@ install_cmd() {
     rollback_managed_runtime_state "yes" "yes"
     rollback_optional_component_state
     rollback_install_runtime_state
+    install_draft_session_abort
     return 1
   fi
   log_step "校验并启动托管服务。"
   if ! finalize_installation; then
     rollback_install_runtime_state
+    install_draft_session_abort
     return 1
   fi
 
-  clear_install_draft_file
+  install_draft_session_finish
   log "部署完成。"
   log "备份目录：${BACKUP_DIR}"
   log "管理命令：${SELF_COMMAND_PATH}"

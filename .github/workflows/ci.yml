@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  shellcheck-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck jq openssl
+
+      - name: Run Shellcheck
+        run: shellcheck xray-warp-team.sh $(find lib tests -type f -name '*.sh' | sort)
+
+      - name: Run Smoke Tests
+        run: bash tests/smoke.sh

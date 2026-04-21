@@ -17,6 +17,10 @@ xray_release_base_url() {
   printf '%s' "https://github.com/XTLS/Xray-core/releases/latest/download"
 }
 
+xray_release_api_url() {
+  printf '%s' "https://api.github.com/repos/XTLS/Xray-core/releases/latest"
+}
+
 xray_archive_name() {
   local arch="${1}"
   printf 'Xray-linux-%s.zip' "${arch}"
@@ -25,6 +29,38 @@ xray_archive_name() {
 xray_digest_name() {
   local archive_name="${1}"
   printf '%s.dgst' "${archive_name}"
+}
+
+fetch_xray_release_metadata_json() {
+  curl -fsSL \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$(xray_release_api_url)"
+}
+
+xray_release_asset_field_from_metadata() {
+  local metadata_json="${1}"
+  local asset_name="${2}"
+  local field_name="${3}"
+
+  [[ -n "${metadata_json}" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
+
+  jq -r \
+    --arg asset_name "${asset_name}" \
+    --arg field_name "${field_name}" \
+    '.assets[]? | select(.name == $asset_name) | .[$field_name] // empty' \
+    <<< "${metadata_json}" 2>/dev/null | head -n 1
+}
+
+normalize_xray_sha256_value() {
+  local raw_value="${1:-}"
+  local normalized=""
+
+  normalized="$(printf '%s' "${raw_value}" | tr 'A-Z' 'a-z' | sed -E 's/^[[:space:]]*sha256:[[:space:]]*//; s/^[[:space:]]+|[[:space:]]+$//g')"
+  if [[ "${normalized}" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s' "${normalized}"
+  fi
 }
 
 parse_xray_dgst_sha256() {
@@ -37,10 +73,31 @@ parse_xray_dgst_sha256() {
     value="$(grep -Ei 'sha256' "${dgst_file}" 2>/dev/null | grep -Eo '[0-9a-fA-F]{64}' | head -n 1 || true)"
   fi
   if [[ -z "${value}" ]]; then
+    value="$(
+      awk -v asset_name="${asset_name}" '
+        BEGIN { IGNORECASE = 1; asset_seen = 0 }
+        {
+          line = tolower($0)
+          if (index($0, asset_name) > 0) {
+            asset_seen = 1
+            next
+          }
+
+          if (asset_seen && line ~ /sha(2-)?256/) {
+            if (match(line, /[0-9a-f]{64}/)) {
+              print substr(line, RSTART, RLENGTH)
+              exit
+            }
+          }
+        }
+      ' "${dgst_file}" 2>/dev/null || true
+    )"
+  fi
+  if [[ -z "${value}" ]]; then
     value="$(grep -Eo '[0-9a-fA-F]{64}' "${dgst_file}" 2>/dev/null | head -n 1 || true)"
   fi
 
-  printf '%s' "${value,,}"
+  normalize_xray_sha256_value "${value}"
 }
 
 verify_file_sha256() {
@@ -60,14 +117,22 @@ install_xray() {
   local archive_name=""
   local digest_name=""
   local base_url=""
+  local release_metadata_json=""
+  local archive_url=""
+  local digest_url=""
   local archive_path=""
   local digest_path=""
   local expected_sha256=""
+  local checksum_source=""
 
   arch="$(detect_xray_arch)"
   archive_name="$(xray_archive_name "${arch}")"
   digest_name="$(xray_digest_name "${archive_name}")"
   base_url="$(xray_release_base_url)"
+  release_metadata_json="$(fetch_xray_release_metadata_json 2>/dev/null || true)"
+  archive_url="$(xray_release_asset_field_from_metadata "${release_metadata_json}" "${archive_name}" "browser_download_url")"
+  digest_url="$(xray_release_asset_field_from_metadata "${release_metadata_json}" "${digest_name}" "browser_download_url")"
+  expected_sha256="$(normalize_xray_sha256_value "$(xray_release_asset_field_from_metadata "${release_metadata_json}" "${archive_name}" "digest")")"
   tmp_dir="$(mktemp -d)"
   archive_path="${tmp_dir}/${archive_name}"
   digest_path="${tmp_dir}/${digest_name}"
@@ -75,9 +140,19 @@ install_xray() {
   log_step "下载 Xray-core 最新版本。"
   log "资源文件：${archive_name}"
   log "校验文件：${digest_name}"
-  curl -fsSL "${base_url}/${archive_name}" -o "${archive_path}"
-  curl -fsSL "${base_url}/${digest_name}" -o "${digest_path}"
-  expected_sha256="$(parse_xray_dgst_sha256 "${digest_path}" "${archive_name}")"
+  [[ -n "${archive_url}" ]] || archive_url="${base_url}/${archive_name}"
+  curl -fsSL "${archive_url}" -o "${archive_path}"
+
+  if [[ -n "${expected_sha256}" ]]; then
+    checksum_source="GitHub Release API digest"
+  else
+    [[ -n "${digest_url}" ]] || digest_url="${base_url}/${digest_name}"
+    curl -fsSL "${digest_url}" -o "${digest_path}"
+    expected_sha256="$(parse_xray_dgst_sha256 "${digest_path}" "${archive_name}")"
+    checksum_source="${digest_name}"
+  fi
+
+  log "校验来源：${checksum_source}"
   verify_file_sha256 "${archive_path}" "${expected_sha256}" "Xray-core 安装包"
   log_success "Xray-core 安装包校验通过。"
   unzip -qo "${archive_path}" -d "${tmp_dir}/xray"
@@ -278,6 +353,57 @@ write_install_draft_file() {
 
 clear_install_draft_file() {
   rm -f "${INSTALL_DRAFT_FILE}"
+}
+
+install_draft_session_begin() {
+  INSTALL_DRAFT_SESSION_ACTIVE="1"
+  trap 'install_draft_session_handle_exit "$?"' EXIT
+  trap 'install_draft_session_handle_signal 130' INT
+  trap 'install_draft_session_handle_signal 143' TERM
+}
+
+install_draft_session_disarm() {
+  trap - EXIT INT TERM
+  INSTALL_DRAFT_SESSION_ACTIVE="0"
+}
+
+install_draft_session_persist() {
+  write_install_draft_file >/dev/null 2>&1 || true
+}
+
+install_draft_session_handle_exit() {
+  local exit_status="${1:-0}"
+
+  if [[ "${INSTALL_DRAFT_SESSION_ACTIVE:-0}" == "1" && "${exit_status}" -ne 0 ]]; then
+    install_draft_session_persist
+  fi
+
+  install_draft_session_disarm
+  return "${exit_status}"
+}
+
+install_draft_session_handle_signal() {
+  local exit_status="${1}"
+
+  if [[ "${INSTALL_DRAFT_SESSION_ACTIVE:-0}" == "1" ]]; then
+    install_draft_session_persist
+  fi
+
+  install_draft_session_disarm
+  exit "${exit_status}"
+}
+
+install_draft_session_abort() {
+  if [[ "${INSTALL_DRAFT_SESSION_ACTIVE:-0}" == "1" ]]; then
+    install_draft_session_persist
+  fi
+
+  install_draft_session_disarm
+}
+
+install_draft_session_finish() {
+  clear_install_draft_file
+  install_draft_session_disarm
 }
 
 prepare_install_inputs() {

@@ -79,6 +79,7 @@ run_install_validation_case() {
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 ENABLE_WARP="no"
 REALITY_SNI='bad"host'
@@ -94,6 +95,7 @@ EOF
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 ENABLE_WARP="no"
 REALITY_SNI='reality.example.com'
@@ -109,6 +111,7 @@ EOF
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 ENABLE_WARP="no"
 REALITY_SNI='reality.example.com'
@@ -144,6 +147,7 @@ run_xray_digest_parse_case() {
   local workdir=""
   local dgst_file=""
   local hash_value=""
+  local metadata_json=""
 
   workdir="$(mktemp -d)"
   dgst_file="${workdir}/Xray-linux-64.zip.dgst"
@@ -163,6 +167,11 @@ EOF
 
   hash_value="$(parse_xray_dgst_sha256 "${dgst_file}" "Xray-linux-64.zip")"
   [[ "${hash_value}" == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ]]
+
+  metadata_json='{"assets":[{"name":"Xray-linux-64.zip","browser_download_url":"https://example.invalid/Xray-linux-64.zip","digest":"sha256:0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF"}]}'
+  hash_value="$(normalize_xray_sha256_value "$(xray_release_asset_field_from_metadata "${metadata_json}" "Xray-linux-64.zip" "digest")")"
+  [[ "${hash_value}" == "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ]]
+  [[ "$(xray_release_asset_field_from_metadata "${metadata_json}" "Xray-linux-64.zip" "browser_download_url")" == "https://example.invalid/Xray-linux-64.zip" ]]
 }
 
 run_install_xray_checksum_failure_case() {
@@ -170,6 +179,7 @@ run_install_xray_checksum_failure_case() {
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 detect_xray_arch() { printf '64'; }
 curl() {
@@ -256,6 +266,7 @@ run_preflight_token_verify_case() {
 
   if ! output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 curl() {
   printf '%s' '{"success":true}'
@@ -272,6 +283,7 @@ EOF
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 curl() {
   printf '%s' '{"success":false}'
@@ -292,6 +304,7 @@ run_warp_rule_normalize_case() {
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 normalize_warp_rules_text \$'bad rule with space'
 EOF
@@ -431,6 +444,7 @@ run_missing_option_value_case() {
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 parse_install_args --server-ip
 EOF
@@ -441,6 +455,7 @@ EOF
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 change_uuid_cmd --reality-uuid
 EOF
@@ -451,6 +466,7 @@ EOF
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 change_warp_cmd --bogus
 EOF
@@ -461,6 +477,7 @@ EOF
 
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
 source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
 change_cert_mode_cmd --bogus
 EOF
@@ -541,11 +558,15 @@ run_install_flow_case() {
   local rolled_runtime=0
   local rolled_optional=0
   local rolled_install_runtime=0
+  local draft_writes=0
+  local draft_clears=0
 
   load_functions
   stub_side_effects
 
   prepare_install_command() {
+    BACKUP_DIR="/tmp/install-backup"
+    install_draft_session_begin
     steps+=("prepare:$*")
   }
   install_xray_runtime() {
@@ -575,6 +596,12 @@ run_install_flow_case() {
   log_step() {
     logged+="STEP:${1}"$'\n'
   }
+  write_install_draft_file() {
+    draft_writes=$((draft_writes + 1))
+  }
+  clear_install_draft_file() {
+    draft_clears=$((draft_clears + 1))
+  }
   show_links() {
     shown=1
   }
@@ -583,6 +610,8 @@ run_install_flow_case() {
 
   [[ "${steps[*]}" == "prepare:--non-interactive --disable-warp runtime files optional finalize" ]]
   [[ "${shown}" -eq 1 ]]
+  [[ "${draft_writes}" -eq 0 ]]
+  [[ "${draft_clears}" -eq 1 ]]
   printf '%s' "${logged}" | grep -q 'STEP:准备安装参数与运行环境。'
   printf '%s' "${logged}" | grep -q 'STEP:校验并启动托管服务。'
   printf '%s' "${logged}" | grep -q '部署完成。'
@@ -594,6 +623,8 @@ run_install_flow_case() {
   rolled_runtime=0
   rolled_optional=0
   rolled_install_runtime=0
+  draft_writes=0
+  draft_clears=0
   install_optional_components() {
     return 1
   }
@@ -604,4 +635,6 @@ run_install_flow_case() {
   [[ "${rolled_runtime}" -eq 1 ]]
   [[ "${rolled_optional}" -eq 1 ]]
   [[ "${rolled_install_runtime}" -eq 1 ]]
+  [[ "${draft_writes}" -eq 1 ]]
+  [[ "${draft_clears}" -eq 0 ]]
 }
