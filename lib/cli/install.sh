@@ -125,6 +125,8 @@ prepare_install_command() {
 install_xray_runtime() {
   install_packages
   install_self_command
+  backup_path "${XRAY_BIN}"
+  backup_path "${XRAY_ASSET_DIR}"
   install_xray
   ensure_xray_bind_capability
   ensure_xray_user
@@ -149,17 +151,28 @@ install_cmd() {
   log_step "准备安装参数与运行环境。"
   prepare_install_command "$@"
   log_step "安装 Xray 运行时。"
-  install_xray_runtime
+  if ! install_xray_runtime; then
+    rollback_install_runtime_state
+    return 1
+  fi
   log_step "写入托管配置文件。"
-  write_install_managed_files
+  if ! write_install_managed_files; then
+    rollback_managed_runtime_state "yes" "yes"
+    rollback_install_runtime_state
+    return 1
+  fi
   log_step "安装可选组件。"
   if ! install_optional_components; then
     rollback_managed_runtime_state "yes" "yes"
     rollback_optional_component_state
+    rollback_install_runtime_state
     return 1
   fi
   log_step "校验并启动托管服务。"
-  finalize_installation
+  if ! finalize_installation; then
+    rollback_install_runtime_state
+    return 1
+  fi
 
   log "部署完成。"
   log "备份目录：${BACKUP_DIR}"

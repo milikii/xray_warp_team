@@ -487,6 +487,7 @@ run_install_flow_case() {
   local shown=0
   local rolled_runtime=0
   local rolled_optional=0
+  local rolled_install_runtime=0
 
   load_functions
   stub_side_effects
@@ -505,6 +506,9 @@ run_install_flow_case() {
   }
   rollback_managed_runtime_state() {
     rolled_runtime=$((rolled_runtime + 1))
+  }
+  rollback_install_runtime_state() {
+    rolled_install_runtime=$((rolled_install_runtime + 1))
   }
   rollback_optional_component_state() {
     rolled_optional=$((rolled_optional + 1))
@@ -536,6 +540,7 @@ run_install_flow_case() {
   shown=0
   rolled_runtime=0
   rolled_optional=0
+  rolled_install_runtime=0
   install_optional_components() {
     return 1
   }
@@ -545,4 +550,5 @@ run_install_flow_case() {
   fi
   [[ "${rolled_runtime}" -eq 1 ]]
   [[ "${rolled_optional}" -eq 1 ]]
+  [[ "${rolled_install_runtime}" -eq 1 ]]
 }

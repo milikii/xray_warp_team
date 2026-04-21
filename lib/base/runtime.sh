@@ -265,6 +265,18 @@ rollback_managed_runtime_state() {
   attempt_runtime_service_recovery
 }
 
+rollback_install_runtime_state() {
+  local paths=(
+    "${SELF_COMMAND_PATH}"
+    "${SELF_INSTALL_DIR}"
+    "${XRAY_BIN}"
+    "${XRAY_ASSET_DIR}"
+  )
+
+  warn "检测到安装运行时应用失败，正在回滚管理命令与 Xray 核心文件。"
+  rollback_managed_paths "${paths[@]}"
+}
+
 rollback_optional_component_state() {
   local paths=()
 
