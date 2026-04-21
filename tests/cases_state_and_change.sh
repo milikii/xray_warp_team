@@ -202,6 +202,7 @@ run_runtime_context_reset_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   WARP_MDM_FILE="${workdir}/missing-mdm.xml"
+  WARP_RULES_FILE="${workdir}/missing-rules.list"
   HEALTH_STATE_FILE="${workdir}/missing-health.env"
 
   REALITY_UUID="stale-reality"
@@ -216,6 +217,7 @@ run_runtime_context_reset_case() {
   [[ -z "${ENABLE_WARP}" ]]
   [[ -z "${WARP_RULES_TEXT}" ]]
   [[ -z "${CORE_HEALTH_LAST_ACTION}" ]]
+  [[ "$(warp_rule_count_text)" == "0" ]]
 }
 
 run_managed_apply_case() {
@@ -382,6 +384,8 @@ run_optional_component_rollback_case() {
   [[ " ${stopped[*]} " == *" warp-svc.service "* ]]
   [[ " ${stopped[*]} " == *" ${WARP_HEALTH_TIMER_NAME} "* ]]
   [[ " ${stopped[*]} " == *" ${NET_SERVICE_NAME} "* ]]
+  [[ " ${rolled[*]} " == *" ${WARP_APT_KEYRING} "* ]]
+  [[ " ${rolled[*]} " == *" ${WARP_APT_SOURCE_LIST} "* ]]
   [[ " ${rolled[*]} " == *" ${WARP_MDM_FILE} "* ]]
   [[ " ${rolled[*]} " == *" ${NET_SYSCTL_CONF} "* ]]
   [[ "${sysctl_calls}" -eq 1 ]]

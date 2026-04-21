@@ -268,6 +268,8 @@ rollback_optional_component_state() {
     stop_and_disable_service_if_present "${WARP_HEALTH_SERVICE_NAME}"
     stop_and_disable_service_if_present "warp-svc.service"
     paths+=(
+      "${WARP_APT_KEYRING}"
+      "${WARP_APT_SOURCE_LIST}"
       "${WARP_MDM_FILE}"
       "${WARP_HEALTH_HELPER}"
       "${WARP_HEALTH_SERVICE_FILE}"

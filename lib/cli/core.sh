@@ -24,7 +24,6 @@ show_links() {
     shift
   done
 
-  [[ -f "${STATE_FILE}" ]] || die "找不到状态文件：${STATE_FILE}"
   [[ -f "${OUTPUT_FILE}" ]] || die "找不到输出文件：${OUTPUT_FILE}"
   cat "${OUTPUT_FILE}"
 
@@ -297,6 +296,8 @@ uninstall_cmd() {
     "${HAPROXY_CONFIG}" \
     "${NGINX_CONFIG_FILE}" \
     "${SSL_DIR}" \
+    "${WARP_APT_KEYRING}" \
+    "${WARP_APT_SOURCE_LIST}" \
     "${WARP_MDM_FILE}" \
     "${WARP_HEALTH_HELPER}" \
     "${WARP_HEALTH_SERVICE_FILE}" \

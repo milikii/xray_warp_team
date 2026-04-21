@@ -13,6 +13,21 @@ run_usage_case() {
   [[ "${output}" == *$'\n  xray-warp-team diagnose'* ]]
 }
 
+run_show_links_without_state_case() {
+  local workdir=""
+  local output=""
+
+  workdir="$(mktemp -d)"
+  OUTPUT_FILE="${workdir}/output.md"
+  STATE_FILE="${workdir}/missing-state.env"
+  cat > "${OUTPUT_FILE}" <<'EOF'
+vless://example-link
+EOF
+
+  output="$(show_links)"
+  [[ "${output}" == "vless://example-link" ]]
+}
+
 run_install_self_command_case() {
   local workdir=""
   local output=""

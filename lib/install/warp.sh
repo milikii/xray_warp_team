@@ -55,12 +55,14 @@ install_warp_apt_repo() {
   local key_tmp=""
 
   key_tmp="$(mktemp)"
+  backup_path "${WARP_APT_KEYRING}"
+  backup_path "${WARP_APT_SOURCE_LIST}"
   curl -fsSL https://pkg.cloudflareclient.com/pubkey.gpg -o "${key_tmp}"
-  gpg --yes --dearmor --output /usr/share/keyrings/cloudflare-warp-archive-keyring.gpg "${key_tmp}"
+  gpg --yes --dearmor --output "${WARP_APT_KEYRING}" "${key_tmp}"
   rm -f "${key_tmp}"
 
-  cat > /etc/apt/sources.list.d/cloudflare-client.list <<EOF
-deb [signed-by=/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg] https://pkg.cloudflareclient.com/ ${repo_codename} main
+  cat > "${WARP_APT_SOURCE_LIST}" <<EOF
+deb [signed-by=${WARP_APT_KEYRING}] https://pkg.cloudflareclient.com/ ${repo_codename} main
 EOF
 
   apt-get update

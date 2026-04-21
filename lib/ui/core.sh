@@ -234,6 +234,11 @@ warp_exit_ip_text() {
 warp_rule_count_text() {
   local count=0
 
+  if [[ -z "${WARP_RULES_TEXT:-}" && ! -f "${WARP_RULES_FILE}" ]]; then
+    printf '0'
+    return
+  fi
+
   while IFS= read -r _; do
     count=$((count + 1))
   done < <(current_warp_rules_text)
