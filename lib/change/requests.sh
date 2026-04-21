@@ -44,8 +44,13 @@ resolve_cert_mode_change_targets() {
   local new_cert_mode="${5:-}"
   local new_xhttp_domain="${6:-}"
 
-  resolve_change_value CERT_MODE "新的证书模式 (self-signed/existing/cf-origin-ca/acme-dns-cf)" "${old_cert_mode}" "${cert_mode_overridden}" "${new_cert_mode}"
-  CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
+  if [[ "${cert_mode_overridden}" -eq 1 ]]; then
+    CERT_MODE="${new_cert_mode}"
+    CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
+  else
+    CERT_MODE=""
+    prompt_cert_mode_selection "新的证书模式序号" "${old_cert_mode}"
+  fi
   resolve_change_value XHTTP_DOMAIN "XHTTP CDN 域名" "${old_xhttp_domain}" "${xhttp_domain_overridden}" "${new_xhttp_domain}"
 }
 

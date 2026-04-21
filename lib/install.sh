@@ -422,8 +422,7 @@ prepare_install_inputs() {
   prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
   prompt_yes_no XHTTP_VLESS_ENCRYPTION_ENABLED "是否启用 XHTTP CDN 的 VLESS Encryption？ [y/n]" "y"
   XHTTP_VLESS_ENCRYPTION_ENABLED="$(normalize_yes_no_value "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}")"
-  prompt_with_default CERT_MODE "TLS 证书模式（自签名/self-signed，现有证书/existing，Cloudflare Origin CA/cf-origin-ca，ACME DNS/acme-dns-cf）" "self-signed"
-  CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
+  prompt_cert_mode_selection "TLS 证书模式序号" "self-signed"
   prompt_cert_mode_inputs
 
   prompt_yes_no ENABLE_NET_OPT "是否启用网络优化？ [y/n]" "y"
@@ -491,6 +490,27 @@ validate_cert_mode_value() {
       die "不支持的证书模式：${1}"
       ;;
   esac
+}
+
+show_cert_mode_menu() {
+  cat <<'EOF'
+证书模式:
+  1. 自签名
+  2. 现有证书
+  3. Cloudflare Origin CA
+  4. ACME DNS (Cloudflare)
+EOF
+}
+
+prompt_cert_mode_selection() {
+  local prompt_text="${1}"
+  local default_mode="${2}"
+  local default_choice=""
+
+  default_choice="$(cert_mode_choice_value "${default_mode}")"
+  [[ -n "${CERT_MODE:-}" ]] || show_cert_mode_menu
+  prompt_with_default CERT_MODE "${prompt_text}" "${default_choice}"
+  CERT_MODE="$(validate_cert_mode_value "${CERT_MODE}")"
 }
 
 prompt_warp_settings() {

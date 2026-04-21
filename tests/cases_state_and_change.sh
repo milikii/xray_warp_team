@@ -639,7 +639,7 @@ run_change_helper_case() {
 
   CERT_MODE="existing"
   XHTTP_DOMAIN="cdn.old.example.com"
-  resolve_cert_mode_change_targets "existing" "cdn.old.example.com" 1 1 "self-signed" "cdn.new.example.com"
+  resolve_cert_mode_change_targets "existing" "cdn.old.example.com" 1 1 "1" "cdn.new.example.com"
   [[ "${CERT_MODE}" == "self-signed" ]]
   [[ "${XHTTP_DOMAIN}" == "cdn.new.example.com" ]]
 
@@ -648,7 +648,7 @@ run_change_helper_case() {
 
     case "${var_name}" in
       CERT_MODE)
-        printf -v "${var_name}" '%s' "cf-origin-ca"
+        printf -v "${var_name}" '%s' "3"
         ;;
       XHTTP_DOMAIN)
         printf -v "${var_name}" '%s' "cdn.prompt.example.com"
@@ -662,6 +662,7 @@ run_change_helper_case() {
   resolve_cert_mode_change_targets "existing" "cdn.old.example.com" 0 0 "" ""
   [[ "${CERT_MODE}" == "cf-origin-ca" ]]
   [[ "${XHTTP_DOMAIN}" == "cdn.prompt.example.com" ]]
+  [[ "$(cert_mode_choice_value "existing")" == "2" ]]
 
   eval "${original_prompt}"
 }

@@ -121,20 +121,49 @@ normalize_cert_mode() {
   local input="${1:-}"
 
   case "${input}" in
+    1)
+      printf 'self-signed'
+      ;;
     self-signed|自签名|selfsigned)
       printf 'self-signed'
+      ;;
+    2)
+      printf 'existing'
       ;;
     existing|现有证书|已有证书|现有)
       printf 'existing'
       ;;
+    3)
+      printf 'cf-origin-ca'
+      ;;
     cf-origin-ca|cloudflare-origin-ca|cloudflare-origin|cf-origin|origin-ca|cfca|cloudflare-originca|cloudflare-ca|cf-origin-ca证书|cf-origin-ca模式)
       printf 'cf-origin-ca'
+      ;;
+    4)
+      printf 'acme-dns-cf'
       ;;
     acme-dns-cf|acme|acme-dns|acme-cf|acme证书)
       printf 'acme-dns-cf'
       ;;
     *)
       printf '%s' "${input}"
+      ;;
+  esac
+}
+
+cert_mode_choice_value() {
+  case "$(normalize_cert_mode "${1:-}")" in
+    self-signed)
+      printf '1'
+      ;;
+    existing)
+      printf '2'
+      ;;
+    cf-origin-ca)
+      printf '3'
+      ;;
+    acme-dns-cf)
+      printf '4'
       ;;
   esac
 }

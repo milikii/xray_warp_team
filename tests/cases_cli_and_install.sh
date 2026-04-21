@@ -232,7 +232,7 @@ run_install_parse_case() {
     --xhttp-domain cdn.example.com \
     --xhttp-path /edge \
     --disable-xhttp-vless-encryption \
-    --cert-mode existing \
+    --cert-mode 2 \
     --cert-file /tmp/cert.pem \
     --key-file /tmp/key.pem \
     --enable-warp \
@@ -250,7 +250,8 @@ run_install_parse_case() {
   [[ "${XHTTP_DOMAIN}" == "cdn.example.com" ]]
   [[ "${XHTTP_PATH}" == "/edge" ]]
   [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "no" ]]
-  [[ "${CERT_MODE}" == "existing" ]]
+  [[ "${CERT_MODE}" == "2" ]]
+  [[ "$(validate_cert_mode_value "${CERT_MODE}")" == "existing" ]]
   [[ "${CERT_SOURCE_FILE}" == "/tmp/cert.pem" ]]
   [[ "${KEY_SOURCE_FILE}" == "/tmp/key.pem" ]]
   [[ "${ENABLE_WARP}" == "yes" ]]
