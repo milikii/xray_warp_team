@@ -32,11 +32,16 @@ EOF
 run_single_file_bootstrap_case() {
   local workdir=""
   local output=""
+  local old_bundle=""
 
   workdir="$(mktemp -d)"
   cp "${ROOT_DIR}/xray-warp-team.sh" "${workdir}/xray-warp-team.sh"
+  old_bundle="${workdir}/old-bundle"
+  mkdir -p "${old_bundle}/lib/base"
+  cp "${ROOT_DIR}/xray-warp-team.sh" "${old_bundle}/xray-warp-team.sh"
+  printf '# helper\n' > "${old_bundle}/lib/base/helpers.sh"
 
-  output="$(XRAY_WARP_TEAM_BOOTSTRAP_ROOT="${ROOT_DIR}" bash "${workdir}/xray-warp-team.sh" help)"
+  output="$(XRAY_WARP_TEAM_SELF_INSTALL_DIR="${old_bundle}" XRAY_WARP_TEAM_SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team" XRAY_WARP_TEAM_BOOTSTRAP_ROOT="${ROOT_DIR}" bash "${workdir}/xray-warp-team.sh" help)"
   [[ "${output}" == *$'\n  xray-warp-team.sh help'* ]]
   [[ "${output}" == *$'\n  xray-warp-team.sh diagnose'* ]]
 }

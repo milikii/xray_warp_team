@@ -16,8 +16,11 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
+SCRIPT_VERSION="0.4.8"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xray-warp-team"
+SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xray-warp-team"
 BOOTSTRAP_SELF_INSTALL_DIR="${XRAY_WARP_TEAM_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
+BOOTSTRAP_SELF_COMMAND_PATH="${XRAY_WARP_TEAM_SELF_COMMAND_PATH:-${SELF_COMMAND_PATH_DEFAULT}}"
 BOOTSTRAP_REPO_OWNER="${XRAY_WARP_TEAM_BOOTSTRAP_REPO_OWNER:-milikii}"
 BOOTSTRAP_REPO_NAME="${XRAY_WARP_TEAM_BOOTSTRAP_REPO_NAME:-xray_warp_team}"
 BOOTSTRAP_BRANCH_REF="${XRAY_WARP_TEAM_BOOTSTRAP_BRANCH_REF:-main}"
@@ -87,6 +90,34 @@ exec_bundle_root() {
     bash "${bundle_root}/xray-warp-team.sh" "$@"
 }
 
+bootstrap_install_bundle_to_self() {
+  local bundle_root="${1}"
+  local target_entry="${BOOTSTRAP_SELF_INSTALL_DIR}/xray-warp-team.sh"
+  local wrapper_path="${BOOTSTRAP_SELF_COMMAND_PATH}"
+  local staging_dir=""
+  local wrapper_tmp=""
+
+  [[ "${EUID}" -eq 0 ]] || return 0
+  bundle_root_ready "${bundle_root}" || return 0
+
+  staging_dir="$(mktemp -d "$(dirname "${BOOTSTRAP_SELF_INSTALL_DIR}")/.xray-warp-team.bootstrap.XXXXXX")"
+  install -m 0755 "${bundle_root}/xray-warp-team.sh" "${staging_dir}/xray-warp-team.sh"
+  cp -a "${bundle_root}/lib" "${staging_dir}/lib"
+
+  install -d -m 0755 "$(dirname "${wrapper_path}")"
+  wrapper_tmp="$(mktemp)"
+  cat > "${wrapper_tmp}" <<EOF
+#!/usr/bin/env bash
+export XRAY_WARP_TEAM_COMMAND_NAME="\$(basename "\$0")"
+exec "${target_entry}" "\$@"
+EOF
+
+  rm -rf "${BOOTSTRAP_SELF_INSTALL_DIR}"
+  mv "${staging_dir}" "${BOOTSTRAP_SELF_INSTALL_DIR}"
+  install -m 0755 "${wrapper_tmp}" "${wrapper_path}"
+  rm -f "${wrapper_tmp}"
+}
+
 bootstrap_script_root_if_needed() {
   local bundle_root=""
   local tmp_dir=""
@@ -96,11 +127,8 @@ bootstrap_script_root_if_needed() {
   bundle_root_ready "${SCRIPT_ROOT}" && return 0
 
   if bundle_root_ready "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT:-}"; then
+    bootstrap_install_bundle_to_self "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT}"
     exec_bundle_root "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT}" "$@"
-  fi
-
-  if bundle_root_ready "${BOOTSTRAP_SELF_INSTALL_DIR}"; then
-    exec_bundle_root "${BOOTSTRAP_SELF_INSTALL_DIR}" "$@"
   fi
 
   command -v curl >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 curl，无法自动拉取脚本 bundle。"
@@ -109,16 +137,22 @@ bootstrap_script_root_if_needed() {
   tmp_dir="$(mktemp -d)"
   archive_path="${tmp_dir}/xray-warp-team.tar.gz"
   archive_url="$(bootstrap_resolve_archive_url)"
-  curl -fsSL "${archive_url}" -o "${archive_path}" || bootstrap_die "自动下载脚本 bundle 失败：${archive_url}"
-  tar -xzf "${archive_path}" -C "${tmp_dir}" || bootstrap_die "解压脚本 bundle 失败。"
-  bundle_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-  bundle_root_ready "${bundle_root}" || bootstrap_die "下载的脚本 bundle 缺少必需文件。"
-  exec_bundle_root "${bundle_root}" "$@"
+  if curl -fsSL "${archive_url}" -o "${archive_path}" && tar -xzf "${archive_path}" -C "${tmp_dir}"; then
+    bundle_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+    if bundle_root_ready "${bundle_root}"; then
+      bootstrap_install_bundle_to_self "${bundle_root}"
+      exec_bundle_root "${bundle_root}" "$@"
+    fi
+  fi
+
+  if bundle_root_ready "${BOOTSTRAP_SELF_INSTALL_DIR}"; then
+    exec_bundle_root "${BOOTSTRAP_SELF_INSTALL_DIR}" "$@"
+  fi
+
+  bootstrap_die "自动下载脚本 bundle 失败，且本机也没有可用的已安装 bundle。"
 }
 
 bootstrap_script_root_if_needed "$@"
-
-SCRIPT_VERSION="0.4.7"
 STATE_VERSION_CURRENT="1"
 DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
