@@ -465,7 +465,9 @@ main_menu() {
     if [[ "${choice}" == "0" ]]; then
       exit 0
     fi
+    IN_MAIN_MENU=1
     run_menu_choice "${choice}" || true
+    IN_MAIN_MENU=0
     pause_after_menu_action
   done
 }

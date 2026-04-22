@@ -179,6 +179,10 @@ EOF
     logged+="${1}"$'\n'
   }
   backup_path() { :; }
+  reload_updated_script_if_needed() {
+    SCRIPT_VERSION="${1}"
+    logged+="RELOAD:${1}"$'\n'
+  }
 
   update_script_cmd
 
@@ -188,6 +192,8 @@ EOF
   grep -q 'STEP:下载最新脚本 bundle。' <<< "${logged}"
   grep -q 'STEP:安装脚本 bundle。' <<< "${logged}"
   grep -q '当前版本：9.9.9' <<< "${logged}"
+  grep -q 'RELOAD:9.9.9' <<< "${logged}"
+  [[ "${SCRIPT_VERSION}" == "9.9.9" ]]
 
   log() {
     printf '[信息] %s\n' "${1}"

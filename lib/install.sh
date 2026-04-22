@@ -931,6 +931,21 @@ update_script_cmd() {
   log "备份目录：${BACKUP_DIR}"
   [[ -n "${previous_version}" ]] && log "更新前版本：${previous_version}"
   [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
+  reload_updated_script_if_needed "${current_version}"
+}
+
+reload_updated_script_if_needed() {
+  local current_version="${1:-}"
+
+  [[ -n "${current_version}" ]] || return 0
+  SCRIPT_VERSION="${current_version}"
+
+  if [[ "${IN_MAIN_MENU:-0}" == "1" && -x "${SELF_COMMAND_PATH}" ]]; then
+    log "已更新到 ${current_version}，正在重新载入脚本。"
+    exec "${SELF_COMMAND_PATH}"
+  fi
+
+  log "已更新到 ${current_version}。当前进程仍使用旧代码路径时，请重新运行脚本以完整载入新版本。"
 }
 
 . "${SCRIPT_ROOT}/lib/install/certs.sh"
