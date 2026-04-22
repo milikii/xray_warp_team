@@ -230,6 +230,16 @@ ensure_managed_permissions() {
       chmod 0640 /var/log/xray/error.log
     fi
   fi
+
+  if [[ -f "${WARP_APT_KEYRING}" ]]; then
+    chown 0:0 "${WARP_APT_KEYRING}"
+    chmod 0644 "${WARP_APT_KEYRING}"
+  fi
+
+  if [[ -f "${WARP_APT_SOURCE_LIST}" ]]; then
+    chown 0:0 "${WARP_APT_SOURCE_LIST}"
+    chmod 0644 "${WARP_APT_SOURCE_LIST}"
+  fi
 }
 
 ensure_xray_user() {

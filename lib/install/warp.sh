@@ -73,6 +73,8 @@ deb [signed-by=${WARP_APT_KEYRING}] https://pkg.cloudflareclient.com/ ${repo_cod
 EOF
   mv -f "${keyring_tmp}" "${WARP_APT_KEYRING}"
   mv -f "${source_tmp}" "${WARP_APT_SOURCE_LIST}"
+  chown 0:0 "${WARP_APT_KEYRING}" "${WARP_APT_SOURCE_LIST}"
+  chmod 0644 "${WARP_APT_KEYRING}" "${WARP_APT_SOURCE_LIST}"
 
   apt-get update
   apt-get install -y cloudflare-warp
@@ -209,10 +211,12 @@ install_warp() {
   [[ -n "${repo_codename}" ]] || die "VERSION_CODENAME 为空，无法安装 Cloudflare WARP。"
 
   log "正在安装 Cloudflare WARP 客户端。"
-  install_warp_apt_repo "${repo_codename}"
-  write_warp_mdm_file
-  install_warp_health_monitor
-  systemctl enable --now warp-svc
-  warp-cli --accept-tos mdm refresh || true
-  systemctl restart warp-svc
+  install_warp_apt_repo "${repo_codename}" || return 1
+  command -v warp-cli >/dev/null 2>&1 || die "Cloudflare WARP 客户端安装失败：未找到 warp-cli。"
+  service_exists "warp-svc.service" || die "Cloudflare WARP 客户端安装失败：未找到 warp-svc.service。"
+  write_warp_mdm_file || return 1
+  install_warp_health_monitor || return 1
+  systemctl enable --now warp-svc || return 1
+  warp-cli --accept-tos mdm refresh || return 1
+  systemctl restart warp-svc || return 1
 }

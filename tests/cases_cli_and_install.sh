@@ -433,6 +433,56 @@ run_optional_component_skip_case() {
   install_warp
 }
 
+run_warp_repo_file_mode_case() {
+  local output=""
+
+  if ! output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+tmp_dir="\$(mktemp -d)"
+WARP_APT_KEYRING="\${tmp_dir}/cloudflare-warp-archive-keyring.gpg"
+WARP_APT_SOURCE_LIST="\${tmp_dir}/cloudflare-client.list"
+backup_path() { :; }
+curl() {
+  printf '%s' 'pubkey' > "\${4}"
+}
+gpg() {
+  printf '%s' 'keyring' > "\${4}"
+}
+apt-get() { :; }
+install_warp_apt_repo "trixie"
+[[ "\$(stat -c '%a' "\${WARP_APT_KEYRING}")" == "644" ]]
+[[ "\$(stat -c '%a' "\${WARP_APT_SOURCE_LIST}")" == "644" ]]
+EOF
+)"; then
+    return 1
+  fi
+}
+
+run_install_warp_failure_case() {
+  local mdm_written=0
+  local monitor_written=0
+
+  ENABLE_WARP="yes"
+  install_warp_apt_repo() {
+    return 1
+  }
+  write_warp_mdm_file() {
+    mdm_written=$((mdm_written + 1))
+  }
+  install_warp_health_monitor() {
+    monitor_written=$((monitor_written + 1))
+  }
+
+  if install_warp; then
+    return 1
+  fi
+  [[ "${mdm_written}" -eq 0 ]]
+  [[ "${monitor_written}" -eq 0 ]]
+  load_functions
+}
+
 run_install_draft_case() {
   local workdir=""
 
