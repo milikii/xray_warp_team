@@ -18,7 +18,10 @@ fi
 
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xray-warp-team"
 BOOTSTRAP_SELF_INSTALL_DIR="${XRAY_WARP_TEAM_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
-BOOTSTRAP_ARCHIVE_URL="${XRAY_WARP_TEAM_BOOTSTRAP_ARCHIVE_URL:-https://codeload.github.com/milikii/xray_warp_team/tar.gz/main}"
+BOOTSTRAP_REPO_OWNER="${XRAY_WARP_TEAM_BOOTSTRAP_REPO_OWNER:-milikii}"
+BOOTSTRAP_REPO_NAME="${XRAY_WARP_TEAM_BOOTSTRAP_REPO_NAME:-xray_warp_team}"
+BOOTSTRAP_BRANCH_REF="${XRAY_WARP_TEAM_BOOTSTRAP_BRANCH_REF:-main}"
+BOOTSTRAP_ARCHIVE_URL="${XRAY_WARP_TEAM_BOOTSTRAP_ARCHIVE_URL:-}"
 
 bootstrap_die() {
   printf '[错误] %s\n' "$*" >&2
@@ -28,6 +31,50 @@ bootstrap_die() {
 bundle_root_ready() {
   local root_path="${1}"
   [[ -n "${root_path}" && -f "${root_path}/xray-warp-team.sh" && -f "${root_path}/lib/base/helpers.sh" ]]
+}
+
+bootstrap_default_archive_url() {
+  printf 'https://codeload.github.com/%s/%s/tar.gz/%s' \
+    "${BOOTSTRAP_REPO_OWNER}" \
+    "${BOOTSTRAP_REPO_NAME}" \
+    "${BOOTSTRAP_BRANCH_REF}"
+}
+
+bootstrap_commit_api_url() {
+  printf 'https://api.github.com/repos/%s/%s/commits/%s' \
+    "${BOOTSTRAP_REPO_OWNER}" \
+    "${BOOTSTRAP_REPO_NAME}" \
+    "${BOOTSTRAP_BRANCH_REF}"
+}
+
+bootstrap_extract_commit_sha() {
+  local metadata_json="${1:-}"
+  local commit_sha=""
+
+  commit_sha="$(printf '%s' "${metadata_json}" | grep -Eo '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' | head -n 1 | grep -Eo '[0-9a-f]{40}' || true)"
+  printf '%s' "${commit_sha}"
+}
+
+bootstrap_resolve_archive_url() {
+  local metadata_json=""
+  local commit_sha=""
+
+  if [[ -n "${BOOTSTRAP_ARCHIVE_URL}" ]]; then
+    printf '%s' "${BOOTSTRAP_ARCHIVE_URL}"
+    return
+  fi
+
+  metadata_json="$(curl -fsSL -H "Accept: application/vnd.github+json" "$(bootstrap_commit_api_url)" 2>/dev/null || true)"
+  commit_sha="$(bootstrap_extract_commit_sha "${metadata_json}")"
+  if [[ "${commit_sha}" =~ ^[0-9a-f]{40}$ ]]; then
+    printf 'https://codeload.github.com/%s/%s/tar.gz/%s' \
+      "${BOOTSTRAP_REPO_OWNER}" \
+      "${BOOTSTRAP_REPO_NAME}" \
+      "${commit_sha}"
+    return
+  fi
+
+  bootstrap_default_archive_url
 }
 
 exec_bundle_root() {
@@ -44,6 +91,7 @@ bootstrap_script_root_if_needed() {
   local bundle_root=""
   local tmp_dir=""
   local archive_path=""
+  local archive_url=""
 
   bundle_root_ready "${SCRIPT_ROOT}" && return 0
 
@@ -60,7 +108,8 @@ bootstrap_script_root_if_needed() {
 
   tmp_dir="$(mktemp -d)"
   archive_path="${tmp_dir}/xray-warp-team.tar.gz"
-  curl -fsSL "${BOOTSTRAP_ARCHIVE_URL}" -o "${archive_path}" || bootstrap_die "自动下载脚本 bundle 失败：${BOOTSTRAP_ARCHIVE_URL}"
+  archive_url="$(bootstrap_resolve_archive_url)"
+  curl -fsSL "${archive_url}" -o "${archive_path}" || bootstrap_die "自动下载脚本 bundle 失败：${archive_url}"
   tar -xzf "${archive_path}" -C "${tmp_dir}" || bootstrap_die "解压脚本 bundle 失败。"
   bundle_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
   bundle_root_ready "${bundle_root}" || bootstrap_die "下载的脚本 bundle 缺少必需文件。"
@@ -69,7 +118,7 @@ bootstrap_script_root_if_needed() {
 
 bootstrap_script_root_if_needed "$@"
 
-SCRIPT_VERSION="0.4.2"
+SCRIPT_VERSION="0.4.3"
 STATE_VERSION_CURRENT="1"
 DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"

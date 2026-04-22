@@ -40,6 +40,41 @@ run_single_file_bootstrap_case() {
   [[ "${output}" == *$'\n  xray-warp-team.sh diagnose'* ]]
 }
 
+run_bootstrap_archive_resolve_case() {
+  local archive_url=""
+  local original_bootstrap_archive_url="${BOOTSTRAP_ARCHIVE_URL:-}"
+  local original_repo_owner="${BOOTSTRAP_REPO_OWNER:-}"
+  local original_repo_name="${BOOTSTRAP_REPO_NAME:-}"
+  local original_branch_ref="${BOOTSTRAP_BRANCH_REF:-}"
+
+  BOOTSTRAP_ARCHIVE_URL=""
+  BOOTSTRAP_REPO_OWNER="milikii"
+  BOOTSTRAP_REPO_NAME="xray_warp_team"
+  BOOTSTRAP_BRANCH_REF="main"
+
+  curl() {
+    printf '%s' '{"sha":"0123456789abcdef0123456789abcdef01234567"}'
+  }
+  archive_url="$(bootstrap_resolve_archive_url)"
+  [[ "${archive_url}" == "https://codeload.github.com/milikii/xray_warp_team/tar.gz/0123456789abcdef0123456789abcdef01234567" ]]
+
+  curl() {
+    return 99
+  }
+  archive_url="$(bootstrap_resolve_archive_url)"
+  [[ "${archive_url}" == "https://codeload.github.com/milikii/xray_warp_team/tar.gz/main" ]]
+
+  BOOTSTRAP_ARCHIVE_URL="https://example.invalid/custom.tar.gz"
+  archive_url="$(bootstrap_resolve_archive_url)"
+  [[ "${archive_url}" == "https://example.invalid/custom.tar.gz" ]]
+
+  BOOTSTRAP_ARCHIVE_URL="${original_bootstrap_archive_url}"
+  BOOTSTRAP_REPO_OWNER="${original_repo_owner}"
+  BOOTSTRAP_REPO_NAME="${original_repo_name}"
+  BOOTSTRAP_BRANCH_REF="${original_branch_ref}"
+  unset -f curl
+}
+
 run_install_self_command_case() {
   local workdir=""
   local output=""
