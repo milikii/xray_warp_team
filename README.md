@@ -105,11 +105,25 @@ xray-warp-team.sh
 
 ## 快速开始
 
-拉脚本并运行：
+不要再直接拉 `raw.githubusercontent.com/.../main/xray-warp-team.sh` 单文件运行。
+GitHub 的 `raw` 和 `codeload` 分发链路有机会出现缓存错位，表现为：
+
+- 下载到的入口脚本已经是新版本
+- 但真正 bootstrap 到的 bundle 仍然是旧版本
+
+更稳的方式是：先通过 GitHub API 解析 `main` 当前 commit，再按这个 commit 下载完整 bundle 并运行。
+
+推荐命令：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/milikii/xray_warp_team/main/xray-warp-team.sh -o xray-warp-team.sh
-bash xray-warp-team.sh
+tmp_dir="$(mktemp -d)"
+api_url="https://api.github.com/repos/milikii/xray_warp_team/commits/main"
+commit_sha="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${api_url}" | sed -n 's/.*"sha":[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -n 1)"
+archive_url="https://codeload.github.com/milikii/xray_warp_team/tar.gz/${commit_sha:-main}"
+curl -fsSL "${archive_url}" -o "${tmp_dir}/xray-warp-team.tar.gz"
+tar -xzf "${tmp_dir}/xray-warp-team.tar.gz" -C "${tmp_dir}"
+bundle_dir="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+bash "${bundle_dir}/xray-warp-team.sh"
 ```
 
 不带参数时会进入菜单。第一次安装一般直接选：
