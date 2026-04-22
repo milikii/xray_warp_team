@@ -105,25 +105,11 @@ xray-warp-team.sh
 
 ## 快速开始
 
-不要再直接拉 `raw.githubusercontent.com/.../main/xray-warp-team.sh` 单文件运行。
-GitHub 的 `raw` 和 `codeload` 分发链路有机会出现缓存错位，表现为：
-
-- 下载到的入口脚本已经是新版本
-- 但真正 bootstrap 到的 bundle 仍然是旧版本
-
-更稳的方式是：先通过 GitHub API 解析 `main` 当前 commit，再按这个 commit 下载完整 bundle 并运行。
-
-推荐命令：
+现在可以直接用单文件入口启动，脚本会自动处理 bundle：
 
 ```bash
-tmp_dir="$(mktemp -d)"
-api_url="https://api.github.com/repos/milikii/xray_warp_team/commits/main"
-commit_sha="$(curl -fsSL -H 'Accept: application/vnd.github+json' "${api_url}" | sed -n 's/.*"sha":[[:space:]]*"\([0-9a-f]\{40\}\)".*/\1/p' | head -n 1)"
-archive_url="https://codeload.github.com/milikii/xray_warp_team/tar.gz/${commit_sha:-main}"
-curl -fsSL "${archive_url}" -o "${tmp_dir}/xray-warp-team.tar.gz"
-tar -xzf "${tmp_dir}/xray-warp-team.tar.gz" -C "${tmp_dir}"
-bundle_dir="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
-bash "${bundle_dir}/xray-warp-team.sh"
+curl -fsSL https://raw.githubusercontent.com/milikii/xray_warp_team/main/xray-warp-team.sh -o xray-warp-team.sh
+bash xray-warp-team.sh
 ```
 
 不带参数时会进入菜单。第一次安装一般直接选：
@@ -131,6 +117,28 @@ bash "${bundle_dir}/xray-warp-team.sh"
 ```text
 1. 安装或重装
 ```
+
+说明：
+
+- 如果当前目录已经有完整 `lib/`，脚本会直接本地运行
+- 如果当前目录只有单文件入口，脚本会自动拉取完整 bundle 后再执行
+- 如果机器上已经装过 `/usr/local/lib/xray-warp-team`，也会优先复用已安装 bundle
+
+### 交互安装失败后怎么继续
+
+交互安装时，脚本会把你已经填过的值先保存到：
+
+```bash
+/root/.xray-warp-team-install-draft.env
+```
+
+如果中途在预检、下载、证书、WARP 或配置校验阶段失败，再次执行：
+
+```bash
+bash xray-warp-team.sh
+```
+
+脚本会自动带回上次已经填过的值，不需要从头重新输入。安装成功后，这个 draft 文件会自动删除。
 
 ## 最小非交互示例
 
@@ -191,12 +199,14 @@ bash xray-warp-team.sh install --non-interactive \
 当前版本已经补上的几个关键行为：
 
 - 持久化管理命令不是单文件裸拷贝，而是 `wrapper + bundle` 结构
+- 单文件入口会自动 bootstrap 到完整 bundle，不再要求手动先解压仓库
 - `Xray` 核心仍然优先安装最新版本，但会同时下载 release 的 `.dgst` 并校验 `SHA256`
 - `Xray / nginx / haproxy` 托管配置使用临时文件生成后再原子替换
 - `TLS` 证书和私钥先写 staging，再校验匹配后替换正式文件
 - 配置校验或服务重启失败时，会自动回滚最近一次托管变更
 - 安装、升级、校验、重启、回滚都会输出阶段日志，便于直接判断卡在哪一步
 - 状态文件带 `STATE_VERSION`，脚本读取旧版本状态文件时会给出提示
+- 交互安装失败后会保留一份安装 draft，方便再次进入时继续填写
 - 安装前会做预检：443 端口占用、CDN 域名解析、Cloudflare Token 在线校验（在相关模式下）
 - 启用 WARP 时会额外安装一个健康检查 timer，定期验证本地 WARP SOCKS5 是否可用
 
@@ -611,6 +621,18 @@ xray-warp-team upgrade
 ```bash
 xray-warp-team restart
 ```
+
+### 更新脚本本身
+
+```bash
+xray-warp-team update-script
+```
+
+说明：
+
+- 会下载最新脚本 bundle 并覆盖 `/usr/local/lib/xray-warp-team`
+- 会同时更新 `/usr/local/sbin/xray-warp-team` wrapper
+- 如果 bundle 安装失败，会自动回滚到更新前的持久化脚本文件
 
 ### 抢修权限
 
