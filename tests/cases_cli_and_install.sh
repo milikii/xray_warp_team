@@ -118,6 +118,7 @@ run_install_self_command_case() {
 run_update_script_command_case() {
   local workdir=""
   local logged=""
+  local stdout_output=""
 
   workdir="$(mktemp -d)"
   SELF_INSTALL_DIR="${workdir}/bundle"
@@ -187,6 +188,15 @@ EOF
   printf '%s' "${logged}" | grep -q 'STEP:下载最新脚本 bundle。'
   printf '%s' "${logged}" | grep -q 'STEP:安装脚本 bundle。'
   printf '%s' "${logged}" | grep -q '当前版本：9.9.9'
+
+  log() {
+    printf '[信息] %s\n' "${1}"
+  }
+  stdout_output="$(update_script_cmd 2>&1)"
+  [[ -x "${SELF_COMMAND_PATH}" ]]
+  [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
+  printf '%s' "${stdout_output}" | grep -q '下载来源：'
+  printf '%s' "${stdout_output}" | grep -q '当前版本：9.9.9'
 }
 
 run_install_validation_case() {

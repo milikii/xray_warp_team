@@ -884,7 +884,7 @@ download_latest_script_bundle() {
   local bundle_root=""
 
   archive_url="$(bootstrap_resolve_archive_url)"
-  log "下载来源：${archive_url}"
+  printf '[信息] %s\n' "下载来源：${archive_url}" >&2
   curl -fsSL "${archive_url}" -o "${archive_path}" || return 1
   tar -xzf "${archive_path}" -C "${target_dir}" || return 1
   bundle_root="$(find "${target_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
