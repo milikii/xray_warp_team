@@ -16,7 +16,7 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
-SCRIPT_VERSION="0.5.0"
+SCRIPT_VERSION="0.5.1"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xray-warp-team"
 SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xray-warp-team"
 BOOTSTRAP_SELF_INSTALL_DIR="${XRAY_WARP_TEAM_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
@@ -199,6 +199,8 @@ CORE_HEALTH_TIMER_NAME="xray-warp-team-core-health.timer"
 CORE_HEALTH_TIMER_FILE="/etc/systemd/system/${CORE_HEALTH_TIMER_NAME}"
 BACKUP_ROOT="/root/xray-warp-team-backups"
 BACKUP_KEEP_COUNT="${XRAY_WARP_TEAM_BACKUP_KEEP_COUNT:-5}"
+OP_LOG_DIR="/var/log/xray-warp-team"
+OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
 NET_SYSCTL_CONF="/etc/sysctl.d/98-xray-warp-team-net.conf"
 NET_HELPER_PATH="/usr/local/sbin/xray-warp-team-net-optimize.sh"
 NET_SERVICE_NAME="xray-warp-team-net-optimize.service"
@@ -209,6 +211,7 @@ ACME_SH_BIN="${ACME_HOME}/acme.sh"
 ACME_RELOAD_HELPER="/usr/local/sbin/xray-warp-team-cert-reload.sh"
 INSTALL_DRAFT_FILE="/root/.xray-warp-team-install-draft.env"
 SCRIPT_LOCK_FILE="${XRAY_WARP_TEAM_LOCK_FILE:-/run/xray-warp-team.lock}"
+SESSION_LOG_FILE=""
 
 NON_INTERACTIVE=0
 ENABLE_WARP=""

@@ -263,6 +263,7 @@ start_backup_session() {
 
   BACKUP_DIR="${BACKUP_ROOT}/$(date +%Y%m%d-%H%M%S)"
   mkdir -p "${BACKUP_DIR}"
+  SESSION_LOG_FILE="${BACKUP_DIR}/operation.log"
 
   [[ "${BACKUP_KEEP_COUNT}" =~ ^[0-9]+$ ]] || return 0
   [[ "${BACKUP_KEEP_COUNT}" -gt 0 ]] || return 0

@@ -25,7 +25,8 @@ usage() {
   ${command_name} change-warp-rules [参数]
   ${command_name} change-cert-mode [参数]
   ${command_name} renew-cert [参数]
-  ${command_name} uninstall [--yes]
+  ${command_name} uninstall [--yes] [--purge]
+  ${command_name} purge [--yes]
   ${command_name} show-links [--qr]
   ${command_name} diagnose
   ${command_name} status [--raw]
@@ -136,6 +137,7 @@ usage() {
 
 卸载参数:
   --yes                       跳过确认提示。
+  --purge                     同时卸载脚本安装的软件包。
 
 状态参数:
   --raw                       显示原始 systemctl 输出，而不是面板。
@@ -164,6 +166,7 @@ usage() {
   ${command_name} change-cert-mode --cert-mode self-signed
   ${command_name} renew-cert
   ${command_name} uninstall --yes
+  ${command_name} uninstall --purge --yes
   ${command_name} install --non-interactive \
     --server-ip 203.0.113.10 \
     --xhttp-domain cdn.example.com \

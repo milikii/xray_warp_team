@@ -190,7 +190,7 @@ run_service_config_helper_case() {
   assert_contains "Unit=${CORE_HEALTH_SERVICE_NAME}" "${CORE_HEALTH_TIMER_FILE}"
   XRAY_LOGROTATE_FILE="${workdir}/xray-logrotate"
   write_xray_logrotate_config
-  assert_contains '/var/log/xray/access.log /var/log/xray/error.log {' "${XRAY_LOGROTATE_FILE}"
+  assert_contains '/var/log/xray/access.log /var/log/xray/error.log /var/log/xray-warp-team/operations.log {' "${XRAY_LOGROTATE_FILE}"
   assert_contains 'rotate 7' "${XRAY_LOGROTATE_FILE}"
 }
 

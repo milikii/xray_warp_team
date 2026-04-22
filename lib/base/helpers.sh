@@ -5,24 +5,55 @@
 # 负责最小核心工具与基础模块装配
 # ------------------------------
 
+append_operation_log() {
+  local line="${1}"
+
+  if mkdir -p "${OP_LOG_DIR}" 2>/dev/null; then
+    printf '%s\n' "${line}" >> "${OP_LOG_FILE}" 2>/dev/null || true
+  fi
+  if [[ -n "${SESSION_LOG_FILE:-}" ]]; then
+    if mkdir -p "$(dirname "${SESSION_LOG_FILE}")" 2>/dev/null; then
+      printf '%s\n' "${line}" >> "${SESSION_LOG_FILE}" 2>/dev/null || true
+    fi
+  fi
+}
+
+emit_log() {
+  local level="${1}"
+  local stream="${2}"
+  shift 2
+  local message="$*"
+  local timestamp=""
+  local line=""
+
+  timestamp="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+  line="[${timestamp}] [${level}] ${message}"
+  if [[ "${stream}" == "stderr" ]]; then
+    printf '%s\n' "${line}" >&2
+  else
+    printf '%s\n' "${line}"
+  fi
+  append_operation_log "${line}"
+}
+
 log() {
-  printf '[信息] %s\n' "$*"
+  emit_log "信息" "stdout" "$*"
 }
 
 log_step() {
-  printf '[步骤] %s\n' "$*"
+  emit_log "步骤" "stdout" "$*"
 }
 
 log_success() {
-  printf '[完成] %s\n' "$*"
+  emit_log "完成" "stdout" "$*"
 }
 
 warn() {
-  printf '[警告] %s\n' "$*" >&2
+  emit_log "警告" "stderr" "$*"
 }
 
 die() {
-  printf '[错误] %s\n' "$*" >&2
+  emit_log "错误" "stderr" "$*"
   exit 1
 }
 

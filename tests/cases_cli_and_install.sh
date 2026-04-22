@@ -808,6 +808,10 @@ run_dispatch_case() {
   [[ "${dispatched}" == "uninstall" ]]
 
   run_menu_choice 18
+  [[ "${dispatched}" == "uninstall" ]]
+  [[ "${dispatched_args}" == "--purge --yes" ]]
+
+  run_menu_choice 19
   [[ "${dispatched}" == "status" ]]
   [[ "${dispatched_args}" == "--raw" ]]
 
@@ -910,4 +914,22 @@ run_install_flow_case() {
   [[ "${rolled_install_runtime}" -eq 1 ]]
   [[ "${draft_writes}" -eq 1 ]]
   [[ "${draft_clears}" -eq 0 ]]
+}
+
+run_logging_case() {
+  local workdir=""
+  local output=""
+
+  load_functions
+  stub_side_effects
+
+  workdir="$(mktemp -d)"
+  OP_LOG_DIR="${workdir}/logs"
+  OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
+  SESSION_LOG_FILE="${workdir}/session.log"
+
+  output="$(log "日志测试")"
+  [[ "${output}" == *"[信息] 日志测试"* ]]
+  grep -q '日志测试' "${OP_LOG_FILE}"
+  grep -q '日志测试' "${SESSION_LOG_FILE}"
 }

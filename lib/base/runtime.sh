@@ -46,7 +46,7 @@ write_xray_logrotate_config() {
 
   tmp_file="$(mktemp)"
   cat > "${tmp_file}" <<'EOF'
-/var/log/xray/access.log /var/log/xray/error.log {
+/var/log/xray/access.log /var/log/xray/error.log /var/log/xray-warp-team/operations.log {
   daily
   rotate 7
   missingok
@@ -273,6 +273,7 @@ rollback_managed_runtime_state() {
     "${CORE_HEALTH_SERVICE_FILE}"
     "${CORE_HEALTH_TIMER_FILE}"
     "${XRAY_LOGROTATE_FILE}"
+    "${OP_LOG_DIR}"
   )
 
   if [[ "${include_tls_assets}" == "yes" ]]; then

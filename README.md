@@ -112,6 +112,8 @@ xray-warp-team.sh
 - `--cert-pem`
 - `--key-pem`
 
+`REALITY SNI` 也不再默认塞固定值。安装时需要你自己明确填写。
+
 ## 快速开始
 
 现在可以直接用单文件入口启动，脚本会自动处理 bundle：
@@ -213,11 +215,16 @@ bash xray-warp-team.sh install --non-interactive \
 - `Xray / nginx / haproxy` 托管配置使用临时文件生成后再原子替换
 - `TLS` 证书和私钥先写 staging，再校验匹配后替换正式文件
 - 配置校验或服务重启失败时，会自动回滚最近一次托管变更
+- 如果安装在运行时 / 可选组件 / 最终启动阶段失败，会自动回滚 bundle、Xray 核心和托管配置
 - 安装、升级、校验、重启、回滚都会输出阶段日志，便于直接判断卡在哪一步
+- 所有操作会额外落盘到 `/var/log/xray-warp-team/operations.log`
+- 每次有备份目录的操作，还会把本次会话日志写到 `${BACKUP_DIR}/operation.log`
 - 状态文件带 `STATE_VERSION`，脚本读取旧版本状态文件时会给出提示
 - 交互安装失败后会保留一份安装 draft，方便再次进入时继续填写
 - 安装前会做预检：443 端口占用、CDN 域名解析、Cloudflare Token 在线校验（在相关模式下）
 - 启用 WARP 时会额外安装一个健康检查 timer，定期验证本地 WARP SOCKS5 是否可用
+- 默认保留最近 5 次备份，超出的旧备份会自动清理
+- 使用文件锁避免两个终端同时运行脚本互相踩配置
 
 ## 安装完成后会得到什么
 
@@ -676,6 +683,40 @@ xray-warp-team uninstall --yes
 - 会删除脚本托管的配置、证书、systemd unit、bundle 和输出文件
 - 不会卸载已经装上的软件包
 - 每次卸载前会先把托管文件备份到本次 `BACKUP_DIR`
+
+### 完全卸载（含软件包）
+
+```bash
+xray-warp-team uninstall --purge --yes
+```
+
+说明：
+
+- 会删除脚本托管文件
+- 会尝试卸载脚本安装的主要软件包：
+  - `haproxy`
+  - `nginx`
+  - `jq`
+  - `uuid-runtime`
+  - `cloudflare-warp`
+- 还会额外清理：
+  - `/root/.acme.sh`
+  - `/var/lib/cloudflare-warp`
+  - `/var/log/xray-warp-team`
+
+### 操作日志
+
+全局日志：
+
+```bash
+/var/log/xray-warp-team/operations.log
+```
+
+单次会话日志：
+
+```bash
+${BACKUP_DIR}/operation.log
+```
 
 ## 常见问题
 

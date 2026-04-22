@@ -242,12 +242,16 @@ repair_perms_cmd() {
 
 uninstall_cmd() {
   local assume_yes=0
+  local purge_packages=0
   local answer=""
   local unit_name=""
   local units=()
 
   while [[ $# -gt 0 ]]; do
     case "${1}" in
+      --purge)
+        purge_packages=1
+        ;;
       --yes|-y)
         assume_yes=1
         ;;
@@ -267,7 +271,11 @@ uninstall_cmd() {
   load_existing_state
 
   if [[ "${assume_yes}" -ne 1 ]]; then
-    read -r -p "该操作会停止服务并删除脚本托管文件，但保留已安装的软件包。是否继续？ [y/N]: " answer
+    if [[ "${purge_packages}" -eq 1 ]]; then
+      read -r -p "该操作会停止服务、删除脚本托管文件，并尝试卸载脚本安装的软件包。是否继续？ [y/N]: " answer
+    else
+      read -r -p "该操作会停止服务并删除脚本托管文件，但保留已安装的软件包。是否继续？ [y/N]: " answer
+    fi
     answer="$(printf '%s' "${answer}" | tr 'A-Z' 'a-z')"
     if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
       die "已取消卸载。"
@@ -309,18 +317,31 @@ uninstall_cmd() {
     "${NET_HELPER_PATH}" \
     "${NET_SERVICE_FILE}" \
     "${ACME_RELOAD_HELPER}" \
+    "${ACME_HOME}" \
     "${OUTPUT_FILE}" \
     "/var/log/xray" \
-    "/var/lib/xray"
+    "/var/lib/xray" \
+    "${OP_LOG_DIR}" \
+    "/var/lib/cloudflare-warp"
 
   systemctl daemon-reload
   mapfile -t units < <(xray_managed_service_units)
   systemctl reset-failed "${units[@]}" >/dev/null 2>&1 || true
   sysctl --system >/dev/null 2>&1 || true
 
+  if [[ "${purge_packages}" -eq 1 ]]; then
+    log_step "卸载脚本安装的软件包。"
+    purge_managed_packages
+    log "已尝试卸载脚本安装的软件包。"
+  fi
+
   log "脚本托管文件已删除。"
   log "备份目录：${BACKUP_DIR}"
-  log "已安装的软件包已保留。"
+  if [[ "${purge_packages}" -eq 1 ]]; then
+    log "软件包卸载流程已结束。"
+  else
+    log "已安装的软件包已保留。"
+  fi
 }
 
 show_main_menu() {
@@ -342,8 +363,9 @@ show_main_menu() {
   15. 续期 / 刷新证书
   16. 抢修文件权限
   17. 卸载托管文件
-  18. 查看原始服务详情
-  19. 帮助
+  18. 完全卸载（含软件包）
+  19. 查看原始服务详情
+  20. 帮助
   0. 退出
 EOF
 }
@@ -400,6 +422,9 @@ run_cli_command() {
     uninstall)
       uninstall_cmd "$@"
       ;;
+    purge)
+      uninstall_cmd --purge "$@"
+      ;;
     show-links)
       show_links "$@"
       ;;
@@ -443,8 +468,9 @@ run_menu_choice() {
     15) run_cli_command renew-cert ;;
     16) run_cli_command repair-perms ;;
     17) run_cli_command uninstall ;;
-    18) run_cli_command status --raw ;;
-    19) run_cli_command help ;;
+    18) run_cli_command purge --yes ;;
+    19) run_cli_command status --raw ;;
+    20) run_cli_command help ;;
     *)
       warn "未知的菜单项：${1}"
       return 1

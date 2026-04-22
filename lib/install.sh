@@ -21,6 +21,16 @@ xray_release_api_url() {
   printf '%s' "https://api.github.com/repos/XTLS/Xray-core/releases/latest"
 }
 
+managed_package_names() {
+  printf '%s\n' \
+    "haproxy" \
+    "nginx" \
+    "nginx-common" \
+    "jq" \
+    "uuid-runtime" \
+    "cloudflare-warp"
+}
+
 xray_archive_name() {
   local arch="${1}"
   printf 'Xray-linux-%s.zip' "${arch}"
@@ -363,6 +373,15 @@ write_install_draft_file() {
 
 clear_install_draft_file() {
   rm -f "${INSTALL_DRAFT_FILE}"
+}
+
+purge_managed_packages() {
+  local packages=()
+
+  mapfile -t packages < <(managed_package_names)
+  [[ "${#packages[@]}" -gt 0 ]] || return 0
+  apt-get purge -y "${packages[@]}" >/dev/null 2>&1 || warn "部分软件包卸载失败，请手动检查 apt 输出。"
+  apt-get autoremove -y >/dev/null 2>&1 || true
 }
 
 install_draft_session_begin() {
