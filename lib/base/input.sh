@@ -181,13 +181,15 @@ prompt_with_default() {
   local prompt_text="${2}"
   local default_value="${3}"
   local current_value=""
+  local effective_default=""
+  local answer=""
 
   current_value="${!var_name:-}"
-  if [[ -n "${current_value}" ]]; then
-    return
-  fi
 
   if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    if [[ -n "${current_value}" ]]; then
+      return
+    fi
     if [[ -n "${default_value}" ]]; then
       printf -v "${var_name}" '%s' "${default_value}"
       return
@@ -195,14 +197,15 @@ prompt_with_default() {
     die "缺少必填参数：${var_name}。"
   fi
 
-  if [[ -n "${default_value}" ]]; then
-    read -r -p "${prompt_text} [${default_value}]: " current_value
-    current_value="${current_value:-${default_value}}"
+  effective_default="${current_value:-${default_value}}"
+  if [[ -n "${effective_default}" ]]; then
+    read -r -p "${prompt_text} [${effective_default}]: " answer
+    answer="${answer:-${effective_default}}"
   else
-    read -r -p "${prompt_text}: " current_value
+    read -r -p "${prompt_text}: " answer
   fi
 
-  printf -v "${var_name}" '%s' "${current_value}"
+  printf -v "${var_name}" '%s' "${answer}"
 }
 
 resolve_value_source() {
@@ -228,20 +231,26 @@ prompt_secret() {
   local var_name="${1}"
   local prompt_text="${2}"
   local current_value=""
+  local answer=""
 
   resolve_value_source "${var_name}"
   current_value="${!var_name:-}"
-  if [[ -n "${current_value}" ]]; then
-    return
-  fi
 
   if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    if [[ -n "${current_value}" ]]; then
+      return
+    fi
     die "缺少必填密钥参数：${var_name}。"
   fi
 
-  read -r -s -p "${prompt_text}: " current_value
+  if [[ -n "${current_value}" ]]; then
+    read -r -s -p "${prompt_text} [已填写，直接回车沿用]: " answer
+    answer="${answer:-${current_value}}"
+  else
+    read -r -s -p "${prompt_text}: " answer
+  fi
   printf '\n'
-  printf -v "${var_name}" '%s' "${current_value}"
+  printf -v "${var_name}" '%s' "${answer}"
 }
 
 prompt_multiline_value() {
@@ -249,14 +258,22 @@ prompt_multiline_value() {
   local prompt_text="${2}"
   local current_value=""
   local line=""
+  local answer="keep"
 
   current_value="${!var_name:-}"
-  if [[ -n "${current_value}" ]]; then
-    return
-  fi
 
   if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    if [[ -n "${current_value}" ]]; then
+      return
+    fi
     die "缺少必填多行内容：${var_name}。"
+  fi
+
+  if [[ -n "${current_value}" ]]; then
+    read -r -p "${prompt_text} [已填写，回车沿用，输入 edit 重新粘贴]: " answer
+    if [[ -z "${answer}" ]]; then
+      return
+    fi
   fi
 
   printf '%s\n' "${prompt_text}"
@@ -279,18 +296,22 @@ prompt_yes_no() {
   local var_name="${1}"
   local prompt_text="${2}"
   local default_value="${3}"
+  local current_value=""
+  local effective_default=""
   local answer=""
 
-  if [[ -n "${!var_name:-}" ]]; then
-    return
-  fi
+  current_value="${!var_name:-}"
 
   if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
+    if [[ -n "${current_value}" ]]; then
+      return
+    fi
     printf -v "${var_name}" '%s' "${default_value}"
     return
   fi
 
-  read -r -p "${prompt_text} [${default_value}]: " answer
-  answer="${answer:-${default_value}}"
+  effective_default="${current_value:-${default_value}}"
+  read -r -p "${prompt_text} [${effective_default}]: " answer
+  answer="${answer:-${effective_default}}"
   printf -v "${var_name}" '%s' "${answer}"
 }

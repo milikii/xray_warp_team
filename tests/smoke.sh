@@ -28,6 +28,7 @@ main() {
   run_install_self_command_case
   run_update_script_command_case
   run_value_source_case
+  run_prompt_reuse_case
   run_install_validation_case
   run_xray_digest_parse_case
   run_install_xray_checksum_failure_case

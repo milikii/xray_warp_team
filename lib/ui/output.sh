@@ -57,13 +57,14 @@ build_xhttp_uri() {
   [[ -n "${ech_component}" ]] && ech_query="&ech=${ech_component}"
   [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
 
-  printf 'vless://%s@%s:443?mode=auto&path=%s&security=tls&alpn=%s&encryption=%s&insecure=0&host=%s&fp=%s&type=xhttp&allowInsecure=0&sni=%s%s%s#%s' \
+  printf 'vless://%s@%s:443?mode=auto&path=%s&security=tls&alpn=%s&encryption=%s&insecure=0&host=%s&fp=%s&fingerprint=%s&type=xhttp&allowInsecure=0&sni=%s%s%s#%s' \
     "${XHTTP_UUID}" \
     "${XHTTP_DOMAIN}" \
     "${path_component}" \
     "${TLS_ALPN}" \
     "${encryption_value}" \
     "${XHTTP_DOMAIN}" \
+    "${FINGERPRINT}" \
     "${FINGERPRINT}" \
     "${XHTTP_DOMAIN}" \
     "${ech_query}" \
@@ -118,10 +119,11 @@ cloudflare_ssl_mode_text() {
 build_reality_uri() {
   local label="${1}"
 
-  printf 'vless://%s@%s:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&pbk=%s&sid=%s&type=tcp&headerType=none#%s' \
+  printf 'vless://%s@%s:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&fingerprint=%s&pbk=%s&sid=%s&type=tcp&headerType=none#%s' \
     "${REALITY_UUID}" \
     "${SERVER_IP}" \
     "${REALITY_SNI}" \
+    "${FINGERPRINT}" \
     "${FINGERPRINT}" \
     "${REALITY_PUBLIC_KEY}" \
     "${REALITY_SHORT_ID}" \

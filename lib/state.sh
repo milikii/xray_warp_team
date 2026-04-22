@@ -358,6 +358,7 @@ load_output_runtime_context() {
 normalize_runtime_defaults() {
   SERVER_IP="${SERVER_IP:-$(guess_server_ip)}"
   NODE_LABEL_PREFIX="${NODE_LABEL_PREFIX:-$(default_node_label_prefix)}"
+  TLS_ALPN="${TLS_ALPN:-${DEFAULT_TLS_ALPN}}"
   FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   CERT_MODE="${CERT_MODE:-existing}"
   ACME_CA="${ACME_CA:-${DEFAULT_ACME_CA}}"

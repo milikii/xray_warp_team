@@ -50,6 +50,8 @@ run_warp_enabled_case() {
 
   assert_contains '&ech=' "${OUTPUT_FILE}"
   assert_contains 'extra=' "${OUTPUT_FILE}"
+  assert_contains 'alpn=h2' "${OUTPUT_FILE}"
+  assert_contains 'fingerprint=chrome' "${OUTPUT_FILE}"
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
   assert_contains '已启用: 是' "${OUTPUT_FILE}"
   assert_contains '## Clash Meta / Mihomo 片段' "${OUTPUT_FILE}"

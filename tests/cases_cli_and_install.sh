@@ -253,6 +253,67 @@ run_value_source_case() {
   unset WARP_CLIENT_ID
 }
 
+run_prompt_reuse_case() {
+  local output=""
+  local script_file=""
+
+  script_file="$(mktemp)"
+  cat > "${script_file}" <<EOF
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+NON_INTERACTIVE=0
+SERVER_IP="203.0.113.10"
+prompt_with_default SERVER_IP "REALITY 直连节点地址或 IP" "198.51.100.10"
+printf '%s' "\${SERVER_IP}"
+EOF
+  output="$(printf '203.0.113.11\n' | bash "${script_file}")"
+  rm -f "${script_file}"
+  [[ "${output}" == "203.0.113.11" ]]
+
+  script_file="$(mktemp)"
+  cat > "${script_file}" <<EOF
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+NON_INTERACTIVE=0
+SERVER_IP="203.0.113.10"
+prompt_with_default SERVER_IP "REALITY 直连节点地址或 IP" "198.51.100.10"
+printf '%s' "\${SERVER_IP}"
+EOF
+  output="$(printf '\n' | bash "${script_file}")"
+  rm -f "${script_file}"
+  [[ "${output}" == "203.0.113.10" ]]
+
+  script_file="$(mktemp)"
+  cat > "${script_file}" <<EOF
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+NON_INTERACTIVE=0
+ENABLE_WARP="yes"
+prompt_yes_no ENABLE_WARP "是否启用选择性 WARP 出站？ [y/n]" "y"
+printf '%s' "\${ENABLE_WARP}"
+EOF
+  output="$(printf 'n\n' | bash "${script_file}")"
+  rm -f "${script_file}"
+  [[ "${output}" == "n" ]]
+
+  script_file="$(mktemp)"
+  cat > "${script_file}" <<EOF
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+NON_INTERACTIVE=0
+WARP_CLIENT_SECRET="secret-old"
+prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
+printf '%s' "\${WARP_CLIENT_SECRET}"
+EOF
+  output="$(printf '\n' | bash "${script_file}")"
+  rm -f "${script_file}"
+  [[ "${output##*$'\n'}" == "secret-old" ]]
+}
+
 run_xray_digest_parse_case() {
   local workdir=""
   local dgst_file=""

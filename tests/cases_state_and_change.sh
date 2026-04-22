@@ -83,7 +83,6 @@ EOF
 
   cat > "${STATE_FILE}" <<'EOF'
 STATE_VERSION='1'
-TLS_ALPN='h2'
 CERT_MODE='existing'
 ACME_CA='letsencrypt'
 XHTTP_ECH_CONFIG_LIST='https://1.1.1.1/dns-query'
