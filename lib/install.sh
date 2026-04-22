@@ -809,10 +809,8 @@ install_self_command() {
   local source_path="${SCRIPT_SELF:-$0}"
   local source_real=""
   local source_root=""
-  local target_entry="${SELF_INSTALL_DIR}/xray-warp-team.sh"
   local staging_dir=""
   local source_bundle_root=""
-  local wrapper_tmp=""
 
   if [[ ! -f "${source_path}" ]]; then
     warn "无法写入持久化管理命令，因为当前脚本路径不可用。"
@@ -831,6 +829,25 @@ install_self_command() {
     source_bundle_root="${staging_dir}"
   fi
 
+  install_bundle_root_to_self "${source_bundle_root}"
+  if [[ -n "${staging_dir}" ]]; then
+    rm -rf "${staging_dir}"
+  fi
+  return 0
+}
+
+bundle_script_version() {
+  local bundle_root="${1}"
+
+  sed -n 's/^SCRIPT_VERSION="\([^"]*\)".*/\1/p' "${bundle_root}/xray-warp-team.sh" 2>/dev/null | head -n 1
+}
+
+install_bundle_root_to_self() {
+  local source_bundle_root="${1}"
+  local target_entry="${SELF_INSTALL_DIR}/xray-warp-team.sh"
+  local wrapper_tmp=""
+  [[ -d "${source_bundle_root}/lib" && -f "${source_bundle_root}/xray-warp-team.sh" ]] || die "脚本 bundle 缺少必需文件，无法安装。"
+
   backup_path "${SELF_INSTALL_DIR}"
   backup_path "${SELF_COMMAND_PATH}"
 
@@ -839,7 +856,6 @@ install_self_command() {
   install -d -m 0755 "$(dirname "${SELF_COMMAND_PATH}")"
   install -m 0755 "${source_bundle_root}/xray-warp-team.sh" "${target_entry}"
   cp -a "${source_bundle_root}/lib" "${SELF_INSTALL_DIR}/lib"
-  [[ -n "${staging_dir}" ]] && rm -rf "${staging_dir}"
 
   wrapper_tmp="$(mktemp)"
   cat > "${wrapper_tmp}" <<EOF
@@ -849,6 +865,61 @@ exec "${target_entry}" "\$@"
 EOF
   install -m 0755 "${wrapper_tmp}" "${SELF_COMMAND_PATH}"
   rm -f "${wrapper_tmp}"
+}
+
+download_latest_script_bundle() {
+  local target_dir="${1}"
+  local archive_url=""
+  local archive_path="${target_dir}/xray-warp-team.tar.gz"
+  local bundle_root=""
+
+  archive_url="$(bootstrap_resolve_archive_url)"
+  log "下载来源：${archive_url}"
+  curl -fsSL "${archive_url}" -o "${archive_path}" || return 1
+  tar -xzf "${archive_path}" -C "${target_dir}" || return 1
+  bundle_root="$(find "${target_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
+  bundle_root_ready "${bundle_root}" || return 1
+  printf '%s' "${bundle_root}"
+}
+
+update_script_cmd() {
+  local previous_version=""
+  local current_version=""
+  local tmp_dir=""
+  local bundle_root=""
+
+  need_root
+  start_backup_session
+  previous_version="$(
+    if [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]; then
+      bundle_script_version "${SELF_INSTALL_DIR}"
+    else
+      printf '%s' "${SCRIPT_VERSION}"
+    fi
+  )"
+
+  tmp_dir="$(mktemp -d)"
+  log_step "下载最新脚本 bundle。"
+  if ! bundle_root="$(download_latest_script_bundle "${tmp_dir}")"; then
+    rm -rf "${tmp_dir}"
+    die "下载最新脚本 bundle 失败。"
+  fi
+
+  current_version="$(bundle_script_version "${bundle_root}")"
+  log_step "安装脚本 bundle。"
+  if ! install_bundle_root_to_self "${bundle_root}"; then
+    warn "脚本 bundle 安装失败，正在回滚持久化脚本文件。"
+    restore_backup_path "${SELF_INSTALL_DIR}" || true
+    restore_backup_path "${SELF_COMMAND_PATH}" || true
+    rm -rf "${tmp_dir}"
+    return 1
+  fi
+
+  rm -rf "${tmp_dir}"
+  log_success "脚本 bundle 已更新。"
+  log "备份目录：${BACKUP_DIR}"
+  [[ -n "${previous_version}" ]] && log "更新前版本：${previous_version}"
+  [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
 }
 
 . "${SCRIPT_ROOT}/lib/install/certs.sh"

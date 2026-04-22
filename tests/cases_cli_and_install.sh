@@ -8,6 +8,7 @@ run_usage_case() {
 
   [[ "${output}" == *$'\n  xray-warp-team help'* ]]
   [[ "${output}" == *$'\n  xray-warp-team install [参数]'* ]]
+  [[ "${output}" == *$'\n  xray-warp-team update-script'* ]]
   [[ "${output}" == *$'\n  xray-warp-team renew-cert [参数]'* ]]
   [[ "${output}" == *$'\n  xray-warp-team change-warp-rules [参数]'* ]]
   [[ "${output}" == *$'\n  xray-warp-team diagnose'* ]]
@@ -107,6 +108,80 @@ run_install_self_command_case() {
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
   [[ -f "${SELF_INSTALL_DIR}/lib/ui/output.sh" ]]
+}
+
+run_update_script_command_case() {
+  local workdir=""
+  local logged=""
+
+  workdir="$(mktemp -d)"
+  SELF_INSTALL_DIR="${workdir}/bundle"
+  SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team"
+  SCRIPT_VERSION="0.4.5"
+
+  need_root() { :; }
+  start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
+  bootstrap_resolve_archive_url() {
+    printf '%s' "https://example.invalid/xray-warp-team.tar.gz"
+  }
+  curl() {
+    local output_path=""
+
+    while [[ $# -gt 0 ]]; do
+      case "${1}" in
+        -o)
+          output_path="${2}"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+
+    printf 'archive' > "${output_path}"
+  }
+  tar() {
+    local target_dir=""
+
+    while [[ $# -gt 0 ]]; do
+      case "${1}" in
+        -C)
+          target_dir="${2}"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+
+    mkdir -p "${target_dir}/bundle/lib/base"
+    cat > "${target_dir}/bundle/xray-warp-team.sh" <<'EOF'
+#!/usr/bin/env bash
+SCRIPT_VERSION="9.9.9"
+EOF
+    printf '# helper\n' > "${target_dir}/bundle/lib/base/helpers.sh"
+  }
+  log_step() {
+    logged+="STEP:${1}"$'\n'
+  }
+  log_success() {
+    logged+="DONE:${1}"$'\n'
+  }
+  log() {
+    logged+="${1}"$'\n'
+  }
+  backup_path() { :; }
+
+  update_script_cmd
+
+  [[ -x "${SELF_COMMAND_PATH}" ]]
+  [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
+  grep -q 'SCRIPT_VERSION="9.9.9"' "${SELF_INSTALL_DIR}/xray-warp-team.sh"
+  printf '%s' "${logged}" | grep -q 'STEP:下载最新脚本 bundle。'
+  printf '%s' "${logged}" | grep -q 'STEP:安装脚本 bundle。'
+  printf '%s' "${logged}" | grep -q '当前版本：9.9.9'
 }
 
 run_install_validation_case() {
@@ -531,6 +606,10 @@ run_dispatch_case() {
     dispatched="install"
     dispatched_args="$*"
   }
+  update_script_cmd() {
+    dispatched="update-script"
+    dispatched_args="$*"
+  }
   status_cmd() {
     dispatched="status"
     dispatched_args="$*"
@@ -560,6 +639,9 @@ run_dispatch_case() {
   [[ "${dispatched}" == "install" ]]
   [[ "${dispatched_args}" == "--non-interactive --disable-warp" ]]
 
+  run_cli_command update-script
+  [[ "${dispatched}" == "update-script" ]]
+
   run_cli_command status --raw
   [[ "${dispatched}" == "status" ]]
   [[ "${dispatched_args}" == "--raw" ]]
@@ -570,21 +652,24 @@ run_dispatch_case() {
   run_cli_command
   [[ "${dispatched}" == "menu" ]]
 
-  run_menu_choice 16
+  run_menu_choice 17
   [[ "${dispatched}" == "uninstall" ]]
 
-  run_menu_choice 17
+  run_menu_choice 18
   [[ "${dispatched}" == "status" ]]
   [[ "${dispatched_args}" == "--raw" ]]
 
-  run_menu_choice 14
+  run_menu_choice 15
   [[ "${dispatched}" == "renew-cert" ]]
 
-  run_menu_choice 12
+  run_menu_choice 13
   [[ "${dispatched}" == "change-warp-rules" ]]
 
   run_menu_choice 3
   [[ "${dispatched}" == "diagnose" ]]
+
+  run_menu_choice 6
+  [[ "${dispatched}" == "update-script" ]]
 }
 
 run_install_flow_case() {

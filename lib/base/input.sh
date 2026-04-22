@@ -15,6 +15,7 @@ usage() {
 用法:
   ${command_name}
   ${command_name} install [参数]
+  ${command_name} update-script
   ${command_name} upgrade
   ${command_name} change-uuid [参数]
   ${command_name} change-sni [参数]
@@ -142,11 +143,15 @@ usage() {
 诊断命令:
   diagnose                    一次性输出服务、端口、配置、TLS 与最近自恢复信息。
 
+脚本维护命令:
+  update-script               下载并更新脚本自身的持久化 bundle 与管理命令。
+
 链接参数:
   --qr                        额外输出分享链接二维码；需要系统已安装 qrencode。
 
 示例:
   ${command_name}
+  ${command_name} update-script
   ${command_name} upgrade
   ${command_name} repair-perms
   ${command_name} diagnose

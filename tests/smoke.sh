@@ -26,6 +26,7 @@ main() {
   run_single_file_bootstrap_case
   run_bootstrap_archive_resolve_case
   run_install_self_command_case
+  run_update_script_command_case
   run_value_source_case
   run_install_validation_case
   run_xray_digest_parse_case

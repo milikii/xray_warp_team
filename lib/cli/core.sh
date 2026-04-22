@@ -329,19 +329,20 @@ show_main_menu() {
   3. 运行诊断
   4. 刷新状态面板
   5. 重启服务
-  6. 升级 Xray 核心
-  7. 轮换节点 UUID
-  8. 修改 REALITY SNI
-  9. 修改 XHTTP 路径
-  10. 修改节点名前缀
-  11. 开关 WARP 分流
-  12. 修改 WARP 分流规则
-  13. 修改证书模式 / CDN 域名
-  14. 续期 / 刷新证书
-  15. 抢修文件权限
-  16. 卸载托管文件
-  17. 查看原始服务详情
-  18. 帮助
+  6. 更新脚本本身
+  7. 升级 Xray 核心
+  8. 轮换节点 UUID
+  9. 修改 REALITY SNI
+  10. 修改 XHTTP 路径
+  11. 修改节点名前缀
+  12. 开关 WARP 分流
+  13. 修改 WARP 分流规则
+  14. 修改证书模式 / CDN 域名
+  15. 续期 / 刷新证书
+  16. 抢修文件权限
+  17. 卸载托管文件
+  18. 查看原始服务详情
+  19. 帮助
   0. 退出
 EOF
 }
@@ -364,6 +365,9 @@ run_cli_command() {
       ;;
     install)
       install_cmd "$@"
+      ;;
+    update-script)
+      update_script_cmd "$@"
       ;;
     upgrade)
       upgrade_cmd "$@"
@@ -426,19 +430,20 @@ run_menu_choice() {
     3) run_cli_command diagnose ;;
     4) run_cli_command status ;;
     5) run_cli_command restart ;;
-    6) run_cli_command upgrade ;;
-    7) run_cli_command change-uuid ;;
-    8) run_cli_command change-sni ;;
-    9) run_cli_command change-path ;;
-    10) run_cli_command change-label-prefix ;;
-    11) run_cli_command change-warp ;;
-    12) run_cli_command change-warp-rules ;;
-    13) run_cli_command change-cert-mode ;;
-    14) run_cli_command renew-cert ;;
-    15) run_cli_command repair-perms ;;
-    16) run_cli_command uninstall ;;
-    17) run_cli_command status --raw ;;
-    18) run_cli_command help ;;
+    6) run_cli_command update-script ;;
+    7) run_cli_command upgrade ;;
+    8) run_cli_command change-uuid ;;
+    9) run_cli_command change-sni ;;
+    10) run_cli_command change-path ;;
+    11) run_cli_command change-label-prefix ;;
+    12) run_cli_command change-warp ;;
+    13) run_cli_command change-warp-rules ;;
+    14) run_cli_command change-cert-mode ;;
+    15) run_cli_command renew-cert ;;
+    16) run_cli_command repair-perms ;;
+    17) run_cli_command uninstall ;;
+    18) run_cli_command status --raw ;;
+    19) run_cli_command help ;;
     *)
       warn "未知的菜单项：${1}"
       return 1
