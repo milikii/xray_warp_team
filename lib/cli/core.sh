@@ -295,6 +295,7 @@ uninstall_cmd() {
     "${CORE_HEALTH_HELPER}" \
     "${CORE_HEALTH_SERVICE_FILE}" \
     "${CORE_HEALTH_TIMER_FILE}" \
+    "${XRAY_LOGROTATE_FILE}" \
     "${HAPROXY_CONFIG}" \
     "${NGINX_CONFIG_FILE}" \
     "${SSL_DIR}" \

@@ -41,6 +41,28 @@ EOF
   rm -f "${tmp_file}"
 }
 
+write_xray_logrotate_config() {
+  local tmp_file=""
+
+  tmp_file="$(mktemp)"
+  cat > "${tmp_file}" <<'EOF'
+/var/log/xray/access.log /var/log/xray/error.log {
+  daily
+  rotate 7
+  missingok
+  notifempty
+  compress
+  delaycompress
+  copytruncate
+  create 0640 xray xray
+}
+EOF
+
+  backup_path "${XRAY_LOGROTATE_FILE}"
+  install -m 0644 "${tmp_file}" "${XRAY_LOGROTATE_FILE}"
+  rm -f "${tmp_file}"
+}
+
 write_core_health_helper() {
   local tmp_file=""
 
@@ -250,6 +272,7 @@ rollback_managed_runtime_state() {
     "${CORE_HEALTH_HELPER}"
     "${CORE_HEALTH_SERVICE_FILE}"
     "${CORE_HEALTH_TIMER_FILE}"
+    "${XRAY_LOGROTATE_FILE}"
   )
 
   if [[ "${include_tls_assets}" == "yes" ]]; then

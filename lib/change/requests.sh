@@ -80,6 +80,7 @@ apply_request_value_spec() {
   IFS=':' read -r spec_option request_key override_key <<< "${spec}"
   [[ "${option}" == "${spec_option}" ]] || return 1
   require_option_value "${option}" "$@"
+  enforce_indirect_option_value "${option}" "${1}"
   request_ref["${request_key}"]="${1}"
   if [[ -z "${override_key}" ]]; then
     override_key="$(request_value_presence_key "${request_key}")"

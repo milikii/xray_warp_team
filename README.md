@@ -98,10 +98,19 @@ xray-warp-team.sh
 - Service Token 的 `Client ID`
 - Service Token 的 `Client Secret`
 
-敏感参数建议不要直接写在 shell history 里。当前脚本已经支持：
+敏感参数建议不要直接写在 shell history 里。当前脚本支持：
 
 - 直接用环境变量，例如：`WARP_CLIENT_SECRET=xxx bash xray-warp-team.sh install ...`
 - 用 `@文件路径` 读取，例如：`--warp-client-secret @/root/secret.txt`
+
+从 `0.4.9` 开始，下面这些敏感参数不再接受“命令行直接明文传值”：
+
+- `--warp-client-secret`
+- `--cf-api-token`
+- `--cf-dns-token`
+- `--reality-private-key`
+- `--cert-pem`
+- `--key-pem`
 
 ## 快速开始
 
@@ -157,7 +166,7 @@ bash xray-warp-team.sh install --non-interactive \
   --enable-warp \
   --warp-team your-team \
   --warp-client-id xxxxxxxxx.access \
-  --warp-client-secret xxxxxxxxx
+  --warp-client-secret @/root/warp-client-secret.txt
 ```
 
 等价的更安全写法：
@@ -598,7 +607,7 @@ xray-warp-team renew-cert
 - `cf-origin-ca`：重新向 Cloudflare Origin CA 申请
 - `acme-dns-cf`：重新执行 `acme.sh` 的申请 / 安装流程
 
-敏感参数仍建议优先使用环境变量或 `@文件路径`：
+敏感参数请使用环境变量或 `@文件路径`：
 
 ```bash
 CF_DNS_TOKEN=xxxxxxxx xray-warp-team renew-cert --non-interactive

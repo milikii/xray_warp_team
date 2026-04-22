@@ -44,6 +44,7 @@ main() {
   run_restart_optional_service_case
   run_change_helper_case
   run_install_parse_case
+  run_sensitive_option_reject_case
   run_preflight_token_verify_case
   run_warp_rule_normalize_case
   run_optional_component_skip_case

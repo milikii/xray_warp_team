@@ -449,6 +449,7 @@ prepare_install_inputs() {
 
 default_reality_target_for_sni() {
   local sni="${1}"
+  [[ -n "${sni}" ]] || return 0
   printf '%s:443' "${sni}"
 }
 

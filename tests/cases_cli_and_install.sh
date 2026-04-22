@@ -185,9 +185,9 @@ EOF
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
   grep -q 'SCRIPT_VERSION="9.9.9"' "${SELF_INSTALL_DIR}/xray-warp-team.sh"
-  printf '%s' "${logged}" | grep -q 'STEP:下载最新脚本 bundle。'
-  printf '%s' "${logged}" | grep -q 'STEP:安装脚本 bundle。'
-  printf '%s' "${logged}" | grep -q '当前版本：9.9.9'
+  grep -q 'STEP:下载最新脚本 bundle。' <<< "${logged}"
+  grep -q 'STEP:安装脚本 bundle。' <<< "${logged}"
+  grep -q '当前版本：9.9.9' <<< "${logged}"
 
   log() {
     printf '[信息] %s\n' "${1}"
@@ -195,8 +195,8 @@ EOF
   stdout_output="$(update_script_cmd 2>&1)"
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
-  printf '%s' "${stdout_output}" | grep -q '下载来源：'
-  printf '%s' "${stdout_output}" | grep -q '当前版本：9.9.9'
+  grep -q '下载来源：' <<< "${stdout_output}"
+  grep -q '当前版本：9.9.9' <<< "${stdout_output}"
 }
 
 run_install_validation_case() {
@@ -387,6 +387,10 @@ EOF
 }
 
 run_install_parse_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  printf 'client-secret\n' > "${workdir}/warp-secret.txt"
   NON_INTERACTIVE=0
   SERVER_IP=""
   NODE_LABEL_PREFIX=""
@@ -424,10 +428,11 @@ run_install_parse_case() {
     --enable-warp \
     --warp-team team-name \
     --warp-client-id client-id \
-    --warp-client-secret client-secret \
+    --warp-client-secret "@${workdir}/warp-secret.txt" \
     --warp-proxy-port 41000 \
     --disable-net-opt
 
+  resolve_install_input_sources
   [[ "${NON_INTERACTIVE}" -eq 1 ]]
   [[ "${SERVER_IP}" == "198.51.100.10" ]]
   [[ "${NODE_LABEL_PREFIX}" == "hkg" ]]
@@ -446,6 +451,21 @@ run_install_parse_case() {
   [[ "${WARP_CLIENT_SECRET}" == "client-secret" ]]
   [[ "${WARP_PROXY_PORT}" == "41000" ]]
   [[ "${ENABLE_NET_OPT}" == "no" ]]
+}
+
+run_sensitive_option_reject_case() {
+  local output=""
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+parse_install_args --warp-client-secret direct-secret
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q '不支持直接明文传值'
 }
 
 run_preflight_token_verify_case() {

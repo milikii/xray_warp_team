@@ -40,6 +40,7 @@ assign_option_value() {
 
   shift 2
   require_option_value "${option_name}" "$@"
+  enforce_indirect_option_value "${option_name}" "${1}"
   printf -v "${var_name}" '%s' "${1}"
 }
 

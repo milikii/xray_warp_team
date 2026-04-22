@@ -154,7 +154,6 @@ bootstrap_script_root_if_needed() {
 
 bootstrap_script_root_if_needed "$@"
 STATE_VERSION_CURRENT="1"
-DEFAULT_REALITY_SNI="www.scu.edu"
 DEFAULT_WARP_PROXY_PORT="40000"
 DEFAULT_TLS_ALPN="h2"
 DEFAULT_FINGERPRINT="chrome"
@@ -163,6 +162,7 @@ DEFAULT_CF_CERT_VALIDITY="5475"
 DEFAULT_ACME_CA="letsencrypt"
 DEFAULT_XHTTP_ECH_CONFIG_LIST=""
 DEFAULT_XHTTP_ECH_FORCE_QUERY=""
+DEFAULT_REALITY_SNI=""
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
@@ -198,14 +198,17 @@ CORE_HEALTH_SERVICE_FILE="/etc/systemd/system/${CORE_HEALTH_SERVICE_NAME}"
 CORE_HEALTH_TIMER_NAME="xray-warp-team-core-health.timer"
 CORE_HEALTH_TIMER_FILE="/etc/systemd/system/${CORE_HEALTH_TIMER_NAME}"
 BACKUP_ROOT="/root/xray-warp-team-backups"
+BACKUP_KEEP_COUNT="${XRAY_WARP_TEAM_BACKUP_KEEP_COUNT:-5}"
 NET_SYSCTL_CONF="/etc/sysctl.d/98-xray-warp-team-net.conf"
 NET_HELPER_PATH="/usr/local/sbin/xray-warp-team-net-optimize.sh"
 NET_SERVICE_NAME="xray-warp-team-net-optimize.service"
 NET_SERVICE_FILE="/etc/systemd/system/${NET_SERVICE_NAME}"
+XRAY_LOGROTATE_FILE="/etc/logrotate.d/xray-warp-team"
 ACME_HOME="/root/.acme.sh"
 ACME_SH_BIN="${ACME_HOME}/acme.sh"
 ACME_RELOAD_HELPER="/usr/local/sbin/xray-warp-team-cert-reload.sh"
 INSTALL_DRAFT_FILE="/root/.xray-warp-team-install-draft.env"
+SCRIPT_LOCK_FILE="${XRAY_WARP_TEAM_LOCK_FILE:-/run/xray-warp-team.lock}"
 
 NON_INTERACTIVE=0
 ENABLE_WARP=""
@@ -277,6 +280,7 @@ fi
 . "${SCRIPT_ROOT}/lib/commands.sh"
 
 main() {
+  acquire_script_lock
   run_cli_command "$@"
 }
 

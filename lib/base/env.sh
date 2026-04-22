@@ -257,6 +257,22 @@ restore_backup_path() {
 }
 
 start_backup_session() {
+  local path=""
+  local paths=()
+  local index=0
+
   BACKUP_DIR="${BACKUP_ROOT}/$(date +%Y%m%d-%H%M%S)"
   mkdir -p "${BACKUP_DIR}"
+
+  [[ "${BACKUP_KEEP_COUNT}" =~ ^[0-9]+$ ]] || return 0
+  [[ "${BACKUP_KEEP_COUNT}" -gt 0 ]] || return 0
+
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    paths+=("${path}")
+  done < <(find "${BACKUP_ROOT}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -nr | awk '{print $2}')
+
+  for ((index = BACKUP_KEEP_COUNT; index < ${#paths[@]}; index++)); do
+    rm -rf "${paths[index]}"
+  done
 }

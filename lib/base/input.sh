@@ -40,7 +40,7 @@ usage() {
   --reality-uuid VALUE        指定 REALITY 节点 UUID。
   --reality-sni VALUE         REALITY 可见 SNI，同时用于 HAProxy 分流。
   --reality-short-id VALUE    REALITY 短 ID。
-  --reality-private-key VALUE 复用现有 REALITY 私钥。
+  --reality-private-key VALUE 复用现有 REALITY 私钥；仅支持 @文件路径或环境变量 REALITY_PRIVATE_KEY。
   --xhttp-uuid VALUE          指定 XHTTP CDN 节点 UUID。
   --xhttp-domain VALUE        XHTTP CDN 使用的橙云域名。
   --xhttp-path VALUE          XHTTP 路径，例如 /cfup-example。
@@ -49,14 +49,14 @@ usage() {
   --cert-mode VALUE           证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
   --cert-file VALUE           当证书模式为 existing 时使用的证书文件。
   --key-file VALUE            当证书模式为 existing 时使用的私钥文件。
-  --cert-pem VALUE            当证书模式为 existing 时直接传入证书 PEM 内容。
-  --key-pem VALUE             当证书模式为 existing 时直接传入私钥 PEM 内容。
+  --cert-pem VALUE            existing 模式下仅支持 @文件路径；更推荐直接使用 --cert-file。
+  --key-pem VALUE             existing 模式下仅支持 @文件路径；更推荐直接使用 --key-file。
   --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
-  --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
+  --cf-api-token VALUE        cf-origin-ca 模式仅支持 @文件路径或环境变量 CF_API_TOKEN。
   --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期，默认 5475 天。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA，默认 letsencrypt。
-  --cf-dns-token VALUE        acme dns_cf 模式使用的 Cloudflare DNS API 令牌。
+  --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
   --cf-dns-account-id VALUE   acme dns_cf 模式使用的 Cloudflare Account ID，可选。
   --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
   --enable-warp               启用选择性 WARP 出站。
@@ -65,7 +65,7 @@ usage() {
   --disable-net-opt           禁用网络优化。
   --warp-team VALUE           Cloudflare Zero Trust 团队名。
   --warp-client-id VALUE      服务令牌 Client ID。
-  --warp-client-secret VALUE  服务令牌 Client Secret；支持直接传值、@文件路径或环境变量 WARP_CLIENT_SECRET。
+  --warp-client-secret VALUE  服务令牌 Client Secret；仅支持 @文件路径或环境变量 WARP_CLIENT_SECRET。
   --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口，默认 40000。
 
 变更 UUID 参数:
@@ -92,7 +92,7 @@ usage() {
   --disable-warp              禁用 WARP 分流。
   --warp-team VALUE           Cloudflare Zero Trust 团队名。
   --warp-client-id VALUE      服务令牌 Client ID。
-  --warp-client-secret VALUE  服务令牌 Client Secret；支持直接传值、@文件路径或环境变量 WARP_CLIENT_SECRET。
+  --warp-client-secret VALUE  服务令牌 Client Secret；仅支持 @文件路径或环境变量 WARP_CLIENT_SECRET。
   --warp-proxy-port VALUE     WARP 本地 SOCKS5 端口。
 
 变更 WARP 分流规则参数:
@@ -108,14 +108,14 @@ usage() {
   --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
   --cert-file VALUE           existing 模式使用的证书文件。
   --key-file VALUE            existing 模式使用的私钥文件。
-  --cert-pem VALUE            existing 模式直接传入证书 PEM 内容。
-  --key-pem VALUE             existing 模式直接传入私钥 PEM 内容。
+  --cert-pem VALUE            existing 模式仅支持 @文件路径；更推荐使用 --cert-file。
+  --key-pem VALUE             existing 模式仅支持 @文件路径；更推荐使用 --key-file。
   --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
-  --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
+  --cf-api-token VALUE        cf-origin-ca 模式仅支持 @文件路径或环境变量 CF_API_TOKEN。
   --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA。
-  --cf-dns-token VALUE        acme dns_cf 模式使用的 Cloudflare DNS API 令牌。
+  --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
   --cf-dns-account-id VALUE   acme dns_cf 模式使用的 Cloudflare Account ID，可选。
   --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
 
@@ -123,14 +123,14 @@ usage() {
   --non-interactive           非交互运行。
   --cert-file VALUE           existing 模式使用的证书文件。
   --key-file VALUE            existing 模式使用的私钥文件。
-  --cert-pem VALUE            existing 模式直接传入证书 PEM 内容。
-  --key-pem VALUE             existing 模式直接传入私钥 PEM 内容。
+  --cert-pem VALUE            existing 模式仅支持 @文件路径；更推荐使用 --cert-file。
+  --key-pem VALUE             existing 模式仅支持 @文件路径；更推荐使用 --key-file。
   --cf-zone-id VALUE          cf-origin-ca 模式使用的 Cloudflare Zone ID。
-  --cf-api-token VALUE        cf-origin-ca 模式使用的 Cloudflare API 令牌。
+  --cf-api-token VALUE        cf-origin-ca 模式仅支持 @文件路径或环境变量 CF_API_TOKEN。
   --cf-cert-validity VALUE    Cloudflare Origin CA 证书有效期。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA。
-  --cf-dns-token VALUE        acme dns_cf 模式使用的 Cloudflare DNS API 令牌。
+  --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
   --cf-dns-account-id VALUE   acme dns_cf 模式使用的 Cloudflare Account ID，可选。
   --cf-dns-zone-id VALUE      acme dns_cf 模式使用的 Cloudflare Zone ID，可选。
 
@@ -172,7 +172,7 @@ usage() {
     --enable-warp \
     --warp-team your-team \
     --warp-client-id xxxxxxxxx.access \
-    --warp-client-secret xxxxxxxxx
+    --warp-client-secret @/root/warp-client-secret.txt
 EOF
 }
 
@@ -206,6 +206,42 @@ prompt_with_default() {
   fi
 
   printf -v "${var_name}" '%s' "${answer}"
+}
+
+option_secret_env_name() {
+  case "${1}" in
+    --warp-client-secret) printf 'WARP_CLIENT_SECRET' ;;
+    --cf-api-token) printf 'CF_API_TOKEN' ;;
+    --cf-dns-token) printf 'CF_DNS_TOKEN' ;;
+    --reality-private-key) printf 'REALITY_PRIVATE_KEY' ;;
+    *) return 1 ;;
+  esac
+}
+
+option_requires_indirect_value() {
+  case "${1}" in
+    --warp-client-secret|--cf-api-token|--cf-dns-token|--reality-private-key|--cert-pem|--key-pem)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+enforce_indirect_option_value() {
+  local option_name="${1}"
+  local raw_value="${2-}"
+  local env_name=""
+
+  option_requires_indirect_value "${option_name}" || return 0
+  [[ "${raw_value}" == @* ]] && return 0
+
+  if env_name="$(option_secret_env_name "${option_name}" 2>/dev/null)"; then
+    die "参数 ${option_name} 不支持直接明文传值；请改用 @文件路径，或环境变量 ${env_name}。"
+  fi
+
+  die "参数 ${option_name} 不支持直接明文传值；请改用 @文件路径，或改用对应文件参数。"
 }
 
 resolve_value_source() {

@@ -143,6 +143,7 @@ write_install_managed_files() {
   write_nginx_config
   write_xray_service
   write_core_health_monitor
+  write_xray_logrotate_config
 }
 
 install_optional_components() {

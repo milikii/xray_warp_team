@@ -570,10 +570,13 @@ run_restart_optional_service_case() {
 
 run_change_helper_case() {
   local original_prompt=""
+  local workdir=""
   local -A uuid_request=()
   local -A warp_request=()
   local -A cert_request=()
 
+  workdir="$(mktemp -d)"
+  printf 'client-secret\n' > "${workdir}/warp-secret.txt"
   original_prompt="$(declare -f prompt_with_default)"
   NON_INTERACTIVE=0
   init_change_uuid_request uuid_request
@@ -593,13 +596,15 @@ run_change_helper_case() {
     --enable-warp \
     --warp-team team-name \
     --warp-client-id client-id \
-    --warp-client-secret client-secret \
+    --warp-client-secret "@${workdir}/warp-secret.txt" \
     --warp-proxy-port 41000
+  WARP_CLIENT_SECRET="${warp_request[warp_client_secret]}"
+  resolve_install_input_sources
   [[ "${NON_INTERACTIVE}" -eq 1 ]]
   [[ "${warp_request[target_mode]}" == "enable" ]]
   [[ "${warp_request[warp_team_name]}" == "team-name" ]]
   [[ "${warp_request[warp_client_id]}" == "client-id" ]]
-  [[ "${warp_request[warp_client_secret]}" == "client-secret" ]]
+  [[ "${WARP_CLIENT_SECRET}" == "client-secret" ]]
   [[ "${warp_request[warp_proxy_port]}" == "41000" ]]
 
   NON_INTERACTIVE=0
@@ -823,7 +828,10 @@ run_renew_cert_command_case() {
   local applied=0
   local shown_links=0
   local logged=""
+  local workdir=""
 
+  workdir="$(mktemp -d)"
+  printf 'dns-token\n' > "${workdir}/cf-dns-token.txt"
   need_root() { :; }
   start_backup_session() { BACKUP_DIR="/tmp/renew-backup"; }
   load_current_install_context() {
@@ -853,7 +861,7 @@ run_renew_cert_command_case() {
   prompt_cert_mode_inputs() { :; }
   validate_install_inputs() { :; }
 
-  renew_cert_cmd --non-interactive --acme-email ops@example.com --cf-dns-token dns-token
+  renew_cert_cmd --non-interactive --acme-email ops@example.com --cf-dns-token "@${workdir}/cf-dns-token.txt"
   [[ "${applied}" -eq 1 ]]
   [[ "${shown_links}" -eq 1 ]]
   printf '%s' "${logged}" | grep -q 'STEP:刷新 TLS 证书资产。'
