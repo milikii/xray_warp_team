@@ -119,6 +119,8 @@ run_update_script_command_case() {
   local workdir=""
   local logged=""
   local stdout_output=""
+  local installs=0
+  local original_install_bundle_fn=""
 
   workdir="$(mktemp -d)"
   SELF_INSTALL_DIR="${workdir}/bundle"
@@ -179,6 +181,12 @@ EOF
     logged+="${1}"$'\n'
   }
   backup_path() { :; }
+  original_install_bundle_fn="$(declare -f install_bundle_root_to_self)"
+  eval "${original_install_bundle_fn/install_bundle_root_to_self/real_install_bundle_root_to_self}"
+  install_bundle_root_to_self() {
+    installs=$((installs + 1))
+    real_install_bundle_root_to_self "${1}"
+  }
   reload_updated_script_if_needed() {
     SCRIPT_VERSION="${1}"
     logged+="RELOAD:${1}"$'\n'
@@ -194,6 +202,7 @@ EOF
   grep -q '当前版本：9.9.9' <<< "${logged}"
   grep -q 'RELOAD:9.9.9' <<< "${logged}"
   [[ "${SCRIPT_VERSION}" == "9.9.9" ]]
+  [[ "${installs}" -eq 1 ]]
 
   log() {
     printf '[信息] %s\n' "${1}"
@@ -202,7 +211,33 @@ EOF
   [[ -x "${SELF_COMMAND_PATH}" ]]
   [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
   grep -q '下载来源：' <<< "${stdout_output}"
-  grep -q '当前版本：9.9.9' <<< "${stdout_output}"
+  grep -q '当前已经是最新脚本 bundle。' <<< "${stdout_output}"
+
+  tar() {
+    local target_dir=""
+
+    while [[ $# -gt 0 ]]; do
+      case "${1}" in
+        -C)
+          target_dir="${2}"
+          shift 2
+          ;;
+        *)
+          shift
+          ;;
+      esac
+    done
+
+    mkdir -p "${target_dir}/bundle/lib/base"
+    cat > "${target_dir}/bundle/xray-warp-team.sh" <<'EOF'
+#!/usr/bin/env bash
+SCRIPT_VERSION="9.9.9"
+echo changed
+EOF
+    printf '# helper\n' > "${target_dir}/bundle/lib/base/helpers.sh"
+  }
+  stdout_output="$(update_script_cmd 2>&1)"
+  grep -q '脚本内容已更新，但版本号保持为 9.9.9。' <<< "${stdout_output}"
 }
 
 run_install_validation_case() {

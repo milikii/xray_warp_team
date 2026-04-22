@@ -872,6 +872,18 @@ bundle_script_version() {
   sed -n 's/^SCRIPT_VERSION="\([^"]*\)".*/\1/p' "${bundle_root}/xray-warp-team.sh" 2>/dev/null | head -n 1
 }
 
+bundle_script_signature() {
+  local bundle_root="${1}"
+
+  [[ -d "${bundle_root}" ]] || return 0
+  (
+    cd "${bundle_root}" || exit 0
+    find . -type f -print | LC_ALL=C sort | while IFS= read -r path; do
+      sha256sum "${path}"
+    done | sha256sum | awk '{print $1}'
+  )
+}
+
 install_bundle_root_to_self() {
   local source_bundle_root="${1}"
   local target_entry="${SELF_INSTALL_DIR}/xray-warp-team.sh"
@@ -915,6 +927,8 @@ download_latest_script_bundle() {
 update_script_cmd() {
   local previous_version=""
   local current_version=""
+  local previous_signature=""
+  local current_signature=""
   local tmp_dir=""
   local bundle_root=""
 
@@ -927,6 +941,7 @@ update_script_cmd() {
       printf '%s' "${SCRIPT_VERSION}"
     fi
   )"
+  previous_signature="$(bundle_script_signature "${SELF_INSTALL_DIR}")"
 
   tmp_dir="$(mktemp -d)"
   log_step "下载最新脚本 bundle。"
@@ -936,6 +951,14 @@ update_script_cmd() {
   fi
 
   current_version="$(bundle_script_version "${bundle_root}")"
+  current_signature="$(bundle_script_signature "${bundle_root}")"
+  if [[ -n "${previous_signature}" && -n "${current_signature}" && "${previous_signature}" == "${current_signature}" ]]; then
+    rm -rf "${tmp_dir}"
+    log_success "当前已经是最新脚本 bundle。"
+    [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
+    return 0
+  fi
+
   log_step "安装脚本 bundle。"
   if ! install_bundle_root_to_self "${bundle_root}"; then
     warn "脚本 bundle 安装失败，正在回滚持久化脚本文件。"
@@ -950,6 +973,9 @@ update_script_cmd() {
   log "备份目录：${BACKUP_DIR}"
   [[ -n "${previous_version}" ]] && log "更新前版本：${previous_version}"
   [[ -n "${current_version}" ]] && log "当前版本：${current_version}"
+  if [[ -n "${previous_version}" && -n "${current_version}" && "${previous_version}" == "${current_version}" ]]; then
+    log "脚本内容已更新，但版本号保持为 ${current_version}。"
+  fi
   reload_updated_script_if_needed "${current_version}"
 }
 

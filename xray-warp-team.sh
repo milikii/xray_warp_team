@@ -16,7 +16,7 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
   esac
 fi
 
-SCRIPT_VERSION="0.5.1"
+SCRIPT_VERSION="0.5.2"
 SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xray-warp-team"
 SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xray-warp-team"
 BOOTSTRAP_SELF_INSTALL_DIR="${XRAY_WARP_TEAM_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
