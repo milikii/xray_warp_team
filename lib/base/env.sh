@@ -107,11 +107,16 @@ random_hex() {
 
 random_path() {
   local candidates=(
-    "/assets/v3"
-    "/static/app"
-    "/images/webp"
-    "/fonts/inter"
-    "/media/cache"
+    "/api/v1/ping"
+    "/health"
+    "/status/check"
+    "/service/healthz"
+    "/v1/report"
+    "/metrics/pulse"
+    "/gateway/ping"
+    "/session/refresh"
+    "/edge/check"
+    "/content/live"
   )
 
   printf '%s' "${candidates[$((RANDOM % ${#candidates[@]}))]}"

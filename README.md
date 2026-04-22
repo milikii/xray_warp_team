@@ -729,17 +729,22 @@ ${BACKUP_DIR}/operation.log
 
 当前脚本默认导出的 `Reality` 节点地址是公网 IP，`serverName/SNI` 则使用你设置的 Reality 域名。
 
-### 2. 为什么 XHTTP 默认像正常网站资源路径
+### 2. 为什么 XHTTP 默认像正常业务路径
 
 脚本默认会从这些候选里随机选一个：
 
-- `/assets/v3`
-- `/static/app`
-- `/images/webp`
-- `/fonts/inter`
-- `/media/cache`
+- `/api/v1/ping`
+- `/health`
+- `/status/check`
+- `/service/healthz`
+- `/v1/report`
+- `/metrics/pulse`
+- `/gateway/ping`
+- `/session/refresh`
+- `/edge/check`
+- `/content/live`
 
-这样比早期 `/cfup-随机串` 更自然，也更好记。
+这样比早期固定的静态资源目录更自然，也更接近普通网站里会出现的轻量探测 / 业务接口路径。
 
 ### 3. 为什么默认不启用 ECH
 
