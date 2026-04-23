@@ -476,6 +476,26 @@ bash xray-warp-team.sh install \
    - `acme-dns-cf` -> `Full (strict)`
 4. 如果走 Cloudflare CDN 的 `XHTTP`
    - 建议开启 `gRPC`
+5. 如果走 Cloudflare CDN 的 `XHTTP`
+   - 建议额外配置 `缓存 -> Cache Rules`
+   - 新建一条规则，把 `Cache eligibility` 设为 `Bypass cache`
+   - 表达式可直接写成：
+
+```text
+(http.host eq "cdn.example.com") or (http.request.uri.path contains "/your-xhttp-path")
+```
+
+把 `cdn.example.com` 和 `/your-xhttp-path` 替换成你自己的 `XHTTP` 域名和路径即可。
+
+面板路径参考：
+
+- 左侧菜单 `缓存`
+- `Cache Rules`
+- `创建缓存规则`
+- `如果传入请求匹配... -> 自定义筛选表达式`
+- `Cache eligibility -> Bypass cache`
+
+这条规则的目的，是避免 `XHTTP` 请求被 Cloudflare 边缘缓存后影响连接稳定性。
 
 ## 常用命令
 

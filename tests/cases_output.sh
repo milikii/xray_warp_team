@@ -54,6 +54,8 @@ run_warp_enabled_case() {
   assert_contains 'fingerprint=chrome' "${OUTPUT_FILE}"
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
   assert_contains '已启用: 是' "${OUTPUT_FILE}"
+  assert_contains '## Cloudflare Cache Rules（建议）' "${OUTPUT_FILE}"
+  assert_contains '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
   assert_contains '## Clash Meta / Mihomo 片段' "${OUTPUT_FILE}"
   assert_contains '## sing-box outbound 片段' "${OUTPUT_FILE}"
   assert_contains 'XHTTP-SPLIT 的不同客户端支持差异较大' "${OUTPUT_FILE}"
@@ -142,6 +144,9 @@ run_output_helper_case() {
 
   CERT_MODE="existing"
   [[ "$(cloudflare_ssl_mode_text)" == "Full (strict)" ]]
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  [[ "$(cloudflare_xhttp_cache_bypass_expression)" == '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' ]]
 
   [[ "$(build_reality_uri "HKG-REALITY")" == *"vless://${REALITY_UUID}@${SERVER_IP}:443"* ]]
   [[ "$(build_reality_uri "HKG-REALITY")" == *"#HKG-REALITY" ]]

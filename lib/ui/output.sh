@@ -116,6 +116,12 @@ cloudflare_ssl_mode_text() {
   printf 'Full (strict)'
 }
 
+cloudflare_xhttp_cache_bypass_expression() {
+  printf '(http.host eq "%s") or (http.request.uri.path contains "%s")' \
+    "${XHTTP_DOMAIN}" \
+    "${XHTTP_PATH}"
+}
+
 build_reality_uri() {
   local label="${1}"
 
@@ -210,6 +216,12 @@ output_runtime_summary_block() {
 - 请将 ${XHTTP_DOMAIN} 解析到此服务器 IP。
 - 请为 ${XHTTP_DOMAIN} 打开橙云代理。
 - 请将 Cloudflare SSL/TLS 模式设置为 ${cf_ssl_mode}。
+
+## Cloudflare Cache Rules（建议）
+- 建议为 XHTTP 请求配置 Cache Rules -> Cache eligibility: Bypass cache，避免请求被 Cloudflare 边缘缓存。
+- 可直接使用下面这条表达式：
+  $(cloudflare_xhttp_cache_bypass_expression)
+- 如果 ${XHTTP_DOMAIN} 是专门给 XHTTP 使用的独立子域名，直接按整个 Host 绕过缓存通常也没有问题。
 
 ## 本地文件
 - Xray 配置: ${XRAY_CONFIG_FILE}
