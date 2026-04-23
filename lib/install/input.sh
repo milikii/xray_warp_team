@@ -263,7 +263,7 @@ preflight_check_domain_resolution() {
   local resolved_ip=""
 
   [[ -n "${domain}" ]] || return 0
-  resolved_ip="$(getent ahostsv4 "${domain}" 2>/dev/null | awk 'NR==1 {print $1}')"
+  resolved_ip="$(getent ahostsv4 "${domain}" 2>/dev/null | awk 'NR==1 {print $1}' || true)"
   if [[ -z "${resolved_ip}" ]]; then
     warn "预检提示：${label} 当前无法解析，后续请确认 DNS 配置。"
     return 0

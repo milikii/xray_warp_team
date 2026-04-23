@@ -43,6 +43,7 @@ main() {
     run_install_validation_case
     run_xray_digest_parse_case
     run_install_xray_checksum_failure_case
+    run_install_packages_failure_case
     run_install_draft_case
     run_service_config_helper_case
     run_managed_apply_case
@@ -57,6 +58,7 @@ main() {
     run_install_parse_case
     run_sensitive_option_reject_case
     run_preflight_token_verify_case
+    run_preflight_domain_resolution_warning_case
     run_warp_rule_normalize_case
     run_optional_component_skip_case
     run_warp_repo_file_mode_case

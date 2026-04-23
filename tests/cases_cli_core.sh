@@ -433,6 +433,28 @@ EOF
   printf '%s' "${output}" | grep -q 'Xray-core 安装包 SHA256 校验失败'
 }
 
+run_install_packages_failure_case() {
+  local output=""
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+apt-get() {
+  return 1
+}
+install_packages
+EOF
+)"; then
+    return 1
+  fi
+
+  printf '%s' "${output}" | grep -q '安装依赖包'
+  if printf '%s' "${output}" | grep -q '依赖包安装完成'; then
+    return 1
+  fi
+}
+
 run_install_parse_case() {
   local workdir=""
 
@@ -548,6 +570,25 @@ EOF
     return 1
   fi
   printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验未通过'
+}
+
+run_preflight_domain_resolution_warning_case() {
+  local output=""
+
+  if ! output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+getent() {
+  return 2
+}
+preflight_check_domain_resolution "cdn.example.test" "XHTTP CDN 域名"
+EOF
+)"; then
+    return 1
+  fi
+
+  printf '%s' "${output}" | grep -q '预检提示：XHTTP CDN 域名 当前无法解析'
 }
 
 run_warp_rule_normalize_case() {

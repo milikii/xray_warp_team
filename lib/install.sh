@@ -8,8 +8,8 @@
 
 install_packages() {
   log_step "安装依赖包。"
-  apt-get update
-  apt-get install -y ca-certificates curl gnupg haproxy nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin
+  apt-get update || return 1
+  apt-get install -y ca-certificates curl gnupg haproxy nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin || return 1
   log_success "依赖包安装完成。"
 }
 
