@@ -54,11 +54,16 @@ run_warp_enabled_case() {
   assert_contains 'fingerprint=chrome' "${OUTPUT_FILE}"
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
   assert_contains '已启用: 是' "${OUTPUT_FILE}"
-  assert_contains '## Cloudflare Cache Rules（建议）' "${OUTPUT_FILE}"
+  assert_contains '## XHTTP 缓存绕过（重要）' "${OUTPUT_FILE}"
   assert_contains '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
-  assert_contains '## Clash Meta / Mihomo 片段' "${OUTPUT_FILE}"
-  assert_contains '## sing-box outbound 片段' "${OUTPUT_FILE}"
-  assert_contains 'XHTTP-SPLIT 的不同客户端支持差异较大' "${OUTPUT_FILE}"
+  assert_contains '推荐操作步骤：' "${OUTPUT_FILE}"
+  assert_contains 'Cache eligibility' "${OUTPUT_FILE}"
+  if grep -q '## Clash Meta / Mihomo 片段' "${OUTPUT_FILE}"; then
+    return 1
+  fi
+  if grep -q '## sing-box outbound 片段' "${OUTPUT_FILE}"; then
+    return 1
+  fi
 }
 
 run_warp_disabled_case() {

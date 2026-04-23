@@ -838,14 +838,17 @@ xray-warp-team status
 
 ## 客户端导出
 
-当前输出文件除了原始 `vless://` 分享链接，也会直接附带：
+当前输出文件默认只保留 3 条原始 `vless://` 分享链接：
 
-- `Clash Meta / Mihomo` 的结构化片段（`REALITY`、`XHTTP-CDN`）
-- `sing-box` 的 `outbound` JSON 片段（`REALITY`、`XHTTP-CDN`）
+1. `REALITY + Vision`
+2. `XHTTP + TLS + CDN`
+3. `上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality`
 
 说明：
 
-- `XHTTP-SPLIT` 节点的客户端兼容差异更大，所以当前仍然建议直接使用脚本生成的原始分享链接导入
+- 不再额外附带其它客户端结构化片段
+- `XHTTP-SPLIT` 节点的客户端兼容差异更大，继续建议直接使用脚本生成的原始分享链接导入
+- 输出文件最后会单独附上一节 `XHTTP 缓存绕过（重要）`，按步骤指导你去 Cloudflare 面板创建 `Bypass cache` 规则
 
 ## 参考
 

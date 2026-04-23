@@ -217,12 +217,6 @@ output_runtime_summary_block() {
 - 请为 ${XHTTP_DOMAIN} 打开橙云代理。
 - 请将 Cloudflare SSL/TLS 模式设置为 ${cf_ssl_mode}。
 
-## Cloudflare Cache Rules（建议）
-- 建议为 XHTTP 请求配置 Cache Rules -> Cache eligibility: Bypass cache，避免请求被 Cloudflare 边缘缓存。
-- 可直接使用下面这条表达式：
-  $(cloudflare_xhttp_cache_bypass_expression)
-- 如果 ${XHTTP_DOMAIN} 是专门给 XHTTP 使用的独立子域名，直接按整个 Host 绕过缓存通常也没有问题。
-
 ## 本地文件
 - Xray 配置: ${XRAY_CONFIG_FILE}
 - Nginx 配置: ${NGINX_CONFIG_FILE}
@@ -250,146 +244,38 @@ output_runtime_summary_block() {
 EOF
 }
 
-clash_reality_proxy_yaml() {
-  local label="${1}"
-
+output_xhttp_cache_rules_block() {
   cat <<EOF
-- name: ${label}
-  type: vless
-  server: ${SERVER_IP}
-  port: 443
-  uuid: ${REALITY_UUID}
-  network: tcp
-  udp: true
-  tls: true
-  servername: ${REALITY_SNI}
-  flow: xtls-rprx-vision
-  client-fingerprint: ${FINGERPRINT}
-  reality-opts:
-    public-key: ${REALITY_PUBLIC_KEY}
-    short-id: ${REALITY_SHORT_ID}
-EOF
-}
+## XHTTP 缓存绕过（重要）
 
-clash_xhttp_proxy_yaml() {
-  local label="${1}"
+为避免 ${XHTTP_DOMAIN} 上的 XHTTP 请求被 Cloudflare 边缘缓存，建议手动创建一条 Cache Rule，把这类请求设为 Bypass cache。
 
-  cat <<EOF
-- name: ${label}
-  type: vless
-  server: ${XHTTP_DOMAIN}
-  port: 443
-  uuid: ${XHTTP_UUID}
-  network: xhttp
-  udp: true
-  tls: true
-  servername: ${XHTTP_DOMAIN}
-  client-fingerprint: ${FINGERPRINT}
-  alpn:
-    - ${TLS_ALPN}
-  xhttp-opts:
-    path: ${XHTTP_PATH}
-    mode: auto
-EOF
-}
+建议表达式：
 
-singbox_reality_outbound_json() {
-  local label="${1}"
+$(cloudflare_xhttp_cache_bypass_expression)
 
-  jq -cn \
-    --arg tag "${label}" \
-    --arg server "${SERVER_IP}" \
-    --arg uuid "${REALITY_UUID}" \
-    --arg server_name "${REALITY_SNI}" \
-    --arg public_key "${REALITY_PUBLIC_KEY}" \
-    --arg short_id "${REALITY_SHORT_ID}" \
-    --arg fingerprint "${FINGERPRINT}" \
-    '{
-      type: "vless",
-      tag: $tag,
-      server: $server,
-      server_port: 443,
-      uuid: $uuid,
-      flow: "xtls-rprx-vision",
-      tls: {
-        enabled: true,
-        server_name: $server_name,
-        reality: {
-          enabled: true,
-          public_key: $public_key,
-          short_id: $short_id
-        },
-        utls: {
-          enabled: true,
-          fingerprint: $fingerprint
-        }
-      }
-    }'
-}
+推荐操作步骤：
 
-singbox_xhttp_outbound_json() {
-  local label="${1}"
+1. 登录 Cloudflare 控制台，进入站点 ${XHTTP_DOMAIN} 所在的 Zone。
+2. 左侧菜单进入 缓存。
+3. 打开 Cache Rules。
+4. 点击 创建缓存规则。
+5. 规则名称可随意填写，例如 xhttp-bypass-cache。
+6. 在“如果传入请求匹配...”里选择 自定义筛选表达式。
+7. 点击右侧的“编辑表达式”。
+8. 粘贴上面的表达式：
+   作用：
+   - http.host eq "${XHTTP_DOMAIN}"：按整个 XHTTP 域名匹配。
+   - http.request.uri.path contains "${XHTTP_PATH}"：按 XHTTP 路径匹配。
+9. 在规则动作里找到 Cache eligibility。
+10. 将 Cache eligibility 设置为 Bypass cache。
+11. 保存并点击 部署。
 
-  jq -cn \
-    --arg tag "${label}" \
-    --arg server "${XHTTP_DOMAIN}" \
-    --arg uuid "${XHTTP_UUID}" \
-    --arg server_name "${XHTTP_DOMAIN}" \
-    --arg alpn "${TLS_ALPN}" \
-    --arg path "${XHTTP_PATH}" \
-    --arg fingerprint "${FINGERPRINT}" \
-    '{
-      type: "vless",
-      tag: $tag,
-      server: $server,
-      server_port: 443,
-      uuid: $uuid,
-      tls: {
-        enabled: true,
-        server_name: $server_name,
-        alpn: [$alpn],
-        utls: {
-          enabled: true,
-          fingerprint: $fingerprint
-        }
-      },
-      transport: {
-        type: "xhttp",
-        path: $path
-      }
-    }'
-}
+补充建议：
 
-output_client_snippets_block() {
-  local reality_label="${1}"
-  local xhttp_label="${2}"
-  local split_label="${3}"
-
-  cat <<EOF
-## Clash Meta / Mihomo 片段
-
-~~~yaml
-proxies:
-$(clash_reality_proxy_yaml "${reality_label}")
-$(clash_xhttp_proxy_yaml "${xhttp_label}")
-~~~
-
-说明：
-- 上面直接给出 REALITY 和 XHTTP-CDN 两个结构化片段
-- XHTTP-SPLIT 的不同客户端支持差异较大，建议继续直接导入上面的分享链接：${split_label}
-
-## sing-box outbound 片段
-
-~~~json
-[
-  $(singbox_reality_outbound_json "${reality_label}"),
-  $(singbox_xhttp_outbound_json "${xhttp_label}")
-]
-~~~
-
-说明：
-- 上面直接给出 REALITY 和 XHTTP-CDN 两个 outbound 片段
-- XHTTP-SPLIT 仍建议优先使用分享链接导入，避免不同客户端对分离下载链路字段的兼容差异
+- 如果 ${XHTTP_DOMAIN} 是专门给 XHTTP 使用的独立子域名，按整个 Host 绕过缓存通常最省事。
+- 如果这个域名还承载了别的静态资源，建议保留上面的路径条件，避免把整站缓存一起关掉。
+- 修改完成后，建议用新的 XHTTP 链接重新测试，避免客户端还在复用旧连接。
 EOF
 }
 
@@ -431,7 +317,7 @@ $(output_xhttp_split_block "${xhttp_split_uri}")
 
 $(output_runtime_summary_block "${cf_ssl_mode}")
 
-$(output_client_snippets_block "${reality_label}" "${xhttp_label}" "${xhttp_split_label}")
+$(output_xhttp_cache_rules_block)
 EOF
 }
 
