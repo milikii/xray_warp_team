@@ -158,6 +158,47 @@ run_output_helper_case() {
   jq -e '.routeOnly == true' <<<"$(xray_sniffing_json)" >/dev/null
 }
 
+run_output_default_transport_fields_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+
+  SERVER_IP="203.0.113.20"
+  NODE_LABEL_PREFIX="LAX"
+  REALITY_UUID="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="www.cloudflare.com:443"
+  REALITY_SHORT_ID="deadbeef"
+  REALITY_PRIVATE_KEY="private-key"
+  REALITY_PUBLIC_KEY="public-key"
+  XHTTP_UUID="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/status/check"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+  XHTTP_VLESS_ENCRYPTION="enc-value"
+  XHTTP_VLESS_DECRYPTION="enc-value"
+  TLS_ALPN=""
+  FINGERPRINT=""
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  WARP_PROXY_PORT="40000"
+  CERT_MODE="existing"
+  XHTTP_ECH_CONFIG_LIST=""
+  XHTTP_ECH_FORCE_QUERY=""
+
+  write_output_file
+  write_state_file
+
+  assert_contains 'alpn=h2' "${OUTPUT_FILE}"
+  assert_contains 'fp=chrome' "${OUTPUT_FILE}"
+  assert_contains 'fingerprint=chrome' "${OUTPUT_FILE}"
+  assert_contains '- ALPN: h2' "${OUTPUT_FILE}"
+  assert_contains '- 指纹: chrome' "${OUTPUT_FILE}"
+  assert_contains 'TLS_ALPN=h2' "${STATE_FILE}"
+  assert_contains 'FINGERPRINT=chrome' "${STATE_FILE}"
+}
+
 run_service_config_helper_case() {
   local workdir=""
 

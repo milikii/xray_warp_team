@@ -32,6 +32,14 @@ xhttp_ech_status_text() {
   printf '否'
 }
 
+effective_tls_alpn() {
+  printf '%s' "${TLS_ALPN:-${DEFAULT_TLS_ALPN}}"
+}
+
+effective_fingerprint() {
+  printf '%s' "${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
+}
+
 xhttp_uri_encryption_value() {
   local encoded_encryption="${1}"
 
@@ -61,11 +69,11 @@ build_xhttp_uri() {
     "${XHTTP_UUID}" \
     "${XHTTP_DOMAIN}" \
     "${path_component}" \
-    "${TLS_ALPN}" \
+    "$(effective_tls_alpn)" \
     "${encryption_value}" \
     "${XHTTP_DOMAIN}" \
-    "${FINGERPRINT}" \
-    "${FINGERPRINT}" \
+    "$(effective_fingerprint)" \
+    "$(effective_fingerprint)" \
     "${XHTTP_DOMAIN}" \
     "${ech_query}" \
     "${extra_query}" \
@@ -76,7 +84,7 @@ build_xhttp_split_extra_json() {
   jq -cn \
     --arg address "${SERVER_IP}" \
     --arg server_name "${REALITY_SNI}" \
-    --arg fingerprint "${FINGERPRINT}" \
+    --arg fingerprint "$(effective_fingerprint)" \
     --arg short_id "${REALITY_SHORT_ID}" \
     --arg public_key "${REALITY_PUBLIC_KEY}" \
     --arg path "${XHTTP_PATH}" \
@@ -129,8 +137,8 @@ build_reality_uri() {
     "${REALITY_UUID}" \
     "${SERVER_IP}" \
     "${REALITY_SNI}" \
-    "${FINGERPRINT}" \
-    "${FINGERPRINT}" \
+    "$(effective_fingerprint)" \
+    "$(effective_fingerprint)" \
     "${REALITY_PUBLIC_KEY}" \
     "${REALITY_SHORT_ID}" \
     "${label}"
@@ -150,7 +158,7 @@ output_reality_block() {
 - 公钥: ${REALITY_PUBLIC_KEY}
 - 短 ID: ${REALITY_SHORT_ID}
 - 流控: xtls-rprx-vision
-- 指纹: ${FINGERPRINT}
+- 指纹: $(effective_fingerprint)
 
 链接:
 ${reality_uri}
@@ -183,9 +191,9 @@ $(output_xhttp_block "节点 2")
 - 类型: VLESS + XHTTP + TLS + CDN
 - SNI: ${XHTTP_DOMAIN}
 - 主机名: ${XHTTP_DOMAIN}
-- ALPN: ${TLS_ALPN}
+- ALPN: $(effective_tls_alpn)
 - 模式: auto
-- 指纹: ${FINGERPRINT}
+- 指纹: $(effective_fingerprint)
 $(output_xhttp_shared_details)
 
 链接:

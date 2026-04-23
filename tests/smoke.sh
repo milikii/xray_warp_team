@@ -24,6 +24,7 @@ main() {
     run_warp_disabled_case
     run_warp_rules_file_case
     run_output_helper_case
+    run_output_default_transport_fields_case
     run_xray_config_escape_case
     run_generated_file_atomic_failure_case
     run_state_context_case
