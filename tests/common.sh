@@ -28,6 +28,19 @@ stub_side_effects() {
   backup_path() { :; }
 }
 
+capture_function_definition() {
+  local fn_name="${1}"
+
+  declare -f "${fn_name}" 2>/dev/null || true
+}
+
+restore_function_definition() {
+  local definition="${1:-}"
+
+  [[ -n "${definition}" ]] || return 0
+  eval "${definition}"
+}
+
 assert_contains() {
   local pattern="${1}"
   local path="${2}"

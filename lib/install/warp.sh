@@ -200,6 +200,74 @@ install_warp_health_monitor() {
   systemctl enable --now "${WARP_HEALTH_TIMER_NAME}"
 }
 
+warp_daemon_not_ready_output() {
+  local output="${1:-}"
+
+  [[ "${output}" == *"Unable to connect to the CloudflareWARP daemon"* ]] \
+    || [[ "${output}" == *"Maybe the daemon is not running?"* ]] \
+    || [[ "${output}" == *"No such file or directory (os error 2)"* ]]
+}
+
+wait_for_warp_service_active() {
+  local max_attempts="${WARP_SERVICE_READY_RETRIES:-15}"
+  local delay_seconds="${WARP_SERVICE_READY_DELAY_SECONDS:-1}"
+  local attempt=1
+
+  while (( attempt <= max_attempts )); do
+    if systemctl is-active --quiet warp-svc; then
+      return 0
+    fi
+
+    if (( attempt == 1 )); then
+      log "等待 warp-svc 守护进程就绪。"
+    fi
+    sleep "${delay_seconds}"
+    attempt=$((attempt + 1))
+  done
+
+  warn "等待 warp-svc 守护进程就绪超时。"
+  return 1
+}
+
+refresh_warp_mdm_with_retry() {
+  local max_attempts="${WARP_MDM_REFRESH_RETRIES:-10}"
+  local delay_seconds="${WARP_MDM_REFRESH_DELAY_SECONDS:-2}"
+  local attempt=1
+  local output_file=""
+  local output=""
+  local status=0
+
+  output_file="$(mktemp)"
+
+  while (( attempt <= max_attempts )); do
+    : > "${output_file}"
+    if warp-cli --accept-tos mdm refresh > "${output_file}" 2>&1; then
+      rm -f "${output_file}"
+      return 0
+    else
+      status=$?
+    fi
+
+    output="$(<"${output_file}")"
+    if (( attempt < max_attempts )) && warp_daemon_not_ready_output "${output}"; then
+      if (( attempt == 1 )); then
+        log "等待 Cloudflare WARP daemon 接受托管配置。"
+      fi
+      sleep "${delay_seconds}"
+      attempt=$((attempt + 1))
+      continue
+    fi
+
+    printf '%s\n' "${output}" >&2
+    rm -f "${output_file}"
+    return "${status}"
+  done
+
+  printf '%s\n' "${output}" >&2
+  rm -f "${output_file}"
+  return "${status}"
+}
+
 install_warp() {
   local repo_codename=""
 
@@ -217,6 +285,8 @@ install_warp() {
   write_warp_mdm_file || return 1
   install_warp_health_monitor || return 1
   systemctl enable --now warp-svc || return 1
-  warp-cli --accept-tos mdm refresh || return 1
+  wait_for_warp_service_active || return 1
+  refresh_warp_mdm_with_retry || return 1
   systemctl restart warp-svc || return 1
+  wait_for_warp_service_active || return 1
 }
