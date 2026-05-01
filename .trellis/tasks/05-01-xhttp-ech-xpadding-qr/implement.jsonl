@@ -1,5 +1,0 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
-{"file": ".trellis/tasks/05-01-xhttp-ech-xpadding-qr/research/xhttp-ech-xpadding.md", "reason": "ECH/xpadding conventions and client compatibility research"}
-{"file": ".trellis/tasks/05-01-xhttp-ech-xpadding-qr/research/subscription-qr.md", "reason": "Subscription and QR output conventions research"}
-{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Search-before-building and reuse guidance for shared output/config helpers"}
-{"file": ".trellis/spec/backend/index.md", "reason": "Backend/shell guideline index for implementation context"}
