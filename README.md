@@ -237,6 +237,11 @@ bash xray-warp-team.sh install --non-interactive \
 - `/etc/systemd/system/xray.service`
 - `/usr/local/etc/xray/node-meta.env`
 - `/root/xray-warp-team-output.md`
+- `/root/xray-warp-team-subscriptions/vless-raw.txt`
+- `/root/xray-warp-team-subscriptions/vless-base64.txt`
+- `/root/xray-warp-team-subscriptions/manifest.txt`
+
+如果系统里有 `qrencode`，还会在 `/root/xray-warp-team-subscriptions/qr/` 生成订阅二维码 PNG；没有 `qrencode` 时只跳过二维码，不影响安装。
 
 安装成功后会导出 3 个节点：
 
@@ -248,8 +253,30 @@ bash xray-warp-team.sh install --non-interactive \
 
 - `XHTTP` 默认不启用 `ECH`
 - 导出的两个 `XHTTP` 分享链接默认不带 `ech=`
+- `XHTTP` 默认不启用 `xpadding`
 - `XHTTP VLESS Encryption` 默认开启
 - 默认会给节点名加统一前缀，便于客户端区分机器
+
+如果你明确要测试 ECH / xpadding，可以在安装时显式开启：
+
+```bash
+bash xray-warp-team.sh install --non-interactive \
+  ... \
+  --enable-xhttp-ech \
+  --enable-xhttp-xpadding
+```
+
+默认 ECH 配置为：
+
+```text
+cloudflare-ech.com+https://223.5.5.5/dns-query
+```
+
+xpadding 默认使用：
+
+```text
+Header=Referer, key=x_padding, placement=queryInHeader, method=tokenish
+```
 
 ## WARP Team 教程
 
@@ -559,6 +586,21 @@ xray-warp-team show-links
 xray-warp-team show-links --qr
 ```
 
+### 查看订阅文件
+
+安装和每次变更后，脚本会刷新本地订阅文件：
+
+```bash
+ls -l /root/xray-warp-team-subscriptions
+```
+
+其中：
+
+- `vless-raw.txt` 是 3 条原始 `vless://` 链接，适合支持 URI 行订阅的客户端
+- `vless-base64.txt` 是 base64 订阅，适合 V2RayN / Xray 风格导入
+- `manifest.txt` 记录订阅文件和二维码 PNG 的生成状态
+- `qr/` 目录只在系统安装了 `qrencode` 时生成
+
 ### 修改 REALITY 域名 / SNI
 
 ```bash
@@ -778,9 +820,27 @@ ${BACKUP_DIR}/operation.log
 - `XHTTP` 不启用 `ECH`
 - 导出的分享链接不带 `ech=`
 
-如果你后续明确要测，再自己手动加。
+如果你后续明确要测，可以在安装时加 `--enable-xhttp-ech`，或者用 `--xhttp-ech-config-list` 指定自己的 ECH 配置列表。当前脚本不会把 `echForceQuery` 写进分享链接，因为主流 VLESS URI 规范只确认了 `ech=` 对应 `echConfigList`。
 
-### 4. 现在的三节点里，split 为什么不用额外服务端入站
+### 4. 为什么默认不启用 xpadding
+
+`xpadding` 是 XHTTP 的高级伪装选项，依赖较新的 Xray / 客户端实现。默认关闭是为了避免旧客户端导入失败或行为不一致。
+
+如果你明确要测，可以在安装时加：
+
+```bash
+--enable-xhttp-xpadding
+```
+
+默认写入 Xray 的字段是：
+
+- `xPaddingObfsMode: true`
+- `xPaddingKey: x_padding`
+- `xPaddingHeader: Referer`
+- `xPaddingPlacement: queryInHeader`
+- `xPaddingMethod: tokenish`
+
+### 5. 现在的三节点里，split 为什么不用额外服务端入站
 
 因为这套架构里：
 
@@ -848,6 +908,8 @@ xray-warp-team status
 
 - 不再额外附带其它客户端结构化片段
 - `XHTTP-SPLIT` 节点的客户端兼容差异更大，继续建议直接使用脚本生成的原始分享链接导入
+- 订阅文件单独写在 `/root/xray-warp-team-subscriptions/`，不会混进 Markdown 输出文件
+- 当前只生成 raw/base64 VLESS 订阅；原生 Mihomo YAML 暂不生成，避免把 XHTTP split / ECH / xpadding 映射错
 - 输出文件最后会单独附上一节 `XHTTP 缓存绕过（重要）`，按步骤指导你去 Cloudflare 面板创建 `Bypass cache` 规则
 
 ## 参考

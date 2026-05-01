@@ -3,6 +3,7 @@ run_warp_enabled_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
+  reset_feature_defaults
 
   SERVER_IP="203.0.113.10"
   NODE_LABEL_PREFIX="HKG"
@@ -35,6 +36,11 @@ run_warp_enabled_case() {
   CF_DNS_ZONE_ID="dns-zone-id"
   XHTTP_ECH_CONFIG_LIST="https://1.1.1.1/dns-query"
   XHTTP_ECH_FORCE_QUERY="ipv4"
+  XHTTP_XPADDING_ENABLED="yes"
+  XHTTP_XPADDING_KEY="x_padding"
+  XHTTP_XPADDING_HEADER="Referer"
+  XHTTP_XPADDING_PLACEMENT="queryInHeader"
+  XHTTP_XPADDING_METHOD="tokenish"
 
   write_xray_config
   write_state_file
@@ -42,6 +48,8 @@ run_warp_enabled_case() {
 
   jq -e '.routing.rules | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.servers[0].port == 40000' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingObfsMode == true' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingHeader == "Referer"' "${XRAY_CONFIG_FILE}" >/dev/null
   bash -n "${STATE_FILE}"
 
   # shellcheck disable=SC1090
@@ -50,11 +58,14 @@ run_warp_enabled_case() {
 
   assert_contains '&ech=' "${OUTPUT_FILE}"
   assert_contains 'extra=' "${OUTPUT_FILE}"
+  assert_contains 'xPaddingObfsMode' "${OUTPUT_FILE}"
   assert_contains 'alpn=h2' "${OUTPUT_FILE}"
   assert_contains 'fingerprint=chrome' "${OUTPUT_FILE}"
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
   assert_contains '已启用: 是' "${OUTPUT_FILE}"
   assert_contains '## XHTTP 缓存绕过（重要）' "${OUTPUT_FILE}"
+  assert_contains "Raw VLESS 订阅: ${SUBSCRIPTION_RAW_FILE}" "${OUTPUT_FILE}"
+  assert_contains "Base64 VLESS 订阅: ${SUBSCRIPTION_BASE64_FILE}" "${OUTPUT_FILE}"
   assert_contains '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
   assert_contains '推荐操作步骤：' "${OUTPUT_FILE}"
   assert_contains 'Cache eligibility' "${OUTPUT_FILE}"
@@ -64,6 +75,14 @@ run_warp_enabled_case() {
   if grep -q '## sing-box outbound 片段' "${OUTPUT_FILE}"; then
     return 1
   fi
+  [[ -f "${SUBSCRIPTION_RAW_FILE}" ]]
+  [[ -f "${SUBSCRIPTION_BASE64_FILE}" ]]
+  [[ -f "${SUBSCRIPTION_MANIFEST_FILE}" ]]
+  [[ "$(grep -c '^vless://' "${SUBSCRIPTION_RAW_FILE}")" -eq 3 ]]
+  base64 -d "${SUBSCRIPTION_BASE64_FILE}" | grep -q '^vless://'
+  if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" || -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then
+    return 1
+  fi
 }
 
 run_warp_disabled_case() {
@@ -71,6 +90,7 @@ run_warp_disabled_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
+  reset_feature_defaults
 
   SERVER_IP="203.0.113.11"
   NODE_LABEL_PREFIX="SFO"
@@ -94,12 +114,20 @@ run_warp_disabled_case() {
   CERT_MODE="self-signed"
   XHTTP_ECH_CONFIG_LIST=""
   XHTTP_ECH_FORCE_QUERY=""
+  XHTTP_XPADDING_ENABLED="no"
+  XHTTP_XPADDING_KEY="x_padding"
+  XHTTP_XPADDING_HEADER="Referer"
+  XHTTP_XPADDING_PLACEMENT="queryInHeader"
+  XHTTP_XPADDING_METHOD="tokenish"
 
   write_xray_config
   write_output_file
 
   jq -e '.routing.rules | length == 0' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
+  if jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingObfsMode' "${XRAY_CONFIG_FILE}" >/dev/null; then
+    return 1
+  fi
 
   if grep -q '&ech=' "${OUTPUT_FILE}"; then
     return 1
@@ -114,6 +142,7 @@ run_warp_rules_file_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
+  reset_feature_defaults
   WARP_RULES_FILE="${workdir}/warp-domains.list"
 
   SERVER_IP="203.0.113.15"
@@ -134,6 +163,7 @@ run_warp_rules_file_case() {
 }
 
 run_output_helper_case() {
+  reset_feature_defaults
   SERVER_IP="203.0.113.12"
   NODE_LABEL_PREFIX="hkg"
   REALITY_UUID="55555555-5555-5555-5555-555555555555"
@@ -163,6 +193,7 @@ run_output_default_transport_fields_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
+  reset_feature_defaults
 
   SERVER_IP="203.0.113.20"
   NODE_LABEL_PREFIX="LAX"
@@ -186,6 +217,11 @@ run_output_default_transport_fields_case() {
   CERT_MODE="existing"
   XHTTP_ECH_CONFIG_LIST=""
   XHTTP_ECH_FORCE_QUERY=""
+  XHTTP_XPADDING_ENABLED="no"
+  XHTTP_XPADDING_KEY="x_padding"
+  XHTTP_XPADDING_HEADER="Referer"
+  XHTTP_XPADDING_PLACEMENT="queryInHeader"
+  XHTTP_XPADDING_METHOD="tokenish"
 
   write_output_file
   write_state_file
@@ -204,6 +240,7 @@ run_service_config_helper_case() {
 
   workdir="$(mktemp -d)"
   NGINX_CONF_DIR="${workdir}/nginx"
+  reset_feature_defaults
   NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
   HAPROXY_CONFIG="${workdir}/haproxy.cfg"
   XHTTP_DOMAIN="cdn.example.com"
@@ -250,6 +287,7 @@ run_xray_config_escape_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
+  reset_feature_defaults
 
   SERVER_IP="203.0.113.13"
   REALITY_UUID="66666666-6666-6666-6666-666666666666"
@@ -279,6 +317,7 @@ run_generated_file_atomic_failure_case() {
 
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
+  reset_feature_defaults
   NGINX_CONF_DIR="${workdir}/nginx"
   NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
   HAPROXY_CONFIG="${workdir}/haproxy.cfg"
@@ -316,4 +355,56 @@ run_generated_file_atomic_failure_case() {
   if find "${workdir}" -name '.*.tmp.*' | grep -q .; then
     return 1
   fi
+}
+
+run_subscription_qr_success_case() {
+  local workdir=""
+  local fakebin=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+  fakebin="${workdir}/bin"
+  mkdir -p "${fakebin}"
+  cat > "${fakebin}/qrencode" <<'EOF'
+#!/usr/bin/env bash
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o)
+      shift
+      printf 'png\n' > "$1"
+      exit 0
+      ;;
+  esac
+  shift
+done
+exit 0
+EOF
+  chmod +x "${fakebin}/qrencode"
+  PATH="${fakebin}:${PATH}"
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="www.scu.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION=""
+  XHTTP_VLESS_DECRYPTION="none"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  WARP_PROXY_PORT="40000"
+  CERT_MODE="existing"
+
+  write_output_file
+
+  [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" ]]
+  [[ -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]
+  assert_contains "Raw QR PNG:" "${SUBSCRIPTION_MANIFEST_FILE}"
+  assert_contains "${SUBSCRIPTION_RAW_QR_FILE}" "${OUTPUT_FILE}"
 }

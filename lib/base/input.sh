@@ -47,6 +47,16 @@ usage() {
   --xhttp-path VALUE          XHTTP 路径，例如 /cfup-example。
   --enable-xhttp-vless-encryption   启用 XHTTP CDN 的 VLESS Encryption。
   --disable-xhttp-vless-encryption  禁用 XHTTP CDN 的 VLESS Encryption。
+  --enable-xhttp-ech         启用 XHTTP CDN ECH（默认关闭）。
+  --disable-xhttp-ech        禁用 XHTTP CDN ECH。
+  --xhttp-ech-config-list VALUE      ECH 配置列表，默认启用值为 cloudflare-ech.com+https://223.5.5.5/dns-query。
+  --xhttp-ech-force-query VALUE      ECH 强制查询模式，默认 none。
+  --enable-xhttp-xpadding    启用 XHTTP xpadding（默认关闭）。
+  --disable-xhttp-xpadding   禁用 XHTTP xpadding。
+  --xhttp-xpadding-key VALUE        xpadding 参数名，默认 x_padding。
+  --xhttp-xpadding-header VALUE     xpadding Header 名，默认 Referer。
+  --xhttp-xpadding-placement VALUE  xpadding placement，默认 queryInHeader。
+  --xhttp-xpadding-method VALUE     xpadding method，默认 tokenish。
   --cert-mode VALUE           证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
   --cert-file VALUE           当证书模式为 existing 时使用的证书文件。
   --key-file VALUE            当证书模式为 existing 时使用的私钥文件。

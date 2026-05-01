@@ -94,11 +94,27 @@ xray_reality_inbound_json() {
 }
 
 xray_xhttp_inbound_json() {
+  local xpadding_filter='.'
+
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    xpadding_filter='.streamSettings.xhttpSettings += {
+      xPaddingObfsMode: true,
+      xPaddingKey: $xhttp_xpadding_key,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingMethod: $xhttp_xpadding_method
+    }'
+  fi
+
   jq -cn \
     --arg xhttp_local_port "${XHTTP_LOCAL_PORT}" \
     --arg xhttp_uuid "${XHTTP_UUID}" \
     --arg xhttp_decryption "${XHTTP_VLESS_DECRYPTION:-none}" \
     --arg xhttp_path "${XHTTP_PATH}" \
+    --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
+    --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
+    --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
+    --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
     'def sniffing: {
       enabled: true,
       destOverride: ["http", "tls", "quic"],
@@ -128,7 +144,7 @@ xray_xhttp_inbound_json() {
         }
       },
       sniffing: sniffing
-    }'
+    } | '"${xpadding_filter}"
 }
 
 xray_inbounds_json() {

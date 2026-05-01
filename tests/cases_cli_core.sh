@@ -296,6 +296,24 @@ EOF
     return 1
   fi
   printf '%s' "${output}" | grep -q 'XHTTP 路径不能包含空白字符'
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+ENABLE_WARP="no"
+REALITY_SNI='reality.example.com'
+REALITY_TARGET='www.scu.edu:443'
+XHTTP_DOMAIN='cdn.example.com'
+XHTTP_PATH='/assets/v3'
+XHTTP_XPADDING_ENABLED='yes'
+XHTTP_XPADDING_KEY='bad key'
+validate_install_inputs
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'XHTTP xpadding 参数名只能包含'
 }
 
 run_value_source_case() {
@@ -472,6 +490,13 @@ run_install_parse_case() {
   XHTTP_DOMAIN=""
   XHTTP_PATH=""
   XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+  XHTTP_ECH_CONFIG_LIST=""
+  XHTTP_ECH_FORCE_QUERY=""
+  XHTTP_XPADDING_ENABLED="no"
+  XHTTP_XPADDING_KEY=""
+  XHTTP_XPADDING_HEADER=""
+  XHTTP_XPADDING_PLACEMENT=""
+  XHTTP_XPADDING_METHOD=""
   CERT_MODE=""
   CERT_SOURCE_FILE=""
   KEY_SOURCE_FILE=""
@@ -491,6 +516,11 @@ run_install_parse_case() {
     --xhttp-domain cdn.example.com \
     --xhttp-path /edge \
     --disable-xhttp-vless-encryption \
+    --enable-xhttp-ech \
+    --xhttp-ech-force-query none \
+    --enable-xhttp-xpadding \
+    --xhttp-xpadding-key x_pad \
+    --xhttp-xpadding-header Referer \
     --cert-mode 2 \
     --cert-file /tmp/cert.pem \
     --key-file /tmp/key.pem \
@@ -510,6 +540,11 @@ run_install_parse_case() {
   [[ "${XHTTP_DOMAIN}" == "cdn.example.com" ]]
   [[ "${XHTTP_PATH}" == "/edge" ]]
   [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "no" ]]
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == "cloudflare-ech.com+https://223.5.5.5/dns-query" ]]
+  [[ "${XHTTP_ECH_FORCE_QUERY}" == "none" ]]
+  [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]
+  [[ "${XHTTP_XPADDING_KEY}" == "x_pad" ]]
+  [[ "${XHTTP_XPADDING_HEADER}" == "Referer" ]]
   [[ "${CERT_MODE}" == "2" ]]
   [[ "$(validate_cert_mode_value "${CERT_MODE}")" == "existing" ]]
   [[ "${CERT_SOURCE_FILE}" == "/tmp/cert.pem" ]]
@@ -520,6 +555,42 @@ run_install_parse_case() {
   [[ "${WARP_CLIENT_SECRET}" == "client-secret" ]]
   [[ "${WARP_PROXY_PORT}" == "41000" ]]
   [[ "${ENABLE_NET_OPT}" == "no" ]]
+}
+
+run_install_prepare_preserves_ech_flag_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+  INSTALL_DRAFT_FILE="${workdir}/draft.env"
+  SCRIPT_LOCK_FILE="${workdir}/lock"
+  XRAY_CONFIG_FILE="${workdir}/missing-config.json"
+  HAPROXY_CONFIG="${workdir}/missing-haproxy.cfg"
+  SERVER_IP="198.51.100.10"
+  NODE_LABEL_PREFIX="hkg"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="reality.example.com"
+  REALITY_TARGET="reality.example.com:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PRIVATE_KEY="private-key"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/edge"
+  CERT_MODE="self-signed"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+
+  need_root() { :; }
+  ensure_debian_family() { :; }
+  start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
+  run_install_preflight_checks() { :; }
+
+  prepare_install_command --non-interactive --enable-xhttp-ech --enable-xhttp-xpadding
+
+  [[ "${XHTTP_ECH_CONFIG_LIST}" == "cloudflare-ech.com+https://223.5.5.5/dns-query" ]]
+  [[ "${XHTTP_ECH_FORCE_QUERY}" == "none" ]]
+  [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]
 }
 
 run_sensitive_option_reject_case() {

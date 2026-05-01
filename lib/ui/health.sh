@@ -181,6 +181,7 @@ show_dashboard() {
     panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-未知}")"
     panel_row "REALITY 公钥" "$(short_value "${REALITY_PUBLIC_KEY:-未知}" 10 8)"
     panel_row "链接文件" "${OUTPUT_FILE}"
+    panel_row "订阅目录" "${SUBSCRIPTION_DIR}"
   else
     panel_row "安装状态" "$(style_text "${C_YELLOW}" "未安装")"
   fi
@@ -201,6 +202,7 @@ show_dashboard() {
   panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
   panel_row "VLESS Encryption" "$(bool_badge "${XHTTP_VLESS_ENCRYPTION_ENABLED:-${DEFAULT_XHTTP_VLESS_ENCRYPTION_ENABLED}}")"
   panel_row "XHTTP ECH" "$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}" ]]; then bool_badge "yes"; else bool_badge "no"; fi)  doh=${XHTTP_ECH_CONFIG_LIST:-未设置}"
+  panel_row "XHTTP xpadding" "$(bool_badge "${XHTTP_XPADDING_ENABLED:-${DEFAULT_XHTTP_XPADDING_ENABLED}}")  header=${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}"
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" ]]; then
     panel_row "ACME CA" "${ACME_CA:-${DEFAULT_ACME_CA}}"
   fi

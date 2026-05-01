@@ -32,6 +32,15 @@ xhttp_ech_status_text() {
   printf '否'
 }
 
+xhttp_xpadding_status_text() {
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    printf '是'
+    return
+  fi
+
+  printf '否'
+}
+
 effective_tls_alpn() {
   printf '%s' "${TLS_ALPN:-${DEFAULT_TLS_ALPN}}"
 }
@@ -81,6 +90,26 @@ build_xhttp_uri() {
 }
 
 build_xhttp_split_extra_json() {
+  local xpadding_filter='.'
+  local root_xpadding_filter='.'
+
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    root_xpadding_filter='. += {
+      xPaddingObfsMode: true,
+      xPaddingKey: $xhttp_xpadding_key,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingMethod: $xhttp_xpadding_method
+    }'
+    xpadding_filter='.downloadSettings.xhttpSettings += {
+      xPaddingObfsMode: true,
+      xPaddingKey: $xhttp_xpadding_key,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingMethod: $xhttp_xpadding_method
+    }'
+  fi
+
   jq -cn \
     --arg address "${SERVER_IP}" \
     --arg server_name "${REALITY_SNI}" \
@@ -88,6 +117,10 @@ build_xhttp_split_extra_json() {
     --arg short_id "${REALITY_SHORT_ID}" \
     --arg public_key "${REALITY_PUBLIC_KEY}" \
     --arg path "${XHTTP_PATH}" \
+    --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
+    --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
+    --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
+    --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
     '{
       downloadSettings: {
         address: $address,
@@ -107,7 +140,126 @@ build_xhttp_split_extra_json() {
           mode: "auto"
         }
       }
+    } | '"${root_xpadding_filter}"' | '"${xpadding_filter}"
+}
+
+build_xhttp_extra_json() {
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" != "yes" ]]; then
+    return 0
+  fi
+
+  jq -cn \
+    --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
+    --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
+    --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
+    --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
+    '{
+      xPaddingObfsMode: true,
+      xPaddingKey: $xhttp_xpadding_key,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingMethod: $xhttp_xpadding_method
     }'
+}
+
+build_link_context() {
+  local xhttp_path_component=""
+  local xhttp_ech_component=""
+  local xhttp_vlessenc_component=""
+  local reality_label=""
+  local xhttp_label=""
+  local xhttp_split_label=""
+  local xhttp_extra_json=""
+  local xhttp_extra_component=""
+  local split_extra_json=""
+  local split_extra_component=""
+
+  xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
+  xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
+  xhttp_vlessenc_component="$(uri_encode "${XHTTP_VLESS_ENCRYPTION}")"
+  reality_label="$(prefixed_node_label "REALITY")"
+  xhttp_label="$(prefixed_node_label "XHTTP-CDN")"
+  xhttp_split_label="$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")"
+
+  REALITY_URI="$(build_reality_uri "${reality_label}")"
+  xhttp_extra_json="$(build_xhttp_extra_json)"
+  [[ -n "${xhttp_extra_json}" ]] && xhttp_extra_component="$(uri_encode "${xhttp_extra_json}")"
+  XHTTP_URI="$(build_xhttp_uri "${xhttp_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${xhttp_extra_component}")"
+  split_extra_json="$(build_xhttp_split_extra_json)"
+  split_extra_component="$(uri_encode "${split_extra_json}")"
+  XHTTP_SPLIT_URI="$(build_xhttp_uri "${xhttp_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${split_extra_component}")"
+}
+
+subscription_raw_text() {
+  build_link_context
+  printf '%s\n%s\n%s\n' "${REALITY_URI}" "${XHTTP_URI}" "${XHTTP_SPLIT_URI}"
+}
+
+subscription_base64_text() {
+  subscription_raw_text | base64 | tr -d '\n'
+  printf '\n'
+}
+
+subscription_qr_status_text() {
+  if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" || -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then
+    printf '已生成'
+    return
+  fi
+
+  printf '未生成'
+}
+
+subscription_manifest_text() {
+  cat <<EOF
+# Xray WARP Team 订阅文件
+
+Raw VLESS:
+${SUBSCRIPTION_RAW_FILE}
+
+Base64 VLESS:
+${SUBSCRIPTION_BASE64_FILE}
+
+Raw QR PNG:
+$(if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_RAW_QR_FILE}"; else printf '未生成'; fi)
+
+Base64 QR PNG:
+$(if [[ -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_BASE64_QR_FILE}"; else printf '未生成'; fi)
+EOF
+}
+
+write_subscription_qr_png() {
+  local content_file="${1}"
+  local output_file="${2}"
+  local tmp_file=""
+
+  command -v qrencode >/dev/null 2>&1 || return 2
+  [[ -f "${content_file}" ]] || return 1
+  mkdir -p "$(dirname "${output_file}")"
+  tmp_file="$(mktemp "$(dirname "${output_file}")/.$(basename "${output_file}").tmp.XXXXXX")"
+  if ! qrencode -o "${tmp_file}" -s 8 -m 2 "$(<"${content_file}")"; then
+    rm -f "${tmp_file}"
+    return 1
+  fi
+  mv -f "${tmp_file}" "${output_file}"
+}
+
+write_subscription_files() {
+  mkdir -p "${SUBSCRIPTION_DIR}" "${SUBSCRIPTION_QR_DIR}"
+  write_generated_file_atomically "${SUBSCRIPTION_RAW_FILE}" subscription_raw_text
+  chmod 0644 "${SUBSCRIPTION_RAW_FILE}"
+  write_generated_file_atomically "${SUBSCRIPTION_BASE64_FILE}" subscription_base64_text
+  chmod 0644 "${SUBSCRIPTION_BASE64_FILE}"
+
+  if command -v qrencode >/dev/null 2>&1; then
+    write_subscription_qr_png "${SUBSCRIPTION_RAW_FILE}" "${SUBSCRIPTION_RAW_QR_FILE}" || warn "生成 Raw VLESS 订阅二维码失败，已跳过。"
+    write_subscription_qr_png "${SUBSCRIPTION_BASE64_FILE}" "${SUBSCRIPTION_BASE64_QR_FILE}" || warn "生成 Base64 VLESS 订阅二维码失败，已跳过。"
+  else
+    rm -f "${SUBSCRIPTION_RAW_QR_FILE}" "${SUBSCRIPTION_BASE64_QR_FILE}"
+    warn "系统中未找到 qrencode，已跳过订阅二维码 PNG。"
+  fi
+
+  write_generated_file_atomically "${SUBSCRIPTION_MANIFEST_FILE}" subscription_manifest_text
+  chmod 0644 "${SUBSCRIPTION_MANIFEST_FILE}"
 }
 
 prefixed_node_label() {
@@ -180,6 +332,8 @@ output_xhttp_shared_details() {
   cat <<EOF
 - 路径: ${XHTTP_PATH}
 - VLESS Encryption: $(xhttp_vless_status_text)
+- ECH: $(xhttp_ech_status_text)
+- xpadding: $(xhttp_xpadding_status_text)
 EOF
 }
 
@@ -230,6 +384,11 @@ output_runtime_summary_block() {
 - Nginx 配置: ${NGINX_CONFIG_FILE}
 - 安装状态文件: ${STATE_FILE}
 - 链接输出文件: ${OUTPUT_FILE}
+- Raw VLESS 订阅: ${SUBSCRIPTION_RAW_FILE}
+- Base64 VLESS 订阅: ${SUBSCRIPTION_BASE64_FILE}
+- 订阅文件清单: ${SUBSCRIPTION_MANIFEST_FILE}
+- Raw VLESS 订阅二维码: $(if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_RAW_QR_FILE}"; else printf '未生成'; fi)
+- Base64 VLESS 订阅二维码: $(if [[ -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_BASE64_QR_FILE}"; else printf '未生成'; fi)
 
 ## WARP
 - 已启用: ${ENABLE_WARP}
@@ -240,6 +399,14 @@ output_runtime_summary_block() {
 - DoH / ECH 查询: ${XHTTP_ECH_CONFIG_LIST:-未设置}
 - 强制查询模式: ${XHTTP_ECH_FORCE_QUERY:-未设置}
 - 说明: 默认不启用 ECH，导出的两个 XHTTP 节点分享链接也不会带 ech= 参数，避免额外的 DNS / DoH 查询。
+
+## XHTTP xpadding
+- 已启用: $(xhttp_xpadding_status_text)
+- Header: ${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}
+- 参数名: ${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}
+- Placement: ${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}
+- Method: ${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}
+- 说明: 默认不启用；启用后会写入 Xray xhttpSettings，并在 XHTTP 分享链接 extra= 中携带客户端侧配置。
 
 ## XHTTP VLESS Encryption
 - 已启用: $(xhttp_vless_enabled_text)
@@ -288,40 +455,19 @@ EOF
 }
 
 output_file_text() {
-  local xhttp_path_component=""
-  local xhttp_ech_component=""
-  local xhttp_vlessenc_component=""
-  local reality_label=""
-  local xhttp_label=""
-  local xhttp_split_label=""
-  local reality_uri=""
-  local xhttp_uri=""
-  local xhttp_split_uri=""
-  local split_extra_json=""
-  local split_extra_component=""
   local cf_ssl_mode=""
 
-  xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
-  xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
-  xhttp_vlessenc_component="$(uri_encode "${XHTTP_VLESS_ENCRYPTION}")"
-  reality_label="$(prefixed_node_label "REALITY")"
-  xhttp_label="$(prefixed_node_label "XHTTP-CDN")"
-  xhttp_split_label="$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")"
-  reality_uri="$(build_reality_uri "${reality_label}")"
-  xhttp_uri="$(build_xhttp_uri "${xhttp_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}")"
-  split_extra_json="$(build_xhttp_split_extra_json)"
-  split_extra_component="$(uri_encode "${split_extra_json}")"
-  xhttp_split_uri="$(build_xhttp_uri "${xhttp_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "" "${split_extra_component}")"
+  build_link_context
   cf_ssl_mode="$(cloudflare_ssl_mode_text)"
 
   cat <<EOF
 # Xray WARP Team 部署信息
 
-$(output_reality_block "${reality_uri}")
+$(output_reality_block "${REALITY_URI}")
 
-$(output_xhttp_cdn_block "${xhttp_uri}")
+$(output_xhttp_cdn_block "${XHTTP_URI}")
 
-$(output_xhttp_split_block "${xhttp_split_uri}")
+$(output_xhttp_split_block "${XHTTP_SPLIT_URI}")
 
 $(output_runtime_summary_block "${cf_ssl_mode}")
 
@@ -330,6 +476,7 @@ EOF
 }
 
 write_output_file() {
+  write_subscription_files
   write_generated_file_atomically "${OUTPUT_FILE}" output_file_text
   chmod 0644 "${OUTPUT_FILE}"
 }

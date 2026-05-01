@@ -27,6 +27,7 @@ main() {
     run_output_default_transport_fields_case
     run_xray_config_escape_case
     run_generated_file_atomic_failure_case
+    run_subscription_qr_success_case
     run_state_context_case
     run_state_version_case
     run_health_history_count_without_python_case
@@ -57,6 +58,7 @@ main() {
     run_restart_optional_service_case
     run_change_helper_case
     run_install_parse_case
+    run_install_prepare_preserves_ech_flag_case
     run_sensitive_option_reject_case
     run_preflight_token_verify_case
     run_preflight_domain_resolution_warning_case

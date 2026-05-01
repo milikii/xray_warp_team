@@ -10,6 +10,10 @@ install_flag_specs() {
 --non-interactive:NON_INTERACTIVE:1
 --enable-xhttp-vless-encryption:XHTTP_VLESS_ENCRYPTION_ENABLED:yes
 --disable-xhttp-vless-encryption:XHTTP_VLESS_ENCRYPTION_ENABLED:no
+--enable-xhttp-ech:XHTTP_ECH_CONFIG_LIST:cloudflare-ech.com+https://223.5.5.5/dns-query
+--disable-xhttp-ech:XHTTP_ECH_CONFIG_LIST:
+--enable-xhttp-xpadding:XHTTP_XPADDING_ENABLED:yes
+--disable-xhttp-xpadding:XHTTP_XPADDING_ENABLED:no
 --enable-warp:ENABLE_WARP:yes
 --disable-warp:ENABLE_WARP:no
 --enable-net-opt:ENABLE_NET_OPT:yes
@@ -29,6 +33,12 @@ install_value_specs() {
 --xhttp-uuid:XHTTP_UUID
 --xhttp-domain:XHTTP_DOMAIN
 --xhttp-path:XHTTP_PATH
+--xhttp-ech-config-list:XHTTP_ECH_CONFIG_LIST
+--xhttp-ech-force-query:XHTTP_ECH_FORCE_QUERY
+--xhttp-xpadding-key:XHTTP_XPADDING_KEY
+--xhttp-xpadding-header:XHTTP_XPADDING_HEADER
+--xhttp-xpadding-placement:XHTTP_XPADDING_PLACEMENT
+--xhttp-xpadding-method:XHTTP_XPADDING_METHOD
 --cert-mode:CERT_MODE
 --cert-file:CERT_SOURCE_FILE
 --key-file:KEY_SOURCE_FILE

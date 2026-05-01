@@ -21,6 +21,14 @@ prepare_install_inputs() {
   prompt_with_default XHTTP_PATH "XHTTP 路径" "$(random_path)"
   prompt_yes_no XHTTP_VLESS_ENCRYPTION_ENABLED "是否启用 XHTTP CDN 的 VLESS Encryption？ [y/n]" "y"
   XHTTP_VLESS_ENCRYPTION_ENABLED="$(normalize_yes_no_value "XHTTP_VLESS_ENCRYPTION_ENABLED" "${XHTTP_VLESS_ENCRYPTION_ENABLED}")"
+  XHTTP_ECH_ENABLED="${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}"
+  prompt_yes_no XHTTP_ECH_ENABLED "是否启用 XHTTP CDN 的 ECH？ [y/n]" "n"
+  configure_xhttp_ech_from_toggle
+  prompt_yes_no XHTTP_XPADDING_ENABLED "是否启用 XHTTP xpadding？ [y/n]" "n"
+  XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED}")"
+  if [[ "${XHTTP_XPADDING_ENABLED}" == "yes" ]]; then
+    prompt_xhttp_xpadding_settings
+  fi
   prompt_cert_mode_selection "TLS 证书模式序号" "self-signed"
   prompt_cert_mode_inputs
 
@@ -34,6 +42,27 @@ prepare_install_inputs() {
   if [[ "${ENABLE_WARP}" == "yes" ]]; then
     prompt_warp_settings
   fi
+}
+
+configure_xhttp_ech_from_toggle() {
+  local enabled=""
+
+  enabled="$(normalize_yes_no_value "XHTTP_ECH_ENABLED" "${XHTTP_ECH_ENABLED:-$(if [[ -n "${XHTTP_ECH_CONFIG_LIST:-}" ]]; then printf 'yes'; else printf 'no'; fi)}")"
+  if [[ "${enabled}" == "yes" ]]; then
+    XHTTP_ECH_CONFIG_LIST="${XHTTP_ECH_CONFIG_LIST:-cloudflare-ech.com+https://223.5.5.5/dns-query}"
+    XHTTP_ECH_FORCE_QUERY="${XHTTP_ECH_FORCE_QUERY:-none}"
+    return
+  fi
+
+  XHTTP_ECH_CONFIG_LIST=""
+  XHTTP_ECH_FORCE_QUERY=""
+}
+
+prompt_xhttp_xpadding_settings() {
+  prompt_with_default XHTTP_XPADDING_KEY "XHTTP xpadding 参数名" "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}"
+  prompt_with_default XHTTP_XPADDING_HEADER "XHTTP xpadding Header 名" "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}"
+  prompt_with_default XHTTP_XPADDING_PLACEMENT "XHTTP xpadding placement" "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}"
+  prompt_with_default XHTTP_XPADDING_METHOD "XHTTP xpadding method" "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}"
 }
 
 default_reality_target_for_sni() {
@@ -387,6 +416,31 @@ ensure_xhttp_path_format() {
   [[ "${XHTTP_PATH}" != *[[:space:]]* ]] || die "XHTTP 路径不能包含空白字符。"
 }
 
+ensure_xhttp_ech_format() {
+  [[ "${XHTTP_ECH_CONFIG_LIST}" != *$'\n'* && "${XHTTP_ECH_CONFIG_LIST}" != *$'\r'* ]] || die "XHTTP ECH 配置不能包含换行。"
+  [[ "${XHTTP_ECH_FORCE_QUERY}" != *$'\n'* && "${XHTTP_ECH_FORCE_QUERY}" != *$'\r'* ]] || die "XHTTP ECH 强制查询模式不能包含换行。"
+}
+
+ensure_xhttp_xpadding_format() {
+  XHTTP_XPADDING_ENABLED="$(normalize_yes_no_value "XHTTP_XPADDING_ENABLED" "${XHTTP_XPADDING_ENABLED:-${DEFAULT_XHTTP_XPADDING_ENABLED}}")"
+  if [[ "${XHTTP_XPADDING_ENABLED}" != "yes" ]]; then
+    return
+  fi
+
+  [[ -n "${XHTTP_XPADDING_KEY}" ]] || die "XHTTP xpadding 参数名不能为空。"
+  [[ -n "${XHTTP_XPADDING_HEADER}" ]] || die "XHTTP xpadding Header 名不能为空。"
+  [[ "${XHTTP_XPADDING_KEY}" =~ ^[A-Za-z0-9._-]+$ ]] || die "XHTTP xpadding 参数名只能包含字母、数字、点、下划线或横线。"
+  [[ "${XHTTP_XPADDING_HEADER}" =~ ^[A-Za-z0-9._-]+$ ]] || die "XHTTP xpadding Header 名只能包含字母、数字、点、下划线或横线。"
+  case "${XHTTP_XPADDING_PLACEMENT}" in
+    cookie|header|query|queryInHeader) ;;
+    *) die "XHTTP xpadding placement 只能是 cookie、header、query 或 queryInHeader。" ;;
+  esac
+  case "${XHTTP_XPADDING_METHOD}" in
+    repeat-x|tokenish) ;;
+    *) die "XHTTP xpadding method 只能是 repeat-x 或 tokenish。" ;;
+  esac
+}
+
 ensure_warp_proxy_port_format() {
   validate_port_value "WARP 本地 SOCKS5 端口" "${WARP_PROXY_PORT}"
 }
@@ -396,6 +450,8 @@ validate_install_inputs() {
   ensure_reality_target_format
   ensure_xhttp_domain_format
   ensure_xhttp_path_format
+  ensure_xhttp_ech_format
+  ensure_xhttp_xpadding_format
 
   if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
     [[ -n "${WARP_TEAM_NAME}" ]] || die "启用 WARP 时必须提供团队名。"
