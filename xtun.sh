@@ -17,14 +17,14 @@ if [[ -z "${SCRIPT_ROOT}" ]]; then
 fi
 
 SCRIPT_VERSION="0.5.2"
-SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xray-warp-team"
-SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xray-warp-team"
-BOOTSTRAP_SELF_INSTALL_DIR="${XRAY_WARP_TEAM_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
-BOOTSTRAP_SELF_COMMAND_PATH="${XRAY_WARP_TEAM_SELF_COMMAND_PATH:-${SELF_COMMAND_PATH_DEFAULT}}"
-BOOTSTRAP_REPO_OWNER="${XRAY_WARP_TEAM_BOOTSTRAP_REPO_OWNER:-milikii}"
-BOOTSTRAP_REPO_NAME="${XRAY_WARP_TEAM_BOOTSTRAP_REPO_NAME:-xray_warp_team}"
-BOOTSTRAP_BRANCH_REF="${XRAY_WARP_TEAM_BOOTSTRAP_BRANCH_REF:-main}"
-BOOTSTRAP_ARCHIVE_URL="${XRAY_WARP_TEAM_BOOTSTRAP_ARCHIVE_URL:-}"
+SELF_INSTALL_DIR_DEFAULT="/usr/local/lib/xtun"
+SELF_COMMAND_PATH_DEFAULT="/usr/local/sbin/xtun"
+BOOTSTRAP_SELF_INSTALL_DIR="${XTUN_SELF_INSTALL_DIR:-${SELF_INSTALL_DIR_DEFAULT}}"
+BOOTSTRAP_SELF_COMMAND_PATH="${XTUN_SELF_COMMAND_PATH:-${SELF_COMMAND_PATH_DEFAULT}}"
+BOOTSTRAP_REPO_OWNER="${XTUN_BOOTSTRAP_REPO_OWNER:-milikii}"
+BOOTSTRAP_REPO_NAME="${XTUN_BOOTSTRAP_REPO_NAME:-xtun}"
+BOOTSTRAP_BRANCH_REF="${XTUN_BOOTSTRAP_BRANCH_REF:-main}"
+BOOTSTRAP_ARCHIVE_URL="${XTUN_BOOTSTRAP_ARCHIVE_URL:-}"
 
 bootstrap_die() {
   printf '[错误] %s\n' "$*" >&2
@@ -33,7 +33,7 @@ bootstrap_die() {
 
 bundle_root_ready() {
   local root_path="${1}"
-  [[ -n "${root_path}" && -f "${root_path}/xray-warp-team.sh" && -f "${root_path}/lib/base/helpers.sh" ]]
+  [[ -n "${root_path}" && -f "${root_path}/xtun.sh" && -f "${root_path}/lib/base/helpers.sh" ]]
 }
 
 bootstrap_default_archive_url() {
@@ -86,13 +86,13 @@ exec_bundle_root() {
 
   exec env \
     ROOT_DIR="${bundle_root}" \
-    XRAY_WARP_TEAM_COMMAND_NAME="${XRAY_WARP_TEAM_COMMAND_NAME:-$(basename "$0")}" \
-    bash "${bundle_root}/xray-warp-team.sh" "$@"
+    XTUN_COMMAND_NAME="${XTUN_COMMAND_NAME:-$(basename "$0")}" \
+    bash "${bundle_root}/xtun.sh" "$@"
 }
 
 bootstrap_install_bundle_to_self() {
   local bundle_root="${1}"
-  local target_entry="${BOOTSTRAP_SELF_INSTALL_DIR}/xray-warp-team.sh"
+  local target_entry="${BOOTSTRAP_SELF_INSTALL_DIR}/xtun.sh"
   local wrapper_path="${BOOTSTRAP_SELF_COMMAND_PATH}"
   local staging_dir=""
   local wrapper_tmp=""
@@ -100,15 +100,15 @@ bootstrap_install_bundle_to_self() {
   [[ "${EUID}" -eq 0 ]] || return 0
   bundle_root_ready "${bundle_root}" || return 0
 
-  staging_dir="$(mktemp -d "$(dirname "${BOOTSTRAP_SELF_INSTALL_DIR}")/.xray-warp-team.bootstrap.XXXXXX")"
-  install -m 0755 "${bundle_root}/xray-warp-team.sh" "${staging_dir}/xray-warp-team.sh"
+  staging_dir="$(mktemp -d "$(dirname "${BOOTSTRAP_SELF_INSTALL_DIR}")/.xtun.bootstrap.XXXXXX")"
+  install -m 0755 "${bundle_root}/xtun.sh" "${staging_dir}/xtun.sh"
   cp -a "${bundle_root}/lib" "${staging_dir}/lib"
 
   install -d -m 0755 "$(dirname "${wrapper_path}")"
   wrapper_tmp="$(mktemp)"
   cat > "${wrapper_tmp}" <<EOF
 #!/usr/bin/env bash
-export XRAY_WARP_TEAM_COMMAND_NAME="\$(basename "\$0")"
+export XTUN_COMMAND_NAME="\$(basename "\$0")"
 exec "${target_entry}" "\$@"
 EOF
 
@@ -126,16 +126,16 @@ bootstrap_script_root_if_needed() {
 
   bundle_root_ready "${SCRIPT_ROOT}" && return 0
 
-  if bundle_root_ready "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT:-}"; then
-    bootstrap_install_bundle_to_self "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT}"
-    exec_bundle_root "${XRAY_WARP_TEAM_BOOTSTRAP_ROOT}" "$@"
+  if bundle_root_ready "${XTUN_BOOTSTRAP_ROOT:-}"; then
+    bootstrap_install_bundle_to_self "${XTUN_BOOTSTRAP_ROOT}"
+    exec_bundle_root "${XTUN_BOOTSTRAP_ROOT}" "$@"
   fi
 
   command -v curl >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 curl，无法自动拉取脚本 bundle。"
   command -v tar >/dev/null 2>&1 || bootstrap_die "当前目录缺少 lib/，且系统中未找到 tar，无法自动拉取脚本 bundle。"
 
   tmp_dir="$(mktemp -d)"
-  archive_path="${tmp_dir}/xray-warp-team.tar.gz"
+  archive_path="${tmp_dir}/xtun.tar.gz"
   archive_url="$(bootstrap_resolve_archive_url)"
   if curl -fsSL "${archive_url}" -o "${archive_path}" && tar -xzf "${archive_path}" -C "${tmp_dir}"; then
     bundle_root="$(find "${tmp_dir}" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
@@ -167,63 +167,68 @@ DEFAULT_XHTTP_XPADDING_KEY="x_padding"
 DEFAULT_XHTTP_XPADDING_HEADER="Referer"
 DEFAULT_XHTTP_XPADDING_PLACEMENT="queryInHeader"
 DEFAULT_XHTTP_XPADDING_METHOD="tokenish"
+DEFAULT_XHTTP_XMUX_MAX_CONCURRENCY="16-32"
+DEFAULT_XHTTP_XMUX_C_MAX_REUSE_TIMES="0"
+DEFAULT_XHTTP_XMUX_H_MAX_REUSABLE_SECS="1800-3000"
+DEFAULT_XHTTP_XMUX_H_KEEP_ALIVE_PERIOD="0"
+DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS="30"
 DEFAULT_REALITY_SNI=""
 XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONFIG_DIR="/usr/local/etc/xray"
 XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
 XRAY_ASSET_DIR="/usr/local/share/xray"
 XRAY_SERVICE_FILE="/etc/systemd/system/xray.service"
-SELF_COMMAND_PATH="/usr/local/sbin/xray-warp-team"
+SELF_COMMAND_PATH="/usr/local/sbin/xtun"
 SELF_INSTALL_DIR="${BOOTSTRAP_SELF_INSTALL_DIR}"
 HAPROXY_CONFIG="/etc/haproxy/haproxy.cfg"
 NGINX_CONF_DIR="/etc/nginx/conf.d"
-NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
+NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
 NGINX_TLS_PORT="8443"
 XHTTP_LOCAL_PORT="8001"
 NGINX_SERVICE_FILE="/lib/systemd/system/nginx.service"
 STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
 HEALTH_STATE_FILE="${XRAY_CONFIG_DIR}/health-state.env"
 HEALTH_HISTORY_FILE="${XRAY_CONFIG_DIR}/health-history.log"
-OUTPUT_FILE="/root/xray-warp-team-output.md"
-SUBSCRIPTION_DIR_DEFAULT="/root/xray-warp-team-subscriptions"
-SUBSCRIPTION_DIR="${XRAY_WARP_TEAM_SUBSCRIPTION_DIR:-${SUBSCRIPTION_DIR_DEFAULT}}"
+OUTPUT_FILE="/root/xtun-output.md"
+SUBSCRIPTION_DIR_DEFAULT="/root/xtun-subscriptions"
+SUBSCRIPTION_DIR="${XTUN_SUBSCRIPTION_DIR:-${SUBSCRIPTION_DIR_DEFAULT}}"
 SUBSCRIPTION_RAW_FILE="${SUBSCRIPTION_DIR}/vless-raw.txt"
 SUBSCRIPTION_BASE64_FILE="${SUBSCRIPTION_DIR}/vless-base64.txt"
 SUBSCRIPTION_MANIFEST_FILE="${SUBSCRIPTION_DIR}/manifest.txt"
 SUBSCRIPTION_QR_DIR="${SUBSCRIPTION_DIR}/qr"
 SUBSCRIPTION_RAW_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-raw.png"
 SUBSCRIPTION_BASE64_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-base64.png"
-SSL_DIR="/etc/ssl/xray-warp-team"
+SSL_DIR="/etc/ssl/xtun"
 TLS_CERT_FILE="${SSL_DIR}/cert.pem"
 TLS_KEY_FILE="${SSL_DIR}/key.pem"
 WARP_MDM_FILE="/var/lib/cloudflare-warp/mdm.xml"
 WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
 WARP_APT_KEYRING="/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg"
 WARP_APT_SOURCE_LIST="/etc/apt/sources.list.d/cloudflare-client.list"
-WARP_HEALTH_HELPER="/usr/local/sbin/xray-warp-team-warp-health.sh"
-WARP_HEALTH_SERVICE_NAME="xray-warp-team-warp-health.service"
+WARP_HEALTH_HELPER="/usr/local/sbin/xtun-warp-health.sh"
+WARP_HEALTH_SERVICE_NAME="xtun-warp-health.service"
 WARP_HEALTH_SERVICE_FILE="/etc/systemd/system/${WARP_HEALTH_SERVICE_NAME}"
-WARP_HEALTH_TIMER_NAME="xray-warp-team-warp-health.timer"
+WARP_HEALTH_TIMER_NAME="xtun-warp-health.timer"
 WARP_HEALTH_TIMER_FILE="/etc/systemd/system/${WARP_HEALTH_TIMER_NAME}"
-CORE_HEALTH_HELPER="/usr/local/sbin/xray-warp-team-core-health.sh"
-CORE_HEALTH_SERVICE_NAME="xray-warp-team-core-health.service"
+CORE_HEALTH_HELPER="/usr/local/sbin/xtun-core-health.sh"
+CORE_HEALTH_SERVICE_NAME="xtun-core-health.service"
 CORE_HEALTH_SERVICE_FILE="/etc/systemd/system/${CORE_HEALTH_SERVICE_NAME}"
-CORE_HEALTH_TIMER_NAME="xray-warp-team-core-health.timer"
+CORE_HEALTH_TIMER_NAME="xtun-core-health.timer"
 CORE_HEALTH_TIMER_FILE="/etc/systemd/system/${CORE_HEALTH_TIMER_NAME}"
-BACKUP_ROOT="/root/xray-warp-team-backups"
-BACKUP_KEEP_COUNT="${XRAY_WARP_TEAM_BACKUP_KEEP_COUNT:-5}"
-OP_LOG_DIR="/var/log/xray-warp-team"
+BACKUP_ROOT="/root/xtun-backups"
+BACKUP_KEEP_COUNT="${XTUN_BACKUP_KEEP_COUNT:-5}"
+OP_LOG_DIR="/var/log/xtun"
 OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
-NET_SYSCTL_CONF="/etc/sysctl.d/98-xray-warp-team-net.conf"
-NET_HELPER_PATH="/usr/local/sbin/xray-warp-team-net-optimize.sh"
-NET_SERVICE_NAME="xray-warp-team-net-optimize.service"
+NET_SYSCTL_CONF="/etc/sysctl.d/98-xtun-net.conf"
+NET_HELPER_PATH="/usr/local/sbin/xtun-net-optimize.sh"
+NET_SERVICE_NAME="xtun-net-optimize.service"
 NET_SERVICE_FILE="/etc/systemd/system/${NET_SERVICE_NAME}"
-XRAY_LOGROTATE_FILE="/etc/logrotate.d/xray-warp-team"
+XRAY_LOGROTATE_FILE="/etc/logrotate.d/xtun"
 ACME_HOME="/root/.acme.sh"
 ACME_SH_BIN="${ACME_HOME}/acme.sh"
-ACME_RELOAD_HELPER="/usr/local/sbin/xray-warp-team-cert-reload.sh"
-INSTALL_DRAFT_FILE="/root/.xray-warp-team-install-draft.env"
-SCRIPT_LOCK_FILE="${XRAY_WARP_TEAM_LOCK_FILE:-/run/xray-warp-team.lock}"
+ACME_RELOAD_HELPER="/usr/local/sbin/xtun-cert-reload.sh"
+INSTALL_DRAFT_FILE="/root/.xtun-install-draft.env"
+SCRIPT_LOCK_FILE="${XTUN_LOCK_FILE:-/run/xtun.lock}"
 SESSION_LOG_FILE=""
 
 NON_INTERACTIVE=0

@@ -81,7 +81,7 @@ acquire_script_lock() {
     fi
 
     [[ "${lock_opened}" -eq 1 ]] || die "无法创建脚本锁文件。"
-    flock -n 9 || die "检测到另一个 xray-warp-team 进程正在运行，请稍后重试。"
+    flock -n 9 || die "检测到另一个 xtun 进程正在运行，请稍后重试。"
     return
   fi
 
@@ -97,7 +97,7 @@ acquire_script_lock() {
     return
   fi
 
-  die "检测到另一个 xray-warp-team 进程正在运行，请稍后重试。"
+  die "检测到另一个 xtun 进程正在运行，请稍后重试。"
 }
 
 . "${SCRIPT_ROOT}/lib/base/input.sh"

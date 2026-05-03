@@ -4,7 +4,7 @@ run_missing_option_value_case() {
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 parse_install_args --server-ip
 EOF
 )"; then
@@ -15,7 +15,7 @@ EOF
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 change_uuid_cmd --reality-uuid
 EOF
 )"; then
@@ -26,7 +26,7 @@ EOF
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 change_warp_cmd --bogus
 EOF
 )"; then
@@ -37,7 +37,7 @@ EOF
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 change_cert_mode_cmd --bogus
 EOF
 )"; then

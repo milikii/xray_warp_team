@@ -24,7 +24,7 @@ install_self_command() {
 
   if [[ "${source_root}" == "${SELF_INSTALL_DIR}" ]]; then
     staging_dir="$(mktemp -d)"
-    install -m 0755 "${source_root}/xray-warp-team.sh" "${staging_dir}/xray-warp-team.sh"
+    install -m 0755 "${source_root}/xtun.sh" "${staging_dir}/xtun.sh"
     cp -a "${source_root}/lib" "${staging_dir}/lib"
     source_bundle_root="${staging_dir}"
   fi
@@ -40,7 +40,7 @@ install_self_command() {
 bundle_script_version() {
   local bundle_root="${1}"
 
-  sed -n 's/^SCRIPT_VERSION="\([^"]*\)".*/\1/p' "${bundle_root}/xray-warp-team.sh" 2>/dev/null | head -n 1
+  sed -n 's/^SCRIPT_VERSION="\([^"]*\)".*/\1/p' "${bundle_root}/xtun.sh" 2>/dev/null | head -n 1
 }
 
 bundle_script_signature() {
@@ -56,7 +56,7 @@ bundle_script_signature() {
 }
 
 installed_script_version() {
-  if [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]; then
+  if [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]; then
     bundle_script_version "${SELF_INSTALL_DIR}"
     return
   fi
@@ -83,9 +83,9 @@ cleanup_script_bundle_tmp_dir() {
 
 install_bundle_root_to_self() {
   local source_bundle_root="${1}"
-  local target_entry="${SELF_INSTALL_DIR}/xray-warp-team.sh"
+  local target_entry="${SELF_INSTALL_DIR}/xtun.sh"
   local wrapper_tmp=""
-  [[ -d "${source_bundle_root}/lib" && -f "${source_bundle_root}/xray-warp-team.sh" ]] || die "脚本 bundle 缺少必需文件，无法安装。"
+  [[ -d "${source_bundle_root}/lib" && -f "${source_bundle_root}/xtun.sh" ]] || die "脚本 bundle 缺少必需文件，无法安装。"
 
   backup_path "${SELF_INSTALL_DIR}"
   backup_path "${SELF_COMMAND_PATH}"
@@ -93,13 +93,13 @@ install_bundle_root_to_self() {
   rm -rf "${SELF_INSTALL_DIR}"
   install -d -m 0755 "${SELF_INSTALL_DIR}"
   install -d -m 0755 "$(dirname "${SELF_COMMAND_PATH}")"
-  install -m 0755 "${source_bundle_root}/xray-warp-team.sh" "${target_entry}"
+  install -m 0755 "${source_bundle_root}/xtun.sh" "${target_entry}"
   cp -a "${source_bundle_root}/lib" "${SELF_INSTALL_DIR}/lib"
 
   wrapper_tmp="$(mktemp)"
   cat > "${wrapper_tmp}" <<EOF
 #!/usr/bin/env bash
-export XRAY_WARP_TEAM_COMMAND_NAME="\$(basename "\$0")"
+export XTUN_COMMAND_NAME="\$(basename "\$0")"
 exec "${target_entry}" "\$@"
 EOF
   install -m 0755 "${wrapper_tmp}" "${SELF_COMMAND_PATH}"
@@ -109,7 +109,7 @@ EOF
 download_latest_script_bundle() {
   local target_dir="${1}"
   local archive_url=""
-  local archive_path="${target_dir}/xray-warp-team.tar.gz"
+  local archive_path="${target_dir}/xtun.tar.gz"
   local bundle_root=""
 
   archive_url="$(bootstrap_resolve_archive_url)"

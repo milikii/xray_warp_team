@@ -60,6 +60,20 @@ xhttp_uri_encryption_value() {
   printf 'none'
 }
 
+build_xmux_json() {
+  jq -cn \
+    --arg max_concurrency "${DEFAULT_XHTTP_XMUX_MAX_CONCURRENCY}" \
+    --argjson c_max_reuse_times "${DEFAULT_XHTTP_XMUX_C_MAX_REUSE_TIMES}" \
+    --arg h_max_reusable_secs "${DEFAULT_XHTTP_XMUX_H_MAX_REUSABLE_SECS}" \
+    --argjson h_keep_alive_period "${DEFAULT_XHTTP_XMUX_H_KEEP_ALIVE_PERIOD}" \
+    '{
+      maxConcurrency: $max_concurrency,
+      cMaxReuseTimes: $c_max_reuse_times,
+      hMaxReusableSecs: $h_max_reusable_secs,
+      hKeepAlivePeriod: $h_keep_alive_period
+    }'
+}
+
 build_xhttp_uri() {
   local label="${1}"
   local path_component="${2}"
@@ -89,28 +103,78 @@ build_xhttp_uri() {
     "${label}"
 }
 
-build_xhttp_split_extra_json() {
+build_xhttp_reality_uri() {
+  local label="${1}"
+  local path_component="${2}"
+  local encoded_encryption="${3}"
+  local extra_component="${4:-}"
+  local extra_query=""
+  local encryption_value=""
+
+  encryption_value="$(xhttp_uri_encryption_value "${encoded_encryption}")"
+  [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
+
+  printf 'vless://%s@%s:443?encryption=%s&security=reality&sni=%s&fp=%s&fingerprint=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=auto%s#%s' \
+    "${XHTTP_UUID}" \
+    "${SERVER_IP}" \
+    "${encryption_value}" \
+    "${REALITY_SNI}" \
+    "$(effective_fingerprint)" \
+    "$(effective_fingerprint)" \
+    "${REALITY_PUBLIC_KEY}" \
+    "${REALITY_SHORT_ID}" \
+    "${path_component}" \
+    "${extra_query}" \
+    "${label}"
+}
+
+build_download_xhttp_extra_json() {
+  local xmux_json=""
   local xpadding_filter='.'
-  local root_xpadding_filter='.'
+
+  xmux_json="$(build_xmux_json)"
 
   if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
-    root_xpadding_filter='. += {
+    xpadding_filter='{
       xPaddingObfsMode: true,
-      xPaddingKey: $xhttp_xpadding_key,
-      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingMethod: $xhttp_xpadding_method,
       xPaddingPlacement: $xhttp_xpadding_placement,
-      xPaddingMethod: $xhttp_xpadding_method
-    }'
-    xpadding_filter='.downloadSettings.xhttpSettings += {
-      xPaddingObfsMode: true,
-      xPaddingKey: $xhttp_xpadding_key,
       xPaddingHeader: $xhttp_xpadding_header,
-      xPaddingPlacement: $xhttp_xpadding_placement,
-      xPaddingMethod: $xhttp_xpadding_method
-    }'
+      xPaddingKey: $xhttp_xpadding_key
+    } + .'
   fi
 
   jq -cn \
+    --argjson xmux "${xmux_json}" \
+    --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
+    --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
+    --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
+    --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
+    '{xmux: $xmux} | '"${xpadding_filter}"
+}
+
+build_xhttp_split_extra_json() {
+  local xmux_json=""
+  local download_extra_json=""
+  local xpadding_root_prefix='.'
+
+  xmux_json="$(build_xmux_json)"
+  download_extra_json="$(build_download_xhttp_extra_json)"
+
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    xpadding_root_prefix='{
+      xPaddingObfsMode: true,
+      xPaddingMethod: $xhttp_xpadding_method,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingKey: $xhttp_xpadding_key
+    } + .'
+  fi
+
+  jq -cn \
+    --argjson xmux "${xmux_json}" \
+    --argjson download_extra "${download_extra_json}" \
+    --argjson sc_min_posts_interval_ms "${DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS}" \
     --arg address "${SERVER_IP}" \
     --arg server_name "${REALITY_SNI}" \
     --arg fingerprint "$(effective_fingerprint)" \
@@ -122,6 +186,8 @@ build_xhttp_split_extra_json() {
     --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
     --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
     '{
+      scMinPostsIntervalMs: $sc_min_posts_interval_ms,
+      xmux: $xmux,
       downloadSettings: {
         address: $address,
         port: 443,
@@ -137,29 +203,124 @@ build_xhttp_split_extra_json() {
         xhttpSettings: {
           host: "",
           path: $path,
-          mode: "auto"
+          mode: "auto",
+          extra: $download_extra
         }
       }
-    } | '"${root_xpadding_filter}"' | '"${xpadding_filter}"
+    } | '"${xpadding_root_prefix}"
 }
 
+
 build_xhttp_extra_json() {
-  if [[ "${XHTTP_XPADDING_ENABLED:-no}" != "yes" ]]; then
-    return 0
+  local xmux_json=""
+  local xpadding_prefix='.'
+
+  xmux_json="$(build_xmux_json)"
+
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    xpadding_prefix='{
+      xPaddingObfsMode: true,
+      xPaddingMethod: $xhttp_xpadding_method,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingKey: $xhttp_xpadding_key
+    } + .'
   fi
 
   jq -cn \
+    --argjson xmux "${xmux_json}" \
+    --argjson sc_min_posts_interval_ms "${DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS}" \
     --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
     --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
     --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
     --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
     '{
+      scMinPostsIntervalMs: $sc_min_posts_interval_ms,
+      xmux: $xmux
+    } | '"${xpadding_prefix}"
+}
+
+build_xhttp_reality_extra_json() {
+  local xmux_json=""
+  local xpadding_prefix='.'
+
+  xmux_json="$(build_xmux_json)"
+
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    xpadding_prefix='{
       xPaddingObfsMode: true,
-      xPaddingKey: $xhttp_xpadding_key,
-      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingMethod: $xhttp_xpadding_method,
       xPaddingPlacement: $xhttp_xpadding_placement,
-      xPaddingMethod: $xhttp_xpadding_method
-    }'
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingKey: $xhttp_xpadding_key
+    } + .'
+  fi
+
+  jq -cn \
+    --argjson xmux "${xmux_json}" \
+    --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
+    --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
+    --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
+    --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
+    '{xmux: $xmux} | '"${xpadding_prefix}"
+}
+
+build_xhttp_reverse_split_extra_json() {
+  local xmux_json=""
+  local download_extra_json=""
+  local xpadding_root_prefix='.'
+  local ech_settings_filter='.'
+
+  xmux_json="$(build_xmux_json)"
+  download_extra_json="$(build_download_xhttp_extra_json)"
+
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    xpadding_root_prefix='{
+      xPaddingObfsMode: true,
+      xPaddingMethod: $xhttp_xpadding_method,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingKey: $xhttp_xpadding_key
+    } + .'
+  fi
+
+  if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
+    ech_settings_filter='.downloadSettings.tlsSettings.echConfigList = $ech_config_list'
+  fi
+
+  jq -cn \
+    --argjson xmux "${xmux_json}" \
+    --argjson download_extra "${download_extra_json}" \
+    --arg cdn_domain "${XHTTP_DOMAIN}" \
+    --arg alpn "$(effective_tls_alpn)" \
+    --arg fingerprint "$(effective_fingerprint)" \
+    --arg path "${XHTTP_PATH}" \
+    --arg ech_config_list "${XHTTP_ECH_CONFIG_LIST}" \
+    --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
+    --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
+    --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
+    --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
+    '{
+      xmux: $xmux,
+      downloadSettings: {
+        address: $cdn_domain,
+        port: 443,
+        network: "xhttp",
+        security: "tls",
+        tlsSettings: {
+          serverName: $cdn_domain,
+          allowInsecure: false,
+          alpn: [$alpn],
+          fingerprint: $fingerprint
+        },
+        xhttpSettings: {
+          host: $cdn_domain,
+          path: $path,
+          mode: "auto",
+          extra: $download_extra
+        }
+      }
+    } | '"${ech_settings_filter}"' | '"${xpadding_root_prefix}"
 }
 
 build_link_context() {
@@ -169,10 +330,16 @@ build_link_context() {
   local reality_label=""
   local xhttp_label=""
   local xhttp_split_label=""
+  local xhttp_reality_label=""
+  local xhttp_reverse_split_label=""
   local xhttp_extra_json=""
   local xhttp_extra_component=""
   local split_extra_json=""
   local split_extra_component=""
+  local reality_extra_json=""
+  local reality_extra_component=""
+  local reverse_split_extra_json=""
+  local reverse_split_extra_component=""
 
   xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
   xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
@@ -180,19 +347,32 @@ build_link_context() {
   reality_label="$(prefixed_node_label "REALITY")"
   xhttp_label="$(prefixed_node_label "XHTTP-CDN")"
   xhttp_split_label="$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")"
+  xhttp_reality_label="$(prefixed_node_label "XHTTP-REALITY")"
+  xhttp_reverse_split_label="$(prefixed_node_label "XHTTP-SPLIT-REALITY-CDN")"
 
   REALITY_URI="$(build_reality_uri "${reality_label}")"
+  reality_extra_json="$(build_xhttp_reality_extra_json)"
+  reality_extra_component="$(uri_encode "${reality_extra_json}")"
+  XHTTP_REALITY_URI="$(build_xhttp_reality_uri "${xhttp_reality_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${reality_extra_component}")"
   xhttp_extra_json="$(build_xhttp_extra_json)"
-  [[ -n "${xhttp_extra_json}" ]] && xhttp_extra_component="$(uri_encode "${xhttp_extra_json}")"
+  xhttp_extra_component="$(uri_encode "${xhttp_extra_json}")"
   XHTTP_URI="$(build_xhttp_uri "${xhttp_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${xhttp_extra_component}")"
   split_extra_json="$(build_xhttp_split_extra_json)"
   split_extra_component="$(uri_encode "${split_extra_json}")"
   XHTTP_SPLIT_URI="$(build_xhttp_uri "${xhttp_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${split_extra_component}")"
+  reverse_split_extra_json="$(build_xhttp_reverse_split_extra_json)"
+  reverse_split_extra_component="$(uri_encode "${reverse_split_extra_json}")"
+  XHTTP_REVERSE_SPLIT_URI="$(build_xhttp_reality_uri "${xhttp_reverse_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${reverse_split_extra_component}")"
 }
 
 subscription_raw_text() {
   build_link_context
-  printf '%s\n%s\n%s\n' "${REALITY_URI}" "${XHTTP_URI}" "${XHTTP_SPLIT_URI}"
+  printf '%s\n%s\n%s\n%s\n%s\n' \
+    "${REALITY_URI}" \
+    "${XHTTP_REALITY_URI}" \
+    "${XHTTP_URI}" \
+    "${XHTTP_SPLIT_URI}" \
+    "${XHTTP_REVERSE_SPLIT_URI}"
 }
 
 subscription_base64_text() {
@@ -341,7 +521,7 @@ output_xhttp_cdn_block() {
   local uri="${1}"
 
   cat <<EOF
-$(output_xhttp_block "节点 2")
+$(output_xhttp_block "节点 3")
 - 类型: VLESS + XHTTP + TLS + CDN
 - SNI: ${XHTTP_DOMAIN}
 - 主机名: ${XHTTP_DOMAIN}
@@ -359,10 +539,52 @@ output_xhttp_split_block() {
   local uri="${1}"
 
   cat <<EOF
-$(output_xhttp_block "节点 3")
+$(output_xhttp_block "节点 4")
 - 类型: 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality
 - 上行: XHTTP + TLS + CDN
 - 下行: XHTTP + Reality
+$(output_xhttp_shared_details)
+
+链接:
+${uri}
+EOF
+}
+
+output_xhttp_reality_block() {
+  local uri="${1}"
+
+  cat <<EOF
+## 节点 2
+- 类型: VLESS + XHTTP + Reality（上下行不分离）
+- 节点名前缀: ${NODE_LABEL_PREFIX}
+- 地址: ${SERVER_IP}
+- 端口: 443
+- UUID: ${XHTTP_UUID}
+- SNI: ${REALITY_SNI}
+- 公钥: ${REALITY_PUBLIC_KEY}
+- 短 ID: ${REALITY_SHORT_ID}
+- 指纹: $(effective_fingerprint)
+$(output_xhttp_shared_details)
+
+链接:
+${uri}
+EOF
+}
+
+output_xhttp_reverse_split_block() {
+  local uri="${1}"
+
+  cat <<EOF
+## 节点 5
+- 类型: 上行 XHTTP + Reality ｜ 下行 XHTTP + TLS + CDN
+- 节点名前缀: ${NODE_LABEL_PREFIX}
+- 上行地址: ${SERVER_IP}（Reality）
+- 下行地址: ${XHTTP_DOMAIN}（CDN+TLS）
+- UUID: ${XHTTP_UUID}
+- 上行 SNI: ${REALITY_SNI}
+- 公钥: ${REALITY_PUBLIC_KEY}
+- 短 ID: ${REALITY_SHORT_ID}
+- 指纹: $(effective_fingerprint)
 $(output_xhttp_shared_details)
 
 链接:
@@ -465,9 +687,13 @@ output_file_text() {
 
 $(output_reality_block "${REALITY_URI}")
 
+$(output_xhttp_reality_block "${XHTTP_REALITY_URI}")
+
 $(output_xhttp_cdn_block "${XHTTP_URI}")
 
 $(output_xhttp_split_block "${XHTTP_SPLIT_URI}")
+
+$(output_xhttp_reverse_split_block "${XHTTP_REVERSE_SPLIT_URI}")
 
 $(output_runtime_summary_block "${cf_ssl_mode}")
 

@@ -8,8 +8,8 @@
 usage() {
   local command_name=""
 
-  command_name="${XRAY_WARP_TEAM_COMMAND_NAME:-$(basename "${0}")}"
-  printf 'xray-warp-team.sh v%s\n' "${SCRIPT_VERSION}"
+  command_name="${XTUN_COMMAND_NAME:-$(basename "${0}")}"
+  printf 'xtun.sh v%s\n' "${SCRIPT_VERSION}"
   cat <<EOF
 
 用法:

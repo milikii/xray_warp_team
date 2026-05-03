@@ -59,6 +59,10 @@ run_warp_enabled_case() {
   assert_contains '&ech=' "${OUTPUT_FILE}"
   assert_contains 'extra=' "${OUTPUT_FILE}"
   assert_contains 'xPaddingObfsMode' "${OUTPUT_FILE}"
+  assert_contains 'xmux' "${OUTPUT_FILE}"
+  assert_contains 'maxConcurrency' "${OUTPUT_FILE}"
+  assert_contains 'hMaxReusableSecs' "${OUTPUT_FILE}"
+  assert_contains 'scMinPostsIntervalMs' "${OUTPUT_FILE}"
   assert_contains 'alpn=h2' "${OUTPUT_FILE}"
   assert_contains 'fingerprint=chrome' "${OUTPUT_FILE}"
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
@@ -78,7 +82,7 @@ run_warp_enabled_case() {
   [[ -f "${SUBSCRIPTION_RAW_FILE}" ]]
   [[ -f "${SUBSCRIPTION_BASE64_FILE}" ]]
   [[ -f "${SUBSCRIPTION_MANIFEST_FILE}" ]]
-  [[ "$(grep -c '^vless://' "${SUBSCRIPTION_RAW_FILE}")" -eq 3 ]]
+  [[ "$(grep -c '^vless://' "${SUBSCRIPTION_RAW_FILE}")" -eq 5 ]]
   base64 -d "${SUBSCRIPTION_BASE64_FILE}" | grep -q '^vless://'
   if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" || -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then
     return 1
@@ -135,6 +139,9 @@ run_warp_disabled_case() {
 
   assert_contains 'Cloudflare SSL/TLS 模式设置为 Full。' "${OUTPUT_FILE}"
   assert_contains 'encryption=none' "${OUTPUT_FILE}"
+  assert_contains 'xmux' "${OUTPUT_FILE}"
+  assert_contains 'maxConcurrency' "${OUTPUT_FILE}"
+  assert_contains 'scMinPostsIntervalMs' "${OUTPUT_FILE}"
 }
 
 run_warp_rules_file_case() {
@@ -241,19 +248,19 @@ run_service_config_helper_case() {
   workdir="$(mktemp -d)"
   NGINX_CONF_DIR="${workdir}/nginx"
   reset_feature_defaults
-  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
+  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
   HAPROXY_CONFIG="${workdir}/haproxy.cfg"
   XHTTP_DOMAIN="cdn.example.com"
   XHTTP_PATH="/assets/v3"
   XHTTP_LOCAL_PORT="8001"
   NGINX_TLS_PORT="8443"
-  TLS_CERT_FILE="/etc/ssl/xray-warp-team/cert.pem"
-  TLS_KEY_FILE="/etc/ssl/xray-warp-team/key.pem"
+  TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
+  TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
   CORE_HEALTH_HELPER="${workdir}/core-health.sh"
   CORE_HEALTH_SERVICE_FILE="${workdir}/core-health.service"
   CORE_HEALTH_TIMER_FILE="${workdir}/core-health.timer"
-  CORE_HEALTH_SERVICE_NAME="xray-warp-team-core-health.service"
-  CORE_HEALTH_TIMER_NAME="xray-warp-team-core-health.timer"
+  CORE_HEALTH_SERVICE_NAME="xtun-core-health.service"
+  CORE_HEALTH_TIMER_NAME="xtun-core-health.timer"
   HEALTH_STATE_FILE="${workdir}/health-state.env"
   HEALTH_HISTORY_FILE="${workdir}/health-history.log"
 
@@ -278,7 +285,7 @@ run_service_config_helper_case() {
   assert_contains "Unit=${CORE_HEALTH_SERVICE_NAME}" "${CORE_HEALTH_TIMER_FILE}"
   XRAY_LOGROTATE_FILE="${workdir}/xray-logrotate"
   write_xray_logrotate_config
-  assert_contains '/var/log/xray/access.log /var/log/xray/error.log /var/log/xray-warp-team/operations.log {' "${XRAY_LOGROTATE_FILE}"
+  assert_contains '/var/log/xray/access.log /var/log/xray/error.log /var/log/xtun/operations.log {' "${XRAY_LOGROTATE_FILE}"
   assert_contains 'rotate 7' "${XRAY_LOGROTATE_FILE}"
 }
 
@@ -319,7 +326,7 @@ run_generated_file_atomic_failure_case() {
   prepare_workspace "${workdir}"
   reset_feature_defaults
   NGINX_CONF_DIR="${workdir}/nginx"
-  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xray-warp-team.conf"
+  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
   HAPROXY_CONFIG="${workdir}/haproxy.cfg"
   mkdir -p "${NGINX_CONF_DIR}"
 

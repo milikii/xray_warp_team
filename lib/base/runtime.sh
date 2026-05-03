@@ -46,7 +46,7 @@ write_xray_logrotate_config() {
 
   tmp_file="$(mktemp)"
   cat > "${tmp_file}" <<'EOF'
-/var/log/xray/access.log /var/log/xray/error.log /var/log/xray-warp-team/operations.log {
+/var/log/xray/access.log /var/log/xray/error.log /var/log/xtun/operations.log {
   daily
   rotate 7
   missingok

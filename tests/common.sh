@@ -10,7 +10,7 @@ load_functions() {
   # 这样 smoke test 可以直接调用内部生成器
   # ------------------------------
   # shellcheck disable=SC1090
-  source <(sed '$d' "${ROOT_DIR}/xray-warp-team.sh")
+  source <(sed '$d' "${ROOT_DIR}/xtun.sh")
 }
 
 prepare_workspace() {
@@ -42,6 +42,8 @@ reset_feature_defaults() {
   REALITY_URI=""
   XHTTP_URI=""
   XHTTP_SPLIT_URI=""
+  XHTTP_REALITY_URI=""
+  XHTTP_REVERSE_SPLIT_URI=""
 }
 
 stub_side_effects() {

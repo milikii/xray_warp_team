@@ -3,15 +3,15 @@ run_usage_case() {
   local output=""
 
   workdir="$(mktemp -d)"
-  ln -s "${ROOT_DIR}/xray-warp-team.sh" "${workdir}/xray-warp-team"
-  output="$("${workdir}/xray-warp-team" help)"
+  ln -s "${ROOT_DIR}/xtun.sh" "${workdir}/xtun"
+  output="$("${workdir}/xtun" help)"
 
-  [[ "${output}" == *$'\n  xray-warp-team help'* ]]
-  [[ "${output}" == *$'\n  xray-warp-team install [参数]'* ]]
-  [[ "${output}" == *$'\n  xray-warp-team update-script'* ]]
-  [[ "${output}" == *$'\n  xray-warp-team renew-cert [参数]'* ]]
-  [[ "${output}" == *$'\n  xray-warp-team change-warp-rules [参数]'* ]]
-  [[ "${output}" == *$'\n  xray-warp-team diagnose'* ]]
+  [[ "${output}" == *$'\n  xtun help'* ]]
+  [[ "${output}" == *$'\n  xtun install [参数]'* ]]
+  [[ "${output}" == *$'\n  xtun update-script'* ]]
+  [[ "${output}" == *$'\n  xtun renew-cert [参数]'* ]]
+  [[ "${output}" == *$'\n  xtun change-warp-rules [参数]'* ]]
+  [[ "${output}" == *$'\n  xtun diagnose'* ]]
 }
 
 run_show_links_without_state_case() {
@@ -35,15 +35,15 @@ run_single_file_bootstrap_case() {
   local old_bundle=""
 
   workdir="$(mktemp -d)"
-  cp "${ROOT_DIR}/xray-warp-team.sh" "${workdir}/xray-warp-team.sh"
+  cp "${ROOT_DIR}/xtun.sh" "${workdir}/xtun.sh"
   old_bundle="${workdir}/old-bundle"
   mkdir -p "${old_bundle}/lib/base"
-  cp "${ROOT_DIR}/xray-warp-team.sh" "${old_bundle}/xray-warp-team.sh"
+  cp "${ROOT_DIR}/xtun.sh" "${old_bundle}/xtun.sh"
   printf '# helper\n' > "${old_bundle}/lib/base/helpers.sh"
 
-  output="$(XRAY_WARP_TEAM_SELF_INSTALL_DIR="${old_bundle}" XRAY_WARP_TEAM_SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team" XRAY_WARP_TEAM_BOOTSTRAP_ROOT="${ROOT_DIR}" bash "${workdir}/xray-warp-team.sh" help)"
-  [[ "${output}" == *$'\n  xray-warp-team.sh help'* ]]
-  [[ "${output}" == *$'\n  xray-warp-team.sh diagnose'* ]]
+  output="$(XTUN_SELF_INSTALL_DIR="${old_bundle}" XTUN_SELF_COMMAND_PATH="${workdir}/bin/xtun" XTUN_BOOTSTRAP_ROOT="${ROOT_DIR}" bash "${workdir}/xtun.sh" help)"
+  [[ "${output}" == *$'\n  xtun.sh help'* ]]
+  [[ "${output}" == *$'\n  xtun.sh diagnose'* ]]
 }
 
 run_bootstrap_archive_resolve_case() {
@@ -55,20 +55,20 @@ run_bootstrap_archive_resolve_case() {
 
   BOOTSTRAP_ARCHIVE_URL=""
   BOOTSTRAP_REPO_OWNER="milikii"
-  BOOTSTRAP_REPO_NAME="xray_warp_team"
+  BOOTSTRAP_REPO_NAME="xtun"
   BOOTSTRAP_BRANCH_REF="main"
 
   curl() {
     printf '%s' '{"sha":"0123456789abcdef0123456789abcdef01234567"}'
   }
   archive_url="$(bootstrap_resolve_archive_url)"
-  [[ "${archive_url}" == "https://codeload.github.com/milikii/xray_warp_team/tar.gz/0123456789abcdef0123456789abcdef01234567" ]]
+  [[ "${archive_url}" == "https://codeload.github.com/milikii/xtun/tar.gz/0123456789abcdef0123456789abcdef01234567" ]]
 
   curl() {
     return 99
   }
   archive_url="$(bootstrap_resolve_archive_url)"
-  [[ "${archive_url}" == "https://codeload.github.com/milikii/xray_warp_team/tar.gz/main" ]]
+  [[ "${archive_url}" == "https://codeload.github.com/milikii/xtun/tar.gz/main" ]]
 
   BOOTSTRAP_ARCHIVE_URL="https://example.invalid/custom.tar.gz"
   archive_url="$(bootstrap_resolve_archive_url)"
@@ -87,31 +87,31 @@ run_install_self_command_case() {
   local source_bundle=""
 
   workdir="$(mktemp -d)"
-  SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team"
+  SELF_COMMAND_PATH="${workdir}/bin/xtun"
   SELF_INSTALL_DIR="${workdir}/bundle"
-  SCRIPT_SELF="${ROOT_DIR}/xray-warp-team.sh"
+  SCRIPT_SELF="${ROOT_DIR}/xtun.sh"
   SCRIPT_ROOT="${ROOT_DIR}"
 
   install_self_command
 
   [[ -x "${SELF_COMMAND_PATH}" ]]
-  [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
+  [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
   [[ -f "${SELF_INSTALL_DIR}/lib/install.sh" ]]
 
   output="$("${SELF_COMMAND_PATH}" help)"
-  [[ "${output}" == *$'\n  xray-warp-team help'* ]]
-  [[ "${output}" == *$'\n  xray-warp-team install [参数]'* ]]
+  [[ "${output}" == *$'\n  xtun help'* ]]
+  [[ "${output}" == *$'\n  xtun install [参数]'* ]]
 
   source_bundle="${workdir}/source-bundle"
   cp -a "${SELF_INSTALL_DIR}" "${source_bundle}"
   SELF_INSTALL_DIR="${source_bundle}"
-  SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team-reinstall"
-  SCRIPT_SELF="${source_bundle}/xray-warp-team.sh"
+  SELF_COMMAND_PATH="${workdir}/bin/xtun-reinstall"
+  SCRIPT_SELF="${source_bundle}/xtun.sh"
   SCRIPT_ROOT="${source_bundle}"
 
   install_self_command
   [[ -x "${SELF_COMMAND_PATH}" ]]
-  [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
+  [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
   [[ -f "${SELF_INSTALL_DIR}/lib/ui/output.sh" ]]
 }
 
@@ -127,7 +127,7 @@ run_update_script_command_case() {
 
   workdir="$(mktemp -d)"
   SELF_INSTALL_DIR="${workdir}/bundle"
-  SELF_COMMAND_PATH="${workdir}/bin/xray-warp-team"
+  SELF_COMMAND_PATH="${workdir}/bin/xtun"
   SCRIPT_VERSION="0.4.5"
   original_install_bundle_fn="$(capture_function_definition install_bundle_root_to_self)"
   original_log_step_fn="$(capture_function_definition log_step)"
@@ -137,7 +137,7 @@ run_update_script_command_case() {
   need_root() { :; }
   start_backup_session() { BACKUP_DIR="${workdir}/backup"; }
   bootstrap_resolve_archive_url() {
-    printf '%s' "https://example.invalid/xray-warp-team.tar.gz"
+    printf '%s' "https://example.invalid/xtun.tar.gz"
   }
   curl() {
     local output_path=""
@@ -172,7 +172,7 @@ run_update_script_command_case() {
     done
 
     mkdir -p "${target_dir}/bundle/lib/base"
-    cat > "${target_dir}/bundle/xray-warp-team.sh" <<'EOF'
+    cat > "${target_dir}/bundle/xtun.sh" <<'EOF'
 #!/usr/bin/env bash
 SCRIPT_VERSION="9.9.9"
 EOF
@@ -201,8 +201,8 @@ EOF
   update_script_cmd
 
   [[ -x "${SELF_COMMAND_PATH}" ]]
-  [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
-  grep -q 'SCRIPT_VERSION="9.9.9"' "${SELF_INSTALL_DIR}/xray-warp-team.sh"
+  [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
+  grep -q 'SCRIPT_VERSION="9.9.9"' "${SELF_INSTALL_DIR}/xtun.sh"
   grep -q 'STEP:下载最新脚本 bundle。' <<< "${logged}"
   grep -q 'STEP:安装脚本 bundle。' <<< "${logged}"
   grep -q '当前版本：9.9.9' <<< "${logged}"
@@ -215,7 +215,7 @@ EOF
   restore_function_definition "${original_log_fn}"
   stdout_output="$(update_script_cmd 2>&1)"
   [[ -x "${SELF_COMMAND_PATH}" ]]
-  [[ -f "${SELF_INSTALL_DIR}/xray-warp-team.sh" ]]
+  [[ -f "${SELF_INSTALL_DIR}/xtun.sh" ]]
   grep -q '下载来源：' <<< "${stdout_output}"
   grep -q '当前已经是最新脚本 bundle。' <<< "${stdout_output}"
 
@@ -235,7 +235,7 @@ EOF
     done
 
     mkdir -p "${target_dir}/bundle/lib/base"
-    cat > "${target_dir}/bundle/xray-warp-team.sh" <<'EOF'
+    cat > "${target_dir}/bundle/xtun.sh" <<'EOF'
 #!/usr/bin/env bash
 SCRIPT_VERSION="9.9.9"
 echo changed
@@ -252,7 +252,7 @@ run_install_validation_case() {
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
 REALITY_SNI='bad"host'
 REALITY_TARGET='www.scu.edu:443'
@@ -268,7 +268,7 @@ EOF
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
 REALITY_SNI='reality.example.com'
 REALITY_TARGET='www.scu.edu:bad'
@@ -284,7 +284,7 @@ EOF
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
 REALITY_SNI='reality.example.com'
 REALITY_TARGET='www.scu.edu:443'
@@ -300,7 +300,7 @@ EOF
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 ENABLE_WARP="no"
 REALITY_SNI='reality.example.com'
 REALITY_TARGET='www.scu.edu:443'
@@ -341,7 +341,7 @@ run_prompt_reuse_case() {
   cat > "${script_file}" <<EOF
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 NON_INTERACTIVE=0
 SERVER_IP="203.0.113.10"
 prompt_with_default SERVER_IP "REALITY 直连节点地址或 IP" "198.51.100.10"
@@ -355,7 +355,7 @@ EOF
   cat > "${script_file}" <<EOF
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 NON_INTERACTIVE=0
 SERVER_IP="203.0.113.10"
 prompt_with_default SERVER_IP "REALITY 直连节点地址或 IP" "198.51.100.10"
@@ -369,7 +369,7 @@ EOF
   cat > "${script_file}" <<EOF
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 NON_INTERACTIVE=0
 ENABLE_WARP="yes"
 prompt_yes_no ENABLE_WARP "是否启用选择性 WARP 出站？ [y/n]" "y"
@@ -383,7 +383,7 @@ EOF
   cat > "${script_file}" <<EOF
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 NON_INTERACTIVE=0
 WARP_CLIENT_SECRET="secret-old"
 prompt_secret WARP_CLIENT_SECRET "Cloudflare 服务令牌 Client Secret"
@@ -431,7 +431,7 @@ run_install_xray_checksum_failure_case() {
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 detect_xray_arch() { printf '64'; }
 curl() {
   case "\$*" in
@@ -457,7 +457,7 @@ run_install_packages_failure_case() {
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 apt-get() {
   return 1
 }
@@ -599,7 +599,7 @@ run_sensitive_option_reject_case() {
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 parse_install_args --warp-client-secret direct-secret
 EOF
 )"; then
@@ -614,7 +614,7 @@ run_preflight_token_verify_case() {
   if ! output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 curl() {
   printf '%s' '{"success":true}'
 }
@@ -631,7 +631,7 @@ EOF
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 curl() {
   printf '%s' '{"success":false}'
 }
@@ -649,7 +649,7 @@ run_preflight_domain_resolution_warning_case() {
   if ! output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 getent() {
   return 2
 }
@@ -671,7 +671,7 @@ run_warp_rule_normalize_case() {
   if output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 normalize_warp_rules_text \$'bad rule with space'
 EOF
 )"; then
@@ -694,7 +694,7 @@ run_warp_repo_file_mode_case() {
   if ! output="$(bash <<EOF 2>&1
 set -Eeuo pipefail
 ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xray-warp-team.sh")
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
 tmp_dir="\$(mktemp -d)"
 WARP_APT_KEYRING="\${tmp_dir}/cloudflare-warp-archive-keyring.gpg"
 WARP_APT_SOURCE_LIST="\${tmp_dir}/cloudflare-client.list"

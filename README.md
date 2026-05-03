@@ -1,4 +1,4 @@
-# xray_warp_team
+# xtun
 
 一个面向 Debian / Ubuntu VPS 的一键部署脚本，用来在一台机器上稳定搭建：
 
@@ -13,25 +13,25 @@
 脚本主入口：
 
 ```bash
-xray-warp-team.sh
+xtun.sh
 ```
 
 安装完成后会自动落到：
 
 ```bash
-/usr/local/sbin/xray-warp-team
+/usr/local/sbin/xtun
 ```
 
 对应的脚本 bundle 会放到：
 
 ```bash
-/usr/local/lib/xray-warp-team
+/usr/local/lib/xtun
 ```
 
 命令约定：
 
-- 第一次安装：`bash xray-warp-team.sh`
-- 安装完成后的维护：`xray-warp-team`
+- 第一次安装：`bash xtun.sh`
+- 安装完成后的维护：`xtun`
 
 ## 当前脚本架构
 
@@ -100,7 +100,7 @@ xray-warp-team.sh
 
 敏感参数建议不要直接写在 shell history 里。当前脚本支持：
 
-- 直接用环境变量，例如：`WARP_CLIENT_SECRET=xxx bash xray-warp-team.sh install ...`
+- 直接用环境变量，例如：`WARP_CLIENT_SECRET=xxx bash xtun.sh install ...`
 - 用 `@文件路径` 读取，例如：`--warp-client-secret @/root/secret.txt`
 
 从 `0.4.9` 开始，下面这些敏感参数不再接受“命令行直接明文传值”：
@@ -119,8 +119,8 @@ xray-warp-team.sh
 现在可以直接用单文件入口启动，脚本会自动处理 bundle：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/milikii/xray_warp_team/main/xray-warp-team.sh -o xray-warp-team.sh
-bash xray-warp-team.sh
+curl -fsSL https://raw.githubusercontent.com/milikii/xtun/main/xtun.sh -o xtun.sh
+bash xtun.sh
 ```
 
 不带参数时会进入菜单。第一次安装一般直接选：
@@ -133,20 +133,20 @@ bash xray-warp-team.sh
 
 - 如果当前目录已经有完整 `lib/`，脚本会直接本地运行
 - 如果当前目录只有单文件入口，脚本会自动拉取完整 bundle 后再执行
-- 如果机器上已经装过 `/usr/local/lib/xray-warp-team`，也会优先复用已安装 bundle
+- 如果机器上已经装过 `/usr/local/lib/xtun`，也会优先复用已安装 bundle
 
 ### 交互安装失败后怎么继续
 
 交互安装时，脚本会把你已经填过的值先保存到：
 
 ```bash
-/root/.xray-warp-team-install-draft.env
+/root/.xtun-install-draft.env
 ```
 
 如果中途在预检、下载、证书、WARP 或配置校验阶段失败，再次执行：
 
 ```bash
-bash xray-warp-team.sh
+bash xtun.sh
 ```
 
 脚本会自动带回上次已经填过的值，不需要从头重新输入。安装成功后，这个 draft 文件会自动删除。
@@ -156,7 +156,7 @@ bash xray-warp-team.sh
 下面是推荐的最小安装方式：
 
 ```bash
-bash xray-warp-team.sh install --non-interactive \
+bash xtun.sh install --non-interactive \
   --server-ip 203.0.113.10 \
   --node-label-prefix HKG \
   --reality-sni reality.example.com \
@@ -175,7 +175,7 @@ bash xray-warp-team.sh install --non-interactive \
 
 ```bash
 export WARP_CLIENT_SECRET=xxxxxxxxx
-bash xray-warp-team.sh install --non-interactive \
+bash xtun.sh install --non-interactive \
   --server-ip 203.0.113.10 \
   --node-label-prefix HKG \
   --reality-sni reality.example.com \
@@ -192,7 +192,7 @@ bash xray-warp-team.sh install --non-interactive \
 如果你明确不需要 WARP：
 
 ```bash
-bash xray-warp-team.sh install --non-interactive \
+bash xtun.sh install --non-interactive \
   ... \
   --disable-warp
 ```
@@ -200,7 +200,7 @@ bash xray-warp-team.sh install --non-interactive \
 如果你明确不想启用 `XHTTP VLESS Encryption`：
 
 ```bash
-bash xray-warp-team.sh install --non-interactive \
+bash xtun.sh install --non-interactive \
   ... \
   --disable-xhttp-vless-encryption
 ```
@@ -217,7 +217,7 @@ bash xray-warp-team.sh install --non-interactive \
 - 配置校验或服务重启失败时，会自动回滚最近一次托管变更
 - 如果安装在运行时 / 可选组件 / 最终启动阶段失败，会自动回滚 bundle、Xray 核心和托管配置
 - 安装、升级、校验、重启、回滚都会输出阶段日志，便于直接判断卡在哪一步
-- 所有操作会额外落盘到 `/var/log/xray-warp-team/operations.log`
+- 所有操作会额外落盘到 `/var/log/xtun/operations.log`
 - 每次有备份目录的操作，还会把本次会话日志写到 `${BACKUP_DIR}/operation.log`
 - 状态文件带 `STATE_VERSION`，脚本读取旧版本状态文件时会给出提示
 - 交互安装失败后会保留一份安装 draft，方便再次进入时继续填写
@@ -230,18 +230,18 @@ bash xray-warp-team.sh install --non-interactive \
 
 脚本会托管：
 
-- `/usr/local/sbin/xray-warp-team`
-- `/usr/local/lib/xray-warp-team`
+- `/usr/local/sbin/xtun`
+- `/usr/local/lib/xtun`
 - `/usr/local/etc/xray/config.json`
-- `/etc/nginx/conf.d/xray-warp-team.conf`
+- `/etc/nginx/conf.d/xtun.conf`
 - `/etc/systemd/system/xray.service`
 - `/usr/local/etc/xray/node-meta.env`
-- `/root/xray-warp-team-output.md`
-- `/root/xray-warp-team-subscriptions/vless-raw.txt`
-- `/root/xray-warp-team-subscriptions/vless-base64.txt`
-- `/root/xray-warp-team-subscriptions/manifest.txt`
+- `/root/xtun-output.md`
+- `/root/xtun-subscriptions/vless-raw.txt`
+- `/root/xtun-subscriptions/vless-base64.txt`
+- `/root/xtun-subscriptions/manifest.txt`
 
-如果系统里有 `qrencode`，还会在 `/root/xray-warp-team-subscriptions/qr/` 生成订阅二维码 PNG；没有 `qrencode` 时只跳过二维码，不影响安装。
+如果系统里有 `qrencode`，还会在 `/root/xtun-subscriptions/qr/` 生成订阅二维码 PNG；没有 `qrencode` 时只跳过二维码，不影响安装。
 
 安装成功后会导出 3 个节点：
 
@@ -260,7 +260,7 @@ bash xray-warp-team.sh install --non-interactive \
 如果你明确要测试 ECH / xpadding，可以在安装时显式开启：
 
 ```bash
-bash xray-warp-team.sh install --non-interactive \
+bash xtun.sh install --non-interactive \
   ... \
   --enable-xhttp-ech \
   --enable-xhttp-xpadding
@@ -334,7 +334,7 @@ Telegram 默认直连。
 先看面板：
 
 ```bash
-xray-warp-team status
+xtun status
 ```
 
 再看原始服务状态：
@@ -354,19 +354,19 @@ sed -n '1,200p' /var/lib/cloudflare-warp/mdm.xml
 关闭：
 
 ```bash
-xray-warp-team change-warp --disable-warp
+xtun change-warp --disable-warp
 ```
 
 重新启用：
 
 ```bash
-xray-warp-team change-warp --enable-warp
+xtun change-warp --enable-warp
 ```
 
 如果要重新指定 WARP Team 参数：
 
 ```bash
-xray-warp-team change-warp --enable-warp \
+xtun change-warp --enable-warp \
   --warp-team your-team \
   --warp-client-id xxxxx.access \
   --warp-client-secret xxxxx \
@@ -375,9 +375,9 @@ xray-warp-team change-warp --enable-warp \
 
 启用后还会自动安装：
 
-- `/usr/local/sbin/xray-warp-team-warp-health.sh`
-- `xray-warp-team-warp-health.service`
-- `xray-warp-team-warp-health.timer`
+- `/usr/local/sbin/xtun-warp-health.sh`
+- `xtun-warp-health.service`
+- `xtun-warp-health.timer`
 
 它会定期探测本地 WARP SOCKS5 是否还能正常获取出口 IP；如果失败，会自动执行 `mdm refresh + restart warp-svc`。
 
@@ -386,25 +386,25 @@ xray-warp-team change-warp --enable-warp \
 查看当前生效规则：
 
 ```bash
-xray-warp-team change-warp-rules --list
+xtun change-warp-rules --list
 ```
 
 新增一个域名：
 
 ```bash
-xray-warp-team change-warp-rules --add-domain chat.openai.com
+xtun change-warp-rules --add-domain chat.openai.com
 ```
 
 删除一个域名：
 
 ```bash
-xray-warp-team change-warp-rules --del-domain github.com
+xtun change-warp-rules --del-domain github.com
 ```
 
 恢复到脚本默认规则集合：
 
 ```bash
-xray-warp-team change-warp-rules --reset-defaults
+xtun change-warp-rules --reset-defaults
 ```
 
 说明：
@@ -443,7 +443,7 @@ xray-warp-team change-warp-rules --reset-defaults
 本机已有文件示例：
 
 ```bash
-bash xray-warp-team.sh install \
+bash xtun.sh install \
   --cert-mode existing \
   --cert-file /etc/ssl/cloudflare/cert.pem \
   --key-file /etc/ssl/cloudflare/key.pem
@@ -452,7 +452,7 @@ bash xray-warp-team.sh install \
 直接传 PEM 内容示例：
 
 ```bash
-bash xray-warp-team.sh install \
+bash xtun.sh install \
   --cert-mode existing \
   --cert-pem "$(cat /etc/ssl/cloudflare/cert.pem)" \
   --key-pem "$(cat /etc/ssl/cloudflare/key.pem)"
@@ -529,7 +529,7 @@ bash xray-warp-team.sh install \
 ### 查看状态
 
 ```bash
-xray-warp-team status
+xtun status
 ```
 
 当前状态面板除了 systemd 状态，还会额外显示：
@@ -539,7 +539,7 @@ xray-warp-team status
 - `WARP` 出口 IP 探测结果
 - 当前 `WARP` 规则数量
 - 最近一次备份目录
-- `xray-warp-team-warp-health.timer` 的运行状态
+- `xtun-warp-health.timer` 的运行状态
 - 最近一次核心 / WARP 自恢复结果
 - 最近一条自恢复历史记录
 - 近 1 小时 / 24 小时的核心与 WARP 自恢复次数
@@ -548,13 +548,13 @@ xray-warp-team status
 ### 查看原始 systemd 输出
 
 ```bash
-xray-warp-team status --raw
+xtun status --raw
 ```
 
 ### 一次性运行服务端诊断
 
 ```bash
-xray-warp-team diagnose
+xtun diagnose
 ```
 
 这个命令会集中输出：
@@ -577,13 +577,13 @@ xray-warp-team diagnose
 ### 查看节点链接
 
 ```bash
-xray-warp-team show-links
+xtun show-links
 ```
 
 如果系统里装了 `qrencode`，也可以直接输出二维码：
 
 ```bash
-xray-warp-team show-links --qr
+xtun show-links --qr
 ```
 
 ### 查看订阅文件
@@ -591,7 +591,7 @@ xray-warp-team show-links --qr
 安装和每次变更后，脚本会刷新本地订阅文件：
 
 ```bash
-ls -l /root/xray-warp-team-subscriptions
+ls -l /root/xtun-subscriptions
 ```
 
 其中：
@@ -604,37 +604,37 @@ ls -l /root/xray-warp-team-subscriptions
 ### 修改 REALITY 域名 / SNI
 
 ```bash
-xray-warp-team change-sni --reality-sni reality.example.com
+xtun change-sni --reality-sni reality.example.com
 ```
 
 ### 修改 XHTTP 路径
 
 ```bash
-xray-warp-team change-path --xhttp-path /assets/v3
+xtun change-path --xhttp-path /assets/v3
 ```
 
 ### 修改节点名前缀
 
 ```bash
-xray-warp-team change-label-prefix --node-label-prefix HKG
+xtun change-label-prefix --node-label-prefix HKG
 ```
 
 ### 轮换 UUID
 
 ```bash
-xray-warp-team change-uuid
+xtun change-uuid
 ```
 
 只换 REALITY：
 
 ```bash
-xray-warp-team change-uuid --reality-only
+xtun change-uuid --reality-only
 ```
 
 只换 XHTTP：
 
 ```bash
-xray-warp-team change-uuid --xhttp-only
+xtun change-uuid --xhttp-only
 ```
 
 `change-*` 命令现在都会输出阶段日志；如果应用新配置后校验失败或重启失败，会自动回滚最近一次托管变更。
@@ -642,23 +642,23 @@ xray-warp-team change-uuid --xhttp-only
 ### 开关 WARP
 
 ```bash
-xray-warp-team change-warp --disable-warp
+xtun change-warp --disable-warp
 ```
 
 ```bash
-xray-warp-team change-warp --enable-warp
+xtun change-warp --enable-warp
 ```
 
 ### 修改 WARP 分流规则
 
 ```bash
-xray-warp-team change-warp-rules --add-domain chat.openai.com
+xtun change-warp-rules --add-domain chat.openai.com
 ```
 
 ### 切换证书模式
 
 ```bash
-xray-warp-team change-cert-mode --cert-mode existing \
+xtun change-cert-mode --cert-mode existing \
   --cert-file /etc/ssl/cloudflare/cert.pem \
   --key-file /etc/ssl/cloudflare/key.pem
 ```
@@ -666,7 +666,7 @@ xray-warp-team change-cert-mode --cert-mode existing \
 ### 续期 / 刷新当前证书
 
 ```bash
-xray-warp-team renew-cert
+xtun renew-cert
 ```
 
 说明：
@@ -679,13 +679,13 @@ xray-warp-team renew-cert
 敏感参数请使用环境变量或 `@文件路径`：
 
 ```bash
-CF_DNS_TOKEN=xxxxxxxx xray-warp-team renew-cert --non-interactive
+CF_DNS_TOKEN=xxxxxxxx xtun renew-cert --non-interactive
 ```
 
 ### 升级 Xray 核心
 
 ```bash
-xray-warp-team upgrade
+xtun upgrade
 ```
 
 说明：
@@ -697,19 +697,19 @@ xray-warp-team upgrade
 ### 重启服务
 
 ```bash
-xray-warp-team restart
+xtun restart
 ```
 
 ### 更新脚本本身
 
 ```bash
-xray-warp-team update-script
+xtun update-script
 ```
 
 说明：
 
-- 会下载最新脚本 bundle 并覆盖 `/usr/local/lib/xray-warp-team`
-- 会同时更新 `/usr/local/sbin/xray-warp-team` wrapper
+- 会下载最新脚本 bundle 并覆盖 `/usr/local/lib/xtun`
+- 会同时更新 `/usr/local/sbin/xtun` wrapper
 - 如果 bundle 安装失败，会自动回滚到更新前的持久化脚本文件
 
 ### 抢修权限
@@ -723,7 +723,7 @@ xray-warp-team update-script
 先直接跑：
 
 ```bash
-xray-warp-team repair-perms
+xtun repair-perms
 ```
 
 这个命令会：
@@ -737,7 +737,7 @@ xray-warp-team repair-perms
 ### 卸载脚本托管文件
 
 ```bash
-xray-warp-team uninstall --yes
+xtun uninstall --yes
 ```
 
 说明：
@@ -749,7 +749,7 @@ xray-warp-team uninstall --yes
 ### 完全卸载（含软件包）
 
 ```bash
-xray-warp-team uninstall --purge --yes
+xtun uninstall --purge --yes
 ```
 
 说明：
@@ -764,14 +764,14 @@ xray-warp-team uninstall --purge --yes
 - 还会额外清理：
   - `/root/.acme.sh`
   - `/var/lib/cloudflare-warp`
-  - `/var/log/xray-warp-team`
+  - `/var/log/xtun`
 
 ### 操作日志
 
 全局日志：
 
 ```bash
-/var/log/xray-warp-team/operations.log
+/var/log/xtun/operations.log
 ```
 
 单次会话日志：
@@ -868,8 +868,8 @@ ${BACKUP_DIR}/operation.log
 建议第一步先跑：
 
 ```bash
-xray-warp-team repair-perms
-xray-warp-team status
+xtun repair-perms
+xtun status
 ```
 
 如果刚做过 `install`、`change-*`、`upgrade`，也建议顺手看一下终端里最后几条 `[步骤] / [完成] / [警告]` 输出。当前脚本已经会明确告诉你失败是出在：
@@ -892,9 +892,9 @@ xray-warp-team status
 
 相关文件：
 
-- `/etc/sysctl.d/98-xray-warp-team-net.conf`
-- `/usr/local/sbin/xray-warp-team-net-optimize.sh`
-- `xray-warp-team-net-optimize.service`
+- `/etc/sysctl.d/98-xtun-net.conf`
+- `/usr/local/sbin/xtun-net-optimize.sh`
+- `xtun-net-optimize.service`
 
 ## 客户端导出
 
@@ -908,7 +908,7 @@ xray-warp-team status
 
 - 不再额外附带其它客户端结构化片段
 - `XHTTP-SPLIT` 节点的客户端兼容差异更大，继续建议直接使用脚本生成的原始分享链接导入
-- 订阅文件单独写在 `/root/xray-warp-team-subscriptions/`，不会混进 Markdown 输出文件
+- 订阅文件单独写在 `/root/xtun-subscriptions/`，不会混进 Markdown 输出文件
 - 当前只生成 raw/base64 VLESS 订阅；原生 Mihomo YAML 暂不生成，避免把 XHTTP split / ECH / xpadding 映射错
 - 输出文件最后会单独附上一节 `XHTTP 缓存绕过（重要）`，按步骤指导你去 Cloudflare 面板创建 `Bypass cache` 规则
 

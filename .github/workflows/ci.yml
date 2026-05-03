@@ -19,7 +19,7 @@ jobs:
           sudo apt-get install -y shellcheck jq openssl
 
       - name: Run Shellcheck
-        run: shellcheck xray-warp-team.sh $(find lib tests -type f -name '*.sh' | sort)
+        run: shellcheck xtun.sh $(find lib tests -type f -name '*.sh' | sort)
 
       - name: Run Smoke Tests
         run: bash tests/smoke.sh
