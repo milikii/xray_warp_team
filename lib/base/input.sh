@@ -295,6 +295,34 @@ resolve_value_source() {
     [[ -f "${file_path}" ]] || die "${var_name} 指向的文件不存在：${file_path}"
     printf -v "${var_name}" '%s' "$(<"${file_path}")"
   fi
+
+  sanitize_indirect_value "${var_name}"
+}
+
+# 这里进来的全是从文件或环境变量里拿的密钥类值，而这两个来源都会带上看不见的字节：
+#   - `$(<file)` 只剪掉结尾的换行，\r 一个不动。令牌文件是在 Windows 上存的、
+#     或者从网页复制粘贴过一手，内容就是 `token\r`。
+#   - 环境变量同理，CI 的 secret 往回喂一层命令替换也只剪 \n。
+# 后果按消费者不同，从「明显」到「查不出来」：WARP 私钥的 44 位 base64 正则会当场
+# 拒掉（操作员盯着一个数出来正好 44 位的密钥发懵）；而 Cloudflare 令牌带 \r 时
+# curl 会把这个裸 CR 原样塞进 Authorization 头发出去（实测 curl 8.14 不拦），
+# Cloudflare 回 401，装到后面 acme.sh 签发那一步才炸。
+# warp_profile_value 早就在自己那头 `tr -d '\r'` 了——说明这个坑踩过一次，
+# 只是当时补在了消费者上，源头没补，于是别的消费者一个没落下都还在踩。
+# 补在源头：所有 \r 一律删掉（PEM 的 CRLF 变 LF 反而是规范形态），
+# 首尾空白整体剪掉（令牌、密钥、Endpoint、PEM 都不可能以空白开头或结尾）。
+# 内部换行不动——PEM 和 wgcf profile 靠它。
+sanitize_indirect_value() {
+  local var_name="${1}"
+  local value=""
+
+  value="${!var_name:-}"
+  [[ -n "${value}" ]] || return 0
+
+  value="${value//$'\r'/}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf -v "${var_name}" '%s' "${value}"
 }
 
 prompt_secret() {
@@ -321,6 +349,8 @@ prompt_secret() {
   fi
   printf '\n'
   printf -v "${var_name}" '%s' "${answer}"
+  # 手工粘贴的令牌很容易带上一个尾随空格，和 @文件路径 那条路是同一个坑。
+  sanitize_indirect_value "${var_name}"
 }
 
 prompt_multiline_value() {
@@ -351,6 +381,11 @@ prompt_multiline_value() {
 
   current_value=""
   while IFS= read -r line; do
+    # 真正的 tty 会把 CR 映射成 NL（ICRNL 默认开着），所以交互粘贴看不到 \r；
+    # 但 stdin 是管道或文件时不映射。那时 CRLF 输入的结束行是 `EOF\r`，
+    # 和 "EOF" 比不相等，循环就永远等不到结束标记，一路读到 stdin 关闭，
+    # 于是这段内容里凭空多一行字面的 EOF——粘进来的 PEM 当场作废。
+    line="${line//$'\r'/}"
     if [[ "${line}" == "EOF" ]]; then
       break
     fi
@@ -360,6 +395,7 @@ prompt_multiline_value() {
   current_value="${current_value%$'\n'}"
   [[ -n "${current_value}" ]] || die "${var_name} 内容不能为空。"
   printf -v "${var_name}" '%s' "${current_value}"
+  sanitize_indirect_value "${var_name}"
 }
 
 prompt_yes_no() {

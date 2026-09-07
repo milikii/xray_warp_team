@@ -363,6 +363,56 @@ run_value_source_case() {
   unset WARP_ADDRESS_V4
 }
 
+# 上面那条只喂了以 \n 结尾的干净文件。`$(<file)` 只剪结尾的换行，\r 一个不动，
+# 而令牌文件在 Windows 上存过一手、或者从网页复制粘贴过来，内容就是 `token\r`。
+# 带 \r 的令牌 curl 会把裸 CR 原样塞进 Authorization 头发出去（实测 curl 8.14 不拦），
+# Cloudflare 回 401；带 \r 的 WARP 私钥会被 44 位 base64 正则当场拒掉，
+# 操作员盯着一个数出来正好 44 位的密钥发懵。多出来的字节看不见，报错也不提它。
+run_indirect_value_sanitize_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+
+  # Windows 换行的令牌文件
+  printf 'cf-token-abc123\r\n' > "${workdir}/token.crlf"
+  CF_DNS_TOKEN="@${workdir}/token.crlf"
+  resolve_value_source CF_DNS_TOKEN
+  [[ "${CF_DNS_TOKEN}" == "cf-token-abc123" ]]
+
+  # 首尾空白和多余空行
+  printf '  cf-token-def456  \n\n' > "${workdir}/token.pad"
+  CF_API_TOKEN="@${workdir}/token.pad"
+  resolve_value_source CF_API_TOKEN
+  [[ "${CF_API_TOKEN}" == "cf-token-def456" ]]
+
+  # 环境变量来源同样会带上 \r（CI 的 secret 往回喂一层命令替换也只剪 \n）
+  WARP_PRIVATE_KEY=""
+  export WARP_PRIVATE_KEY="${TEST_WARP_PRIVATE_KEY}"$'\r'
+  resolve_value_source WARP_PRIVATE_KEY
+  [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  is_valid_wireguard_key "${WARP_PRIVATE_KEY}"
+  unset WARP_PRIVATE_KEY
+
+  # PEM 是多行的：\r 要删，内部换行一行都不能少，删完还得是能解析的证书
+  openssl req -x509 -newkey rsa:2048 -keyout "${workdir}/k.pem" -out "${workdir}/c.pem" \
+    -days 1 -nodes -subj '/CN=xtun-test' 2>/dev/null
+  sed 's/$/\r/' "${workdir}/c.pem" > "${workdir}/c.crlf.pem"
+  CERT_SOURCE_PEM="@${workdir}/c.crlf.pem"
+  resolve_value_source CERT_SOURCE_PEM
+  printf '%s\n' "${CERT_SOURCE_PEM}" > "${workdir}/out.pem"
+  assert_absent $'\r' "${workdir}/out.pem"
+  [[ "$(wc -l < "${workdir}/out.pem")" -eq "$(wc -l < "${workdir}/c.pem")" ]]
+  openssl x509 -in "${workdir}/out.pem" -noout -subject >/dev/null
+
+  # 本来就干净的值不许被动到
+  printf 'plain-token\n' > "${workdir}/token.lf"
+  CF_DNS_TOKEN="@${workdir}/token.lf"
+  resolve_value_source CF_DNS_TOKEN
+  [[ "${CF_DNS_TOKEN}" == "plain-token" ]]
+
+  rm -rf "${workdir}"
+}
+
 run_prompt_reuse_case() {
   local output=""
   local script_file=""
@@ -652,39 +702,94 @@ EOF
   printf '%s' "${output}" | grep -q '不支持直接明文传值'
 }
 
+# curl 的桩必须和真 curl 的契约一致，不然测出来的是桩的脾气不是代码的。
+# 不带 -f 时：HTTP 错误照样退 0，body 原样给出来，-w '\n%{http_code}' 把状态码接在
+# 最后一行；连不上时状态码是 000 且 body 为空。
+# 这个桩以前是 `printf '%s' '{"success":false}'` 然后退 0——真 curl 带着 -f
+# 永远不会这样，它把出错响应的 body 整个丢掉、退 22。桩比真货听话，于是
+# 「任何坏令牌都被预检放行」这个缺陷在测试全绿的情况下活了下来。
+preflight_token_probe() {
+  local body="${1}"
+  local http_code="${2}"
+  local workdir="${3}"
+
+  printf '%s\n%s' "${body}" "${http_code}" > "${workdir}/response"
+  ROOT_DIR="${ROOT_DIR}" STUB_RESPONSE="${workdir}/response" \
+    bash "${workdir}/probe.sh" 2>&1
+}
+
 run_preflight_token_verify_case() {
+  local workdir=""
   local output=""
 
-  if ! output="$(bash <<EOF 2>&1
+  workdir="$(mktemp -d)"
+  cat > "${workdir}/probe.sh" <<'PROBE'
 set -Eeuo pipefail
-ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
-curl() {
-  printf '%s' '{"success":true}'
-}
-jq() {
-  return 99
-}
+# shellcheck disable=SC1090
+source <(sed '$d' "${ROOT_DIR}/xtun.sh")
+curl() { cat "${STUB_RESPONSE}"; }
+# 预检跑在安装包之前，宿主机可能还没有 jq——那条路要退回 sed 取错误信息。
+if [[ -n "${STUB_NO_JQ:-}" ]]; then
+  command() {
+    if [[ "${1:-}" == "-v" && "${2:-}" == "jq" ]]; then
+      return 1
+    fi
+    builtin command "$@"
+  }
+  jq() { return 99; }
+fi
 verify_cloudflare_token "token-value" "Cloudflare API Token"
-EOF
-)"; then
-    return 1
-  fi
+PROBE
+
+  # 令牌没问题
+  output="$(preflight_token_probe '{"success":true}' 200 "${workdir}")"
   printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验通过'
 
-  if output="$(bash <<EOF 2>&1
-set -Eeuo pipefail
-ROOT_DIR="${ROOT_DIR}"
-source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
-curl() {
-  printf '%s' '{"success":false}'
-}
-verify_cloudflare_token "token-value" "Cloudflare API Token"
-EOF
-)"; then
+  # 令牌是坏的：Cloudflare 回 401 加一段说清了原因的 JSON，必须死掉，
+  # 而且要把它自己的错误信息带出来——「令牌不对」和「权限不够」是两回事
+  if output="$(preflight_token_probe \
+    '{"success":false,"errors":[{"code":1000,"message":"Invalid API Token"}],"messages":[],"result":null}' \
+    401 "${workdir}")"; then
+    printf '[fail] 401 + Invalid API Token 时预检没有失败\n' >&2
     return 1
   fi
   printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验未通过'
+  printf '%s' "${output}" | grep -q 'HTTP 401'
+  printf '%s' "${output}" | grep -q 'Invalid API Token'
+
+  # 权限不足是另一条要给操作员看的信息
+  if output="$(preflight_token_probe \
+    '{"success":false,"errors":[{"code":9109,"message":"Unauthorized to access requested resource"}]}' \
+    403 "${workdir}")"; then
+    printf '[fail] 403 权限不足时预检没有失败\n' >&2
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'Unauthorized to access requested resource'
+
+  # 关键的回归钉子：Cloudflare 答了话但 body 为空。旧代码「响应为空就当没连上」
+  # 正是在这里放行的——答了话就不能再算没连上。
+  if output="$(preflight_token_probe '' 403 "${workdir}")"; then
+    printf '[fail] body 为空的 403 被当成「没连上」放行了\n' >&2
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'Cloudflare API Token 校验未通过'
+  printf '%s' "${output}" | grep -q 'HTTP 403'
+
+  # 真的连不上（状态码 000）才保留原来的宽容行为：警告一句然后放过
+  output="$(preflight_token_probe '' 000 "${workdir}")"
+  printf '%s' "${output}" | grep -q '无法在线校验 Cloudflare API Token'
+  assert_false grep -q '校验未通过' <<< "${output}"
+
+  # 没有 jq 时错误信息退回 sed 取，不能因此变成空话
+  if output="$(STUB_NO_JQ=1 preflight_token_probe \
+    '{"success":false,"errors":[{"code":1000,"message":"Invalid API Token"}],"messages":[]}' \
+    401 "${workdir}")"; then
+    printf '[fail] 没有 jq 时 401 没有让预检失败\n' >&2
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q 'Invalid API Token'
+
+  rm -rf "${workdir}"
 }
 
 run_preflight_domain_resolution_warning_case() {

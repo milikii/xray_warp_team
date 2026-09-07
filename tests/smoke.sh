@@ -175,6 +175,7 @@ main() {
     run_update_script_command_case
     run_logging_case
     run_value_source_case
+    run_indirect_value_sanitize_case
     run_prompt_reuse_case
     run_install_validation_case
     run_xray_digest_parse_case

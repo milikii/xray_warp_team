@@ -459,23 +459,64 @@ preflight_check_domain_resolution() {
   warn "预检提示：${label} 当前解析为 ${resolved_ip}，如果使用了 Cloudflare 橙云，这可能是正常现象。"
 }
 
+# 这里以前是 `curl -fsSL ... || true`，然后「响应为空就当没连上，跳过校验并返回 0」。
+# -f 的作用恰恰是把出错响应的 body 整个丢掉、只留一个退出码 22——而 Cloudflare 对一个
+# 坏令牌回的正是 401 加一段说清了原因的 JSON（实测：
+# {"success":false,"errors":[{"code":1000,"message":"Invalid API Token"}]}）。
+# 于是「令牌被拒」和「网络不通」被压成同一件事：任何拼错、吊销、权限不足的令牌都会
+# 印一句「无法在线校验，已跳过权限验证」然后放行。die 那条分支要求 HTTP 2xx 且
+# success:false，Cloudflare 不这么回——也就是说这个预检存在的唯一目的（在装之前拦住
+# 坏令牌）一次都没实现过，还顺手把锅甩给了网络。
+# 代价是真的：acme-dns-cf 模式下要一路装完包、装完 xray、写完配置，才在 acme.sh
+# 签发那一步炸；走 change-cert-mode 的话是整个托管变更回滚一次。
+# 改成不带 -f，把 http_code 单独取出来：拿不到状态码（000）才是真的没连上，
+# 这时才保留原来的宽容行为。Cloudflare 答了话就按它说的办，并把它自己的错误信息
+# 带出来——「Invalid API Token」和「Unauthorized to access requested resource」
+# 对操作员是两件完全不同的事。
 verify_cloudflare_token() {
   local token="${1}"
   local label="${2}"
   local response=""
+  local http_code=""
+  local body=""
+  local message=""
 
   [[ -n "${token}" ]] || return 0
-  response="$(curl -fsSL https://api.cloudflare.com/client/v4/user/tokens/verify \
+  response="$(curl -sS --max-time 15 -w '\n%{http_code}' \
+    https://api.cloudflare.com/client/v4/user/tokens/verify \
     -H "Authorization: Bearer ${token}" \
     -H 'Content-Type: application/json' 2>/dev/null || true)"
-  if [[ -z "${response}" ]]; then
+  http_code="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+
+  if [[ ! "${http_code}" =~ ^[1-5][0-9]{2}$ ]]; then
     warn "预检提示：无法在线校验 ${label}，已跳过权限验证。"
     return 0
   fi
 
-  printf '%s' "${response}" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true' \
-    || die "预检失败：${label} 校验未通过。"
-  log_success "${label} 校验通过。"
+  if printf '%s' "${body}" | grep -Eq '"success"[[:space:]]*:[[:space:]]*true'; then
+    log_success "${label} 校验通过。"
+    return 0
+  fi
+
+  # 提不出 message 也要死掉：body 为空的 4xx 以前正是走「跳过」那条路的。
+  message="$(cloudflare_error_message "${body}")"
+  die "预检失败：${label} 校验未通过（HTTP ${http_code}${message:+：${message}}）。"
+}
+
+# 只取第一条 errors[].message。jq 在预检这一步不一定装上了（安装包还没跑），
+# 所以没有 jq 就退回 sed，取不到就返回空串，由调用方决定怎么说。
+cloudflare_error_message() {
+  local body="${1:-}"
+
+  [[ -n "${body}" ]] || return 0
+  if command -v jq >/dev/null 2>&1; then
+    printf '%s' "${body}" | jq -r '.errors[0].message? // empty' 2>/dev/null && return 0
+  fi
+
+  printf '%s' "${body}" \
+    | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -n 1
 }
 
 run_install_preflight_checks() {
