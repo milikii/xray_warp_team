@@ -103,6 +103,7 @@ show_dashboard() {
   printf '%b%s%b\n' "${C_BOLD}" "运行探测" "${C_RESET}"
   panel_row "监听 :443" "$(listening_port_text 443)"
   panel_row "监听 :2443" "$(listening_port_text 2443)"
+  panel_row "监听 :${REALITY_FALLBACK_PORT}" "$(listening_port_text "${REALITY_FALLBACK_PORT}")"
   panel_row "监听 :8001" "$(listening_port_text 8001)"
   panel_row "监听 :8443" "$(listening_port_text 8443)"
   panel_row "Xray 自检" "$(xray_config_check_text)"

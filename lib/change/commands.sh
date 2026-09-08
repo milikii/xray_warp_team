@@ -84,7 +84,7 @@ change_sni_cmd() {
     "REALITY SNI 已更新。" \
     "未知的 change-sni 参数：" \
     "" \
-    "ensure_reality_sni_format" \
+    "ensure_reality_sni_ready" \
     "$@"
 }
 

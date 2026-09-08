@@ -17,6 +17,7 @@ usage() {
   ${command_name} install [参数]
   ${command_name} update-script
   ${command_name} upgrade
+  ${command_name} check-sni [域名] [--target host:port] [--timeout N]
   ${command_name} change-uuid [参数]
   ${command_name} change-sni [参数]
   ${command_name} change-path [参数]
@@ -89,9 +90,15 @@ usage() {
   --reality-only              只轮换 REALITY UUID。
   --xhttp-only                只轮换 XHTTP UUID。
 
+check-sni 参数:
+  --target VALUE              覆盖探测目标 host:port（默认 SNI:443）。
+  --timeout VALUE             每次探测超时秒数，默认 10。
+  --server-ip VALUE           本机公网 IP，用于回环判定；默认自动读取。
+
 变更 SNI 参数:
   --non-interactive           非交互运行。
   --reality-sni VALUE         新的 REALITY 可见 SNI。
+  --skip-sni-check            跳过 Reality 目标域名预检。
 
 变更路径参数:
   --non-interactive           非交互运行。
@@ -171,6 +178,7 @@ usage() {
   ${command_name} apply-config
   ${command_name} diagnose
   ${command_name} change-uuid
+  ${command_name} check-sni www.stanford.edu
   ${command_name} change-sni --reality-sni www.stanford.edu
   ${command_name} change-path --xhttp-path /assets/v3
   ${command_name} change-warp --disable-warp

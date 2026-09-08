@@ -7,6 +7,7 @@ set -Eeuo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_state_runtime.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_change.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_cli_and_install.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_sni.sh"
 
 # 失败现场：哪条命令、在哪个函数的哪一行挂的。用例跑在子 shell 里，变量传不回来，
 # 所以走一个临时文件。
@@ -234,6 +235,13 @@ main() {
     run_script_lock_scope_case
     run_script_lock_stale_dir_case
     run_install_flow_case
+    run_sni_judge_tls_case
+    run_sni_judge_http_case
+    run_sni_judge_cert_case
+    run_sni_judge_dns_case
+    run_sni_check_cmd_case
+    run_install_preflight_sni_case
+    run_reality_fallback_inbound_case
   )
 
   load_functions

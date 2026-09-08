@@ -92,6 +92,10 @@ run_dispatch_case() {
     dispatched="renew-cert"
     dispatched_args="$*"
   }
+  sni_check_cmd() {
+    dispatched="check-sni"
+    dispatched_args="$*"
+  }
 
   run_cli_command install --non-interactive --disable-warp
   [[ "${dispatched}" == "install" ]]
@@ -116,13 +120,13 @@ run_dispatch_case() {
   run_cli_command
   [[ "${dispatched}" == "menu" ]]
 
-  run_menu_choice 16
+  run_menu_choice 19
   [[ "${dispatched}" == "uninstall" ]]
 
-  run_menu_choice 14
+  run_menu_choice 15
   [[ "${dispatched}" == "renew-cert" ]]
 
-  run_menu_choice 12
+  run_menu_choice 13
   [[ "${dispatched}" == "change-warp-rules" ]]
   [[ "${dispatched_args}" == "--list" ]]
 
@@ -132,10 +136,13 @@ run_dispatch_case() {
   run_menu_choice 6
   [[ "${dispatched}" == "update-script" ]]
 
-  run_menu_choice 17
+  run_menu_choice 10
+  [[ "${dispatched}" == "check-sni" ]]
+
+  run_menu_choice 16
   [[ "${dispatched}" == "apply-net-opt" ]]
 
-  run_menu_choice 18
+  run_menu_choice 17
   [[ "${dispatched}" == "apply-config" ]]
 
   local version_output=""

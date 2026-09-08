@@ -132,7 +132,7 @@ xray_reality_inbound_json() {
   jq -cn \
     --argjson clients "$(xray_reality_clients_json)" \
     --arg xhttp_local_port "${XHTTP_LOCAL_PORT}" \
-    --arg reality_target "${REALITY_TARGET}" \
+    --arg reality_target "127.0.0.1:${REALITY_FALLBACK_PORT}" \
     --arg reality_sni "${REALITY_SNI}" \
     --arg reality_private_key "${REALITY_PRIVATE_KEY}" \
     --arg reality_short_id "${REALITY_SHORT_ID}" \
@@ -170,6 +170,34 @@ xray_reality_inbound_json() {
         }
       },
       sniffing: sniffing
+    }'
+}
+
+# Reality 对鉴权失败流量的回落：Xray 官方模板「without being stolen」。
+# target 不直连远端站点，而是打回本机 dokodemo-door，由路由过滤 SNI 后再放行，
+# 防止目标站在 CDN 后时本机被当成端口转发偷跑流量。
+# sniffing 是必需的（官方注释「这里的 sniffing 不是多余的，别乱动」）：
+# 路由靠嗅探出的 SNI 做域名匹配；routeOnly 保证实际连接目标仍是 settings.address。
+xray_reality_fallback_inbound_json() {
+  jq -cn \
+    --arg fallback_port "${REALITY_FALLBACK_PORT}" \
+    --arg target_address "$(reality_target_host "${REALITY_TARGET}")" \
+    --argjson target_port "$(reality_target_port "${REALITY_TARGET}")" \
+    '{
+      tag: "reality-fallback",
+      listen: "127.0.0.1",
+      port: ($fallback_port | tonumber),
+      protocol: "dokodemo-door",
+      settings: {
+        address: $target_address,
+        port: $target_port,
+        network: "tcp"
+      },
+      sniffing: {
+        enabled: true,
+        destOverride: ["tls"],
+        routeOnly: true
+      }
     }'
 }
 
@@ -225,8 +253,9 @@ xray_xhttp_inbound_json() {
 xray_inbounds_json() {
   jq -cn \
     --argjson reality_inbound "$(xray_reality_inbound_json)" \
+    --argjson reality_fallback_inbound "$(xray_reality_fallback_inbound_json)" \
     --argjson xhttp_inbound "$(xray_xhttp_inbound_json)" \
-    '[$reality_inbound, $xhttp_inbound]'
+    '[$reality_inbound, $reality_fallback_inbound, $xhttp_inbound]'
 }
 
 xray_direct_domains_json() {
@@ -251,7 +280,25 @@ xray_warp_domains_json() {
   jq -cn '$ARGS.positional' --args "${rules[@]}"
 }
 
-xray_routing_rules_json() {
+xray_reality_fallback_rules_json() {
+  jq -cn \
+    --arg sni "${REALITY_SNI}" \
+    '[
+      {
+        type: "field",
+        inboundTag: ["reality-fallback"],
+        domain: ["full:" + $sni],
+        outboundTag: "direct"
+      },
+      {
+        type: "field",
+        inboundTag: ["reality-fallback"],
+        outboundTag: "block"
+      }
+    ]'
+}
+
+xray_warp_rules_json() {
   if [[ "${ENABLE_WARP}" != "yes" ]]; then
     jq -cn '[]'
     return
@@ -272,6 +319,13 @@ xray_routing_rules_json() {
         domain: $warp_domains
       }
     ]'
+}
+
+xray_routing_rules_json() {
+  jq -cn \
+    --argjson fallback_rules "$(xray_reality_fallback_rules_json)" \
+    --argjson warp_rules "$(xray_warp_rules_json)" \
+    '[$fallback_rules + $warp_rules][]'
 }
 
 xray_direct_outbound_json() {

@@ -179,7 +179,11 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
   v
 haproxy
   |-- SNI = XHTTP CDN 域名 --> nginx 127.0.0.1:8443 --> xray 127.0.0.1:8001
-  `-- 其它 SNI -------------> xray 127.0.0.1:2443
+  `-- 其它 SNI -------------> xray Reality 127.0.0.1:2443
+                                |-- 鉴权通过 --> VLESS / fallbacks 8001
+                                `-- 鉴权失败 --> dokodemo 127.0.0.1:2444
+                                                  |-- SNI == REALITY_SNI --> 真实目标站
+                                                  `-- 其它 SNI --> blackhole
 ```
 
 组件职责：
@@ -193,6 +197,37 @@ haproxy
 | 本地静态站 | `/var/www/xtun-fallback` | nginx 根路径伪装站 |
 
 Reality、XHTTP CDN、XHTTP split 共享同一个 `443`。split 节点不增加额外服务端入站，而是由客户端 `downloadSettings` 控制上下行链路。
+
+## Reality 目标域名要求与预检
+
+Reality 的目标必须是用户指定的第三方权威站点（不是自己的域名），安装与改 SNI 前都会跑一次 `check-sni` 预检：
+
+```bash
+xtun check-sni www.stanford.edu                      # 独立检查，不需要 root
+xtun check-sni www.stanford.edu --target 1.2.3.4:443 --timeout 8
+xtun install ... --reality-sni www.stanford.edu      # 预检自动跑；有 FAIL 就停
+xtun install ... --skip-sni-check                    # 跳过，但输出里留警告
+xtun change-sni --reality-sni www.example.com        # 同样先预检，可用 --skip-sni-check
+```
+
+检查项（一行一项，`PASS` / `WARN` / `FAIL` 三级，有 FAIL 时退出码 2）：
+
+| # | 检查项 | 说明 |
+| --- | --- | --- |
+| 1 | 域名格式 | 合法主机名 |
+| 2 | DNS 解析 | 解析出公网 IPv4；解析到本机（回环）或私网判 FAIL |
+| 3 | TLS 1.3 | 目标必须支持 TLS 1.3 |
+| 4 | X25519 | 握手临时密钥组必须是 X25519 |
+| 5 | HTTP/2 ALPN | 目标必须协商出 h2（Reality + Vision 要求） |
+| 6 | 证书链 | `Verify return code: 0 (ok)` |
+| 7 | 证书 SAN | 证书覆盖 SNI（精确或通配符） |
+| 8 | 证书到期 | ≥30 天 PASS，14–30 天 WARN，<14 天 FAIL |
+| 9 | CDN 前置 | 证书由 CDN 边缘签发时 WARN（可用但不理想） |
+| 10 | HTTP 跳转 | 跨主机 3xx 判 FAIL（如 `stanford.edu` → `www.stanford.edu`，应直接用后者） |
+| 11 | HTTP 版本 | 实际协商出的版本 |
+| 12 | 握手耗时 | ≤0.3s PASS，0.3–1s WARN，>1s FAIL |
+
+防跑流量：Reality 入站的回落不直连目标站，而是经本机 `dokodemo-door`（`127.0.0.1:2444`）过滤 SNI——只有 SNI 等于 `REALITY_SNI` 的回落流量放行到真实目标，其余一律 blackhole。这样扫描者无法把你的服务器当成到目标站（尤其是 CDN 站）的端口转发。回落路径也不配置限速（官方文档明言限速是特征）。
 
 ## 安装会写入哪些文件
 

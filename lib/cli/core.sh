@@ -151,6 +151,7 @@ diagnose_cmd() {
   printf '%s\n' "nginx: ${nginx_state}"
   printf '%s\n' "监听 443: $(listening_port_text 443)"
   printf '%s\n' "监听 2443: $(listening_port_text 2443)"
+  printf '%s\n' "监听 ${REALITY_FALLBACK_PORT}: $(listening_port_text "${REALITY_FALLBACK_PORT}")"
   printf '%s\n' "监听 8001: $(listening_port_text 8001)"
   printf '%s\n' "监听 8443: $(listening_port_text 8443)"
   printf '%s\n' "Xray 配置: $(xray_config_check_text)"
@@ -407,15 +408,16 @@ show_main_menu() {
   7. 升级 Xray 核心
   8. 轮换节点 UUID
   9. 修改 REALITY SNI
- 10. 修改 XHTTP 路径
- 11. 开关 WARP 分流
- 12. 查看 WARP 分流规则
- 13. 修改证书模式 / CDN 域名
- 14. 续期 / 刷新证书
- 15. 抢修文件权限
- 16. 卸载
- 17. 重新应用网络优化
- 18. 重新生成托管配置
+ 10. 检查 REALITY SNI 域名
+ 11. 修改 XHTTP 路径
+ 12. 开关 WARP 分流
+ 13. 查看 WARP 分流规则
+ 14. 修改证书模式 / CDN 域名
+ 15. 续期 / 刷新证书
+ 16. 重新应用网络优化
+ 17. 重新生成托管配置
+ 18. 抢修文件权限
+ 19. 卸载
   0. 退出
 EOF
 }
@@ -434,7 +436,7 @@ script_lock_command_needs_lock() {
   fi
 
   case "${command}" in
-    menu|status|diagnose|help|--help|-h|version|--version|-v)
+    menu|status|diagnose|check-sni|help|--help|-h|version|--version|-v)
       # 菜单本身不写任何东西；菜单里选中的动作会各自再进一次 run_cli_command 并单独加锁。
       return 1
       ;;
@@ -504,6 +506,9 @@ dispatch_cli_command() {
     upgrade)
       upgrade_cmd "$@"
       ;;
+    check-sni)
+      sni_check_cmd "$@"
+      ;;
     change-uuid)
       change_uuid_cmd "$@"
       ;;
@@ -572,15 +577,16 @@ run_menu_choice() {
     7) run_cli_command upgrade ;;
     8) run_cli_command change-uuid ;;
     9) run_cli_command change-sni ;;
-    10) run_cli_command change-path ;;
-    11) run_cli_command change-warp ;;
-    12) run_cli_command change-warp-rules --list ;;
-    13) run_cli_command change-cert-mode ;;
-    14) run_cli_command renew-cert ;;
-    15) run_cli_command repair-perms ;;
-    16) run_cli_command uninstall ;;
-    17) run_cli_command apply-net-opt ;;
-    18) run_cli_command apply-config ;;
+    10) run_cli_command check-sni ;;
+    11) run_cli_command change-path ;;
+    12) run_cli_command change-warp ;;
+    13) run_cli_command change-warp-rules --list ;;
+    14) run_cli_command change-cert-mode ;;
+    15) run_cli_command renew-cert ;;
+    16) run_cli_command apply-net-opt ;;
+    17) run_cli_command apply-config ;;
+    18) run_cli_command repair-perms ;;
+    19) run_cli_command uninstall ;;
     *)
       warn "未知的菜单项：${1}"
       return 1
@@ -589,26 +595,25 @@ run_menu_choice() {
 }
 
 main_menu() {
-  cat <<'EOF'
-  1. 安装或重装
-  2. 查看节点链接与订阅地址
-  3. 运行诊断
-  4. 刷新状态面板
-  5. 重启服务
-  6. 更新脚本本身
-  7. 升级 Xray 核心
-  8. 轮换节点 UUID
-  9. 修改 REALITY SNI
- 10. 修改 XHTTP 路径
- 11. 开关 WARP 分流
- 12. 查看 WARP 分流规则
- 13. 修改证书模式 / CDN 域名
- 14. 续期 / 刷新证书
- 15. 抢修文件权限
- 16. 卸载
- 17. 重新应用网络优化
- 18. 重新生成托管配置
-  0. 退出
-EOF
+  local choice=""
+
+  while true; do
+    if [[ -t 1 ]]; then
+      clear >/dev/null 2>&1 || true
+    fi
+    show_dashboard_brief
+    show_main_menu
+    read -r -p "请选择: " choice
+    if [[ "${choice}" == "0" ]]; then
+      exit 0
+    fi
+    IN_MAIN_MENU=1
+    # 这个 `|| true` 是菜单必须的：单次操作失败不能把菜单进程带走。
+    # 代价是它同样会把整条调用链的 errexit 豁免掉（见 run_cli_command 里的说明），
+    # 所以菜单这条路上的失败也只能靠底下的 `|| return 1` 传回来。
+    run_menu_choice "${choice}" || true
+    IN_MAIN_MENU=0
+    pause_after_menu_action
+  done
 }
 

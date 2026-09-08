@@ -138,6 +138,7 @@ run_change_command_case() {
     WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
   }
   ensure_xray_user() { :; }
+  preflight_check_reality_sni() { :; }
   apply_managed_runtime_update() {
     runtime_updated=1
     runtime_sni="${REALITY_SNI}"
@@ -162,7 +163,8 @@ run_change_command_case() {
   change_sni_cmd --non-interactive --reality-sni new.example.com
   [[ "${runtime_updated}" -eq 1 ]]
   [[ "${runtime_sni}" == "new.example.com" ]]
-  [[ "${runtime_target}" == "www.harvard.edu:443" ]]
+  # 改 SNI 时目标跟着换（0.11 只改 SNI 不改 target 是隐性缺陷）
+  [[ "${runtime_target}" == "new.example.com:443" ]]
   [[ "${shown_links}" -eq 1 ]]
 
   # --opt=value 与 --opt value 必须等价

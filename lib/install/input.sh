@@ -374,6 +374,7 @@ run_install_preflight_checks() {
   log_step "执行安装前预检。"
   preflight_check_port_443
   preflight_check_domain_resolution "${XHTTP_DOMAIN}" "XHTTP CDN 域名"
+  preflight_check_reality_sni
 
   case "${CERT_MODE}" in
     acme-dns-cf)
@@ -442,12 +443,32 @@ ensure_reality_sni_format() {
   validate_hostname_value "REALITY SNI" "${REALITY_SNI}"
 }
 
+# change-sni 的 post_update：改 SNI 时目标跟着换（0.11 只改 SNI 不改 target 是隐性缺陷），
+# 然后跑一次预检。
+ensure_reality_sni_ready() {
+  ensure_reality_sni_format
+  REALITY_TARGET="$(default_reality_target_for_sni "${REALITY_SNI}")"
+  preflight_check_reality_sni
+}
+
 ensure_xhttp_domain_format() {
   validate_hostname_value "XHTTP CDN 域名" "${XHTTP_DOMAIN}"
 }
 
 ensure_reality_target_format() {
   validate_hostport_value "REALITY 目标地址" "${REALITY_TARGET}"
+}
+
+reality_target_host() {
+  local hostport="${1:-${REALITY_TARGET}}"
+  validate_hostport_value "REALITY 目标地址" "${hostport}"
+  printf '%s' "${hostport%:*}"
+}
+
+reality_target_port() {
+  local hostport="${1:-${REALITY_TARGET}}"
+  validate_hostport_value "REALITY 目标地址" "${hostport}"
+  printf '%s' "${hostport##*:}"
 }
 
 ensure_xhttp_path_format() {

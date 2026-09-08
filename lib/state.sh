@@ -325,7 +325,15 @@ config_has_warp_outbound() {
 load_config_runtime_context() {
   REALITY_UUID="${REALITY_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .settings.clients[0].id')}"
   REALITY_SNI="${REALITY_SNI:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.serverNames[0]')}"
-  REALITY_TARGET="${REALITY_TARGET:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.target')}"
+  # 新版回落走 dokodemo-door，真实目标写在 reality-fallback 入站里；
+  # v1 生成的 config.json 再退回 realitySettings.target，但那是 127.0.0.1:2444 时视为无效。
+  REALITY_TARGET="${REALITY_TARGET:-$(config_jq_read '.inbounds[] | select(.tag=="reality-fallback") | "\(.settings.address):\(.settings.port)"')}"
+  if [[ -z "${REALITY_TARGET}" ]]; then
+    REALITY_TARGET="$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.target')"
+    if [[ "${REALITY_TARGET}" == "127.0.0.1:${REALITY_FALLBACK_PORT}" ]]; then
+      REALITY_TARGET=""
+    fi
+  fi
   REALITY_SHORT_ID="${REALITY_SHORT_ID:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.shortIds[0]')}"
   REALITY_PRIVATE_KEY="${REALITY_PRIVATE_KEY:-$(config_jq_read '.inbounds[] | select(.tag=="reality-vision") | .streamSettings.realitySettings.privateKey')}"
   XHTTP_UUID="${XHTTP_UUID:-$(config_jq_read '.inbounds[] | select(.tag=="xhttp-cdn") | .settings.clients[0].id')}"

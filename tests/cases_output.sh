@@ -43,7 +43,8 @@ run_warp_enabled_case() {
   write_state_file
   write_output_file
 
-  jq -e '.routing.rules | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.routing.rules | length == 4' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.routing.rules[0].inboundTag == ["reality-fallback"]' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .protocol == "wireguard"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.secretKey == "'"${TEST_WARP_PRIVATE_KEY}"'"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.address == ["172.16.0.2/32", "2606:4700:110:8a1b:cafe:1:2:3/128"]' "${XRAY_CONFIG_FILE}" >/dev/null
@@ -123,7 +124,7 @@ run_warp_disabled_case() {
   write_xray_config
   write_output_file
 
-  jq -e '.routing.rules | length == 0' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.routing.rules | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
   if jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingObfsMode' "${XRAY_CONFIG_FILE}" >/dev/null; then
     return 1
@@ -456,7 +457,8 @@ run_xray_config_escape_case() {
 
   write_xray_config
 
-  jq -e '.inbounds[] | select(.tag == "reality-vision") | .streamSettings.realitySettings.target == "mirror\"host.example.com:443"' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.inbounds[] | select(.tag == "reality-vision") | .streamSettings.realitySettings.target == "127.0.0.1:2444"' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.inbounds[] | select(.tag == "reality-fallback") | .settings.address == "mirror\"host.example.com"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "reality-vision") | .streamSettings.realitySettings.privateKey == "private\"key"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.path == "/assets/\"quoted\""' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .settings.decryption == "enc\"value"' "${XRAY_CONFIG_FILE}" >/dev/null
@@ -571,7 +573,7 @@ run_warp_config_json_valid_case() {
 
   config_text="$(xray_config_text)"
   jq -e '.outbounds | map(.tag) == ["direct", "WARP", "block"]' <<<"${config_text}" >/dev/null
-  jq -e '.routing.rules | map(.outboundTag) == ["direct", "WARP"]' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules | map(.outboundTag) == ["direct", "block", "direct", "WARP"]' <<<"${config_text}" >/dev/null
   jq -e '[.routing.rules[] | select(.outboundTag == "WARP") | .domain[]] | length > 0' <<<"${config_text}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.peers[0].endpoint | test(":[0-9]+$")' <<<"${config_text}" >/dev/null
 }

@@ -7,3 +7,4 @@
 
 . "${SCRIPT_ROOT}/lib/cli/core.sh"
 . "${SCRIPT_ROOT}/lib/cli/install.sh"
+. "${SCRIPT_ROOT}/lib/cli/sni.sh"

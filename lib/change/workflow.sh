@@ -19,6 +19,10 @@ handle_change_common_arg() {
       NON_INTERACTIVE=1
       return 0
       ;;
+    --skip-sni-check)
+      SKIP_SNI_CHECK=1
+      return 0
+      ;;
     --help|-h|help)
       usage
       exit 0

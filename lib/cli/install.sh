@@ -8,6 +8,7 @@
 install_flag_specs() {
   cat <<'EOF'
 --non-interactive:NON_INTERACTIVE:1
+--skip-sni-check:SKIP_SNI_CHECK:1
 --enable-xhttp-vless-encryption:XHTTP_VLESS_ENCRYPTION_ENABLED:yes
 --disable-xhttp-vless-encryption:XHTTP_VLESS_ENCRYPTION_ENABLED:no
 --enable-xhttp-ech:XHTTP_ECH_CONFIG_LIST:cloudflare-ech.com+https://223.5.5.5/dns-query
