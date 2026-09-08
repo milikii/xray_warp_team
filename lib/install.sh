@@ -202,16 +202,6 @@ ensure_managed_permissions() {
     chmod 0640 "${WARP_RULES_FILE}"
   fi
 
-  if [[ -f "${HEALTH_STATE_FILE}" ]]; then
-    chown 0:"${XRAY_GID}" "${HEALTH_STATE_FILE}"
-    chmod 0640 "${HEALTH_STATE_FILE}"
-  fi
-
-  if [[ -f "${HEALTH_HISTORY_FILE}" ]]; then
-    chown 0:"${XRAY_GID}" "${HEALTH_HISTORY_FILE}"
-    chmod 0640 "${HEALTH_HISTORY_FILE}"
-  fi
-
   if [[ -f "${TLS_CERT_FILE}" ]]; then
     chown 0:"${XRAY_GID}" "${TLS_CERT_FILE}"
     chmod 0640 "${TLS_CERT_FILE}"
@@ -341,9 +331,6 @@ install_draft_file_text() {
   write_state_kv "KEY_SOURCE_FILE" "${KEY_SOURCE_FILE-}"
   write_state_kv "CERT_SOURCE_PEM" "${CERT_SOURCE_PEM-}"
   write_state_kv "KEY_SOURCE_PEM" "${KEY_SOURCE_PEM-}"
-  write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID-}"
-  write_state_kv "CF_API_TOKEN" "${CF_API_TOKEN-}"
-  write_state_kv "CF_CERT_VALIDITY" "${CF_CERT_VALIDITY-}"
   write_state_kv "ACME_EMAIL" "${ACME_EMAIL-}"
   write_state_kv "ACME_CA" "${ACME_CA-}"
   write_state_kv "CF_DNS_TOKEN" "${CF_DNS_TOKEN-}"

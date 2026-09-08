@@ -246,9 +246,6 @@ init_change_cert_mode_request() {
     [key_source_file]=""
     [cert_source_pem]=""
     [key_source_pem]=""
-    [cf_zone_id]=""
-    [cf_api_token]=""
-    [cf_cert_validity]=""
     [acme_email]=""
     [acme_ca]=""
     [cf_dns_token]=""
@@ -267,9 +264,6 @@ parse_change_cert_mode_args() {
     "--key-file:key_source_file"
     "--cert-pem:cert_source_pem"
     "--key-pem:key_source_pem"
-    "--cf-zone-id:cf_zone_id"
-    "--cf-api-token:cf_api_token"
-    "--cf-cert-validity:cf_cert_validity"
     "--acme-email:acme_email"
     "--acme-ca:acme_ca"
     "--cf-dns-token:cf_dns_token"
@@ -298,9 +292,6 @@ apply_cert_mode_change_request() {
     "key_source_file:KEY_SOURCE_FILE" \
     "cert_source_pem:CERT_SOURCE_PEM" \
     "key_source_pem:KEY_SOURCE_PEM" \
-    "cf_zone_id:CF_ZONE_ID" \
-    "cf_api_token:CF_API_TOKEN" \
-    "cf_cert_validity:CF_CERT_VALIDITY" \
     "acme_email:ACME_EMAIL" \
     "acme_ca:ACME_CA" \
     "cf_dns_token:CF_DNS_TOKEN" \

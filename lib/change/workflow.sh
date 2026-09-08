@@ -55,7 +55,6 @@ run_change_warp_action() {
         rollback_optional_component_state
         return 1
       fi
-      warp_teardown_legacy
       finish_managed_change "WARP 分流已启用。" "no" || return 1
       log "出站: $(warp_outbound_text)"
       log "规则数: $(warp_rule_count_text)"
@@ -63,7 +62,6 @@ run_change_warp_action() {
     disable)
       ENABLE_WARP="no"
       apply_managed_runtime_update || return 1
-      warp_teardown_legacy
       finish_managed_change "WARP 分流已禁用。" "no"
       ;;
     *)
@@ -78,16 +76,6 @@ begin_managed_change() {
   log_step "读取当前托管安装状态。"
   load_current_install_context
   ensure_xray_user || return 1
-}
-
-begin_managed_output_change() {
-  need_root
-  start_backup_session
-  log_step "读取当前托管输出状态。"
-  [[ -f "${STATE_FILE}" ]] || die "找不到当前状态文件：${STATE_FILE}"
-  load_existing_state
-  load_output_runtime_context
-  normalize_runtime_defaults
 }
 
 finish_managed_change() {
@@ -108,14 +96,13 @@ run_single_value_change_cmd() {
   local prompt_text="${3}"
   local success_message="${4}"
   local unknown_arg_prefix="${5}"
-  local apply_mode="${6}"
-  local normalizer_fn="${7:-}"
-  local post_update_fn="${8:-}"
+  local normalizer_fn="${6:-}"
+  local post_update_fn="${7:-}"
   local current_value=""
   local new_value=""
   local overridden=0
   local -n state_ref="${state_var_name}"
-  shift 8
+  shift 7
 
   while [[ $# -gt 0 ]]; do
     if handle_change_common_arg "${1}"; then
@@ -142,17 +129,7 @@ run_single_value_change_cmd() {
     shift
   done
 
-  case "${apply_mode}" in
-    runtime)
-      begin_managed_change || return 1
-      ;;
-    output)
-      begin_managed_output_change
-      ;;
-    *)
-      die "未知的变更应用模式：${apply_mode}"
-      ;;
-  esac
+  begin_managed_change || return 1
   current_value="${state_ref}"
   resolve_change_value "${state_var_name}" "${prompt_text}" "${current_value}" "${overridden}" "${new_value}"
 
@@ -165,17 +142,8 @@ run_single_value_change_cmd() {
 
   # apply_* 失败时里面已经回滚过了，这里必须跟着失败：
   # 再往下就是 finish_managed_change 的 log_success，会把回滚过的变更报成改好了。
-  case "${apply_mode}" in
-    runtime)
-      log_step "应用运行时配置变更。"
-      apply_managed_runtime_update || return 1
-      ;;
-    output)
-      log_step "刷新状态与输出文件。"
-      write_state_file || return 1
-      write_output_file || return 1
-      ;;
-  esac
+  log_step "应用运行时配置变更。"
+  apply_managed_runtime_update || return 1
 
   finish_managed_change "${success_message}"
 }

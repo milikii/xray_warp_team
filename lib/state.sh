@@ -29,7 +29,20 @@ output_field_value() {
 
 state_file_key_allowed() {
   case "${1}" in
-    STATE_VERSION|SERVER_IP|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|WARP_PRIVATE_KEY|WARP_ADDRESS_V4|WARP_ADDRESS_V6|WARP_PEER_PUBLIC_KEY|WARP_ENDPOINT|WARP_RESERVED|WARP_MTU|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|CF_ZONE_ID|CF_API_TOKEN|CF_CERT_VALIDITY|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|NODE_CLIENTS_TEXT|CORE_HEALTH_LAST_CHECK_AT|CORE_HEALTH_LAST_ACTION|CORE_HEALTH_LAST_REASON)
+    STATE_VERSION|SERVER_IP|NODE_LABEL_PREFIX|REALITY_UUID|REALITY_SNI|REALITY_TARGET|REALITY_SHORT_ID|REALITY_PRIVATE_KEY|REALITY_PUBLIC_KEY|XHTTP_UUID|XHTTP_DOMAIN|XHTTP_PATH|XHTTP_VLESS_ENCRYPTION_ENABLED|XHTTP_VLESS_DECRYPTION|XHTTP_VLESS_ENCRYPTION|TLS_ALPN|FINGERPRINT|ENABLE_WARP|ENABLE_NET_OPT|NET_BBR_KERNEL|WARP_PRIVATE_KEY|WARP_ADDRESS_V4|WARP_ADDRESS_V6|WARP_PEER_PUBLIC_KEY|WARP_ENDPOINT|WARP_RESERVED|WARP_MTU|WARP_RULES_TEXT|CERT_MODE|CERT_SOURCE_FILE|KEY_SOURCE_FILE|CERT_SOURCE_PEM|KEY_SOURCE_PEM|ACME_EMAIL|ACME_CA|CF_DNS_TOKEN|CF_DNS_ACCOUNT_ID|CF_DNS_ZONE_ID|XHTTP_ECH_CONFIG_LIST|XHTTP_ECH_FORCE_QUERY|XHTTP_XPADDING_ENABLED|XHTTP_XPADDING_KEY|XHTTP_XPADDING_HEADER|XHTTP_XPADDING_PLACEMENT|XHTTP_XPADDING_METHOD|SUB_TOKEN|ROUTE_BLOCK_CN|NGINX_MAIN_MANAGED)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# v1 状态文件里的遗留键：只读不写。
+# 加载时照常赋值（给迁移提示用），state_file_text 永不写出。
+state_file_legacy_key() {
+  case "${1}" in
+    NODE_CLIENTS_TEXT)
       return 0
       ;;
     *)
@@ -174,7 +187,7 @@ load_shell_kv_file() {
 
     key="${line%%=*}"
     raw_value="${line#*=}"
-    state_file_key_allowed "${key}" || continue
+    state_file_key_allowed "${key}" || state_file_legacy_key "${key}" || continue
     decoded_value="$(decode_state_value "${raw_value}")"
     printf -v "${key}" '%s' "${decoded_value}"
   done < "${file_path}"
@@ -199,6 +212,7 @@ reset_loaded_runtime_context() {
   FINGERPRINT=""
   ENABLE_WARP=""
   ENABLE_NET_OPT=""
+  NET_BBR_KERNEL=""
   WARP_PRIVATE_KEY=""
   WARP_ADDRESS_V4=""
   WARP_ADDRESS_V6=""
@@ -213,9 +227,6 @@ reset_loaded_runtime_context() {
   KEY_SOURCE_FILE=""
   CERT_SOURCE_PEM=""
   KEY_SOURCE_PEM=""
-  CF_ZONE_ID=""
-  CF_API_TOKEN=""
-  CF_CERT_VALIDITY=""
   ACME_EMAIL=""
   ACME_CA=""
   CF_DNS_TOKEN=""
@@ -228,14 +239,9 @@ reset_loaded_runtime_context() {
   XHTTP_XPADDING_HEADER=""
   XHTTP_XPADDING_PLACEMENT=""
   XHTTP_XPADDING_METHOD=""
-  NODE_CLIENTS_TEXT=""
-  OUTPUT_CLIENT_NAME=""
-  LINK_CLIENT_NAME=""
-  LINK_REALITY_UUID=""
-  LINK_XHTTP_UUID=""
-  CORE_HEALTH_LAST_CHECK_AT=""
-  CORE_HEALTH_LAST_ACTION=""
-  CORE_HEALTH_LAST_REASON=""
+  SUB_TOKEN=""
+  ROUTE_BLOCK_CN=""
+  NGINX_MAIN_MANAGED=""
   STATE_JQ_MISSING_WARNED=""
 }
 
@@ -292,15 +298,23 @@ load_existing_state() {
   if [[ -f "${STATE_FILE}" ]]; then
     load_shell_kv_file "${STATE_FILE}"
     if [[ "${STATE_VERSION:-0}" != "${STATE_VERSION_CURRENT}" ]]; then
-      warn "检测到旧版本状态文件（${STATE_VERSION:-0} -> ${STATE_VERSION_CURRENT}），将按当前脚本默认值补全缺失字段。"
+      migrate_state_v1_to_v2
     fi
   fi
   if [[ "${XHTTP_ECH_CONFIG_LIST:-}" == "https://1.1.1.1/dns-query" && "${XHTTP_ECH_FORCE_QUERY:-}" == "none" ]]; then
     XHTTP_ECH_CONFIG_LIST=""
     XHTTP_ECH_FORCE_QUERY=""
   fi
-  if [[ -f "${HEALTH_STATE_FILE}" ]]; then
-    load_shell_kv_file "${HEALTH_STATE_FILE}"
+}
+
+migrate_state_v1_to_v2() {
+  if [[ "${CERT_MODE:-}" == "cf-origin-ca" ]]; then
+    warn "证书模式 cf-origin-ca 已并入 existing，本次加载后按 existing 处理。"
+    CERT_MODE="existing"
+  fi
+  if [[ -n "${NODE_CLIENTS_TEXT:-}" ]]; then
+    warn "多客户端功能已移除；以下客户端将在下一次 apply-config 时从 config.json 中移除：$(printf '%s' "${NODE_CLIENTS_TEXT}" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    NODE_CLIENTS_TEXT=""
   fi
 }
 
@@ -349,6 +363,9 @@ normalize_runtime_defaults() {
   FINGERPRINT="${FINGERPRINT:-${DEFAULT_FINGERPRINT}}"
   CERT_MODE="${CERT_MODE:-existing}"
   ACME_CA="${ACME_CA:-${DEFAULT_ACME_CA}}"
+  ROUTE_BLOCK_CN="${ROUTE_BLOCK_CN:-no}"
+  NGINX_MAIN_MANAGED="${NGINX_MAIN_MANAGED:-no}"
+  NET_BBR_KERNEL="${NET_BBR_KERNEL:-joey}"
   XHTTP_ECH_CONFIG_LIST="${XHTTP_ECH_CONFIG_LIST:-${DEFAULT_XHTTP_ECH_CONFIG_LIST}}"
   XHTTP_ECH_FORCE_QUERY="${XHTTP_ECH_FORCE_QUERY:-${DEFAULT_XHTTP_ECH_FORCE_QUERY}}"
   XHTTP_XPADDING_ENABLED="${XHTTP_XPADDING_ENABLED:-${DEFAULT_XHTTP_XPADDING_ENABLED}}"
@@ -430,157 +447,12 @@ path_to_uri_component() {
   uri_encode "${1}"
 }
 
-default_node_client_name() {
-  printf 'default'
-}
-
-ensure_node_client_name_format() {
-  local client_name="${1:-}"
-
-  [[ -n "${client_name}" ]] || die "客户端名称不能为空。"
-  [[ "${client_name}" =~ ^[A-Za-z0-9._-]+$ ]] || die "客户端名称只能包含字母、数字、点、下划线或横线。"
-}
-
-ensure_new_node_client_name_format() {
-  local client_name="${1:-}"
-
-  ensure_node_client_name_format "${client_name}"
-  [[ "${client_name}" != "$(default_node_client_name)" ]] || die "default 是内置客户端名称，不能重复添加。"
-}
-
-ensure_node_client_uuid_format() {
+ensure_uuid_format() {
   local label="${1}"
   local uuid="${2:-}"
 
   [[ "${uuid}" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] \
     || die "${label} 不是合法 UUID。"
-}
-
-node_client_record_line() {
-  local client_name="${1}"
-  local reality_uuid="${2}"
-  local xhttp_uuid="${3}"
-
-  printf '%s|%s|%s\n' "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
-}
-
-node_extra_clients_text() {
-  local line=""
-  local client_name=""
-  local reality_uuid=""
-  local xhttp_uuid=""
-  local _extra=""
-
-  while IFS= read -r line || [[ -n "${line}" ]]; do
-    [[ -n "${line}" ]] || continue
-    IFS='|' read -r client_name reality_uuid xhttp_uuid _extra <<< "${line}"
-    [[ -n "${client_name}" && -n "${reality_uuid}" && -n "${xhttp_uuid}" ]] || continue
-    [[ "${client_name}" != "$(default_node_client_name)" ]] || continue
-    node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
-  done <<< "${NODE_CLIENTS_TEXT:-}"
-}
-
-node_clients_text() {
-  if [[ -n "${REALITY_UUID:-}" && -n "${XHTTP_UUID:-}" ]]; then
-    node_client_record_line "$(default_node_client_name)" "${REALITY_UUID}" "${XHTTP_UUID}"
-  fi
-
-  node_extra_clients_text
-}
-
-node_client_record_for_name() {
-  local wanted_name="${1}"
-  local client_name=""
-  local reality_uuid=""
-  local xhttp_uuid=""
-  local records=""
-
-  ensure_node_client_name_format "${wanted_name}"
-  records="$(node_clients_text)"
-  while IFS='|' read -r client_name reality_uuid xhttp_uuid; do
-    [[ -n "${client_name}" ]] || continue
-    if [[ "${client_name}" == "${wanted_name}" ]]; then
-      node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
-      return 0
-    fi
-  done <<< "${records}"
-
-  return 1
-}
-
-node_client_exists() {
-  node_client_record_for_name "${1}" >/dev/null
-}
-
-node_client_count() {
-  local count=0
-  local line=""
-
-  while IFS= read -r line; do
-    [[ -n "${line}" ]] || continue
-    count=$((count + 1))
-  done < <(node_clients_text)
-
-  printf '%s' "${count}"
-}
-
-node_client_names_text() {
-  local client_name=""
-  local _reality_uuid=""
-  local _xhttp_uuid=""
-
-  while IFS='|' read -r client_name _reality_uuid _xhttp_uuid; do
-    [[ -n "${client_name}" ]] || continue
-    printf '%s\n' "${client_name}"
-  done < <(node_clients_text)
-}
-
-node_client_names_csv() {
-  local joined=""
-  local client_name=""
-
-  while IFS= read -r client_name; do
-    [[ -n "${client_name}" ]] || continue
-    if [[ -n "${joined}" ]]; then
-      joined+=", "
-    fi
-    joined+="${client_name}"
-  done < <(node_client_names_text)
-
-  printf '%s' "${joined}"
-}
-
-append_node_client_record() {
-  local client_name="${1}"
-  local reality_uuid="${2}"
-  local xhttp_uuid="${3}"
-  local existing_clients=""
-  local existing_client_name=""
-  local existing_reality_uuid=""
-  local existing_xhttp_uuid=""
-
-  ensure_new_node_client_name_format "${client_name}"
-  ensure_node_client_uuid_format "REALITY UUID" "${reality_uuid}"
-  ensure_node_client_uuid_format "XHTTP UUID" "${xhttp_uuid}"
-  if node_client_exists "${client_name}"; then
-    die "客户端已存在：${client_name}"
-  fi
-  while IFS='|' read -r existing_client_name existing_reality_uuid existing_xhttp_uuid; do
-    [[ -n "${existing_client_name}" ]] || continue
-    if [[ "${existing_reality_uuid}" == "${reality_uuid}" ]]; then
-      die "REALITY UUID 已被客户端 ${existing_client_name} 使用。"
-    fi
-    if [[ "${existing_xhttp_uuid}" == "${xhttp_uuid}" ]]; then
-      die "XHTTP UUID 已被客户端 ${existing_client_name} 使用。"
-    fi
-  done < <(node_clients_text)
-
-  existing_clients="$(node_extra_clients_text)"
-  if [[ -n "${existing_clients}" ]]; then
-    NODE_CLIENTS_TEXT="${existing_clients}"$'\n'"$(node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}")"
-  else
-    NODE_CLIENTS_TEXT="$(node_client_record_line "${client_name}" "${reality_uuid}" "${xhttp_uuid}")"
-  fi
 }
 
 write_state_kv() {
@@ -623,8 +495,6 @@ state_file_text() {
   write_state_kv "WARP_MTU" "${WARP_MTU}"
   write_state_kv "WARP_RULES_TEXT" "${WARP_RULES_TEXT}"
   write_state_kv "CERT_MODE" "${CERT_MODE}"
-  write_state_kv "CF_ZONE_ID" "${CF_ZONE_ID}"
-  write_state_kv "CF_CERT_VALIDITY" "${CF_CERT_VALIDITY}"
   write_state_kv "ACME_EMAIL" "${ACME_EMAIL}"
   write_state_kv "ACME_CA" "${ACME_CA}"
   write_state_kv "CF_DNS_ACCOUNT_ID" "${CF_DNS_ACCOUNT_ID}"
@@ -636,7 +506,10 @@ state_file_text() {
   write_state_kv "XHTTP_XPADDING_HEADER" "${XHTTP_XPADDING_HEADER}"
   write_state_kv "XHTTP_XPADDING_PLACEMENT" "${XHTTP_XPADDING_PLACEMENT}"
   write_state_kv "XHTTP_XPADDING_METHOD" "${XHTTP_XPADDING_METHOD}"
-  write_state_kv "NODE_CLIENTS_TEXT" "$(node_extra_clients_text)"
+  write_state_kv "SUB_TOKEN" "${SUB_TOKEN}"
+  write_state_kv "ROUTE_BLOCK_CN" "${ROUTE_BLOCK_CN}"
+  write_state_kv "NGINX_MAIN_MANAGED" "${NGINX_MAIN_MANAGED}"
+  write_state_kv "NET_BBR_KERNEL" "${NET_BBR_KERNEL}"
 }
 
 write_state_file() {

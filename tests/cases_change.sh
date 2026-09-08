@@ -52,7 +52,6 @@ run_change_helper_case() {
     --xhttp-domain cdn.example.com \
     --cert-file /tmp/cert.pem \
     --key-file /tmp/key.pem \
-    --cf-zone-id zone-id \
     --acme-email ops@example.com
   [[ "${NON_INTERACTIVE}" -eq 1 ]]
   [[ "${cert_request[cert_mode_overridden]}" == "1" ]]
@@ -61,7 +60,6 @@ run_change_helper_case() {
   [[ "${cert_request[xhttp_domain]}" == "cdn.example.com" ]]
   [[ "${cert_request[cert_source_file]}" == "/tmp/cert.pem" ]]
   [[ "${cert_request[key_source_file]}" == "/tmp/key.pem" ]]
-  [[ "${cert_request[cf_zone_id]}" == "zone-id" ]]
   [[ "${cert_request[acme_email]}" == "ops@example.com" ]]
 
   CERT_SOURCE_FILE="old-cert.pem"
@@ -101,7 +99,8 @@ run_change_helper_case() {
   }
 
   resolve_cert_mode_change_targets "existing" "cdn.old.example.com" 0 0 "" ""
-  [[ "${CERT_MODE}" == "cf-origin-ca" ]]
+  # 菜单序号 3 现在是 existing（cf-origin-ca 并入 existing）
+  [[ "${CERT_MODE}" == "existing" ]]
   [[ "${XHTTP_DOMAIN}" == "cdn.prompt.example.com" ]]
   [[ "$(cert_mode_choice_value "existing")" == "2" ]]
 
@@ -139,9 +138,6 @@ run_change_command_case() {
     WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
   }
   ensure_xray_user() { :; }
-  begin_managed_output_change() {
-    NODE_LABEL_PREFIX="HKG"
-  }
   apply_managed_runtime_update() {
     runtime_updated=1
     runtime_sni="${REALITY_SNI}"
@@ -177,37 +173,6 @@ run_change_command_case() {
   [[ "${shown_links}" -eq 2 ]]
 
   NON_INTERACTIVE=0
-  change_label_prefix_cmd --non-interactive
-  [[ "${state_written}" -eq 1 ]]
-  [[ "${output_written}" -eq 1 ]]
-  [[ "${written_prefix}" == "HKG" ]]
-  [[ "${shown_links}" -eq 3 ]]
-
-  load_current_install_context() {
-    return 99
-  }
-  begin_managed_output_change() {
-    NODE_LABEL_PREFIX="LAX"
-    SERVER_IP="203.0.113.30"
-    REALITY_UUID="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    REALITY_SNI="reality.example.com"
-    REALITY_PUBLIC_KEY="public-key"
-    REALITY_SHORT_ID="abcd1234"
-    XHTTP_UUID="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    XHTTP_DOMAIN="cdn.example.com"
-    XHTTP_PATH="/edge"
-    XHTTP_VLESS_ENCRYPTION_ENABLED="no"
-    XHTTP_VLESS_ENCRYPTION=""
-    XHTTP_VLESS_DECRYPTION="none"
-    TLS_ALPN="h2"
-    FINGERPRINT="chrome"
-    ENABLE_WARP="no"
-    ENABLE_NET_OPT="no"
-    CERT_MODE="existing"
-  }
-  NON_INTERACTIVE=0
-  change_label_prefix_cmd --non-interactive --node-label-prefix nrt
-  [[ "${written_prefix}" == "NRT" ]]
 
   load_current_install_context() {
     REALITY_SNI="old.example.com"
@@ -230,7 +195,7 @@ run_change_command_case() {
   [[ "${rules_written}" == *$'domain:chat.openai.com'* ]]
   [[ "${rules_written}" != *$'domain:github.com'* ]]
   # 分流规则改的是服务端出站，客户端链接一个字都不会变，不该再喷一份部署文档
-  [[ "${shown_links}" -eq 4 ]]
+  [[ "${shown_links}" -eq 2 ]]
   [[ "${output}" == *"domain:chat.openai.com"* ]]
 
   # 规则没有实际变化时不能重启服务，也不该开备份会话挤掉真正的变更备份
@@ -251,7 +216,7 @@ run_change_command_case() {
   output="$(cat "${stdout_file}")"
   [[ "${runtime_updated}" -eq 0 ]]
   [[ "${backup_sessions}" -eq 0 ]]
-  [[ "${shown_links}" -eq 4 ]]
+  [[ "${shown_links}" -eq 2 ]]
   [[ "${output}" == *"domain:chat.openai.com"* ]]
 
   load_existing_state() {
@@ -280,7 +245,6 @@ run_change_warp_enable_rollback_case() {
   begin_managed_change() { :; }
   apply_warp_change_request() { :; }
   prompt_warp_settings() { :; }
-  warp_teardown_legacy() { :; }
   apply_managed_runtime_update() {
     return 1
   }
@@ -485,7 +449,7 @@ run_diagnose_command_case() {
   load_dashboard_context() { :; }
   service_active_state() {
     case "${1}" in
-      xray.service|haproxy.service|nginx.service|"${CORE_HEALTH_TIMER_NAME}")
+      xray.service|haproxy.service|nginx.service)
         printf 'active'
         ;;
       *)

@@ -20,102 +20,13 @@ render_output_file_qr() {
   done < "${OUTPUT_FILE}"
 }
 
-prompt_node_client_selection() {
-  local prompt_text="${1:-请选择客户端}"
-  local answer=""
-  local client_name=""
-  local selected_client=""
-  local index=1
-  local selected_index=0
-  local -a client_names=()
-
-  printf '%s\n' "可用客户端:" >&2
-  while IFS= read -r client_name; do
-    [[ -n "${client_name}" ]] || continue
-    client_names+=("${client_name}")
-    printf '  %s. %s\n' "${index}" "${client_name}" >&2
-    index=$((index + 1))
-  done < <(node_client_names_text)
-
-  [[ "${#client_names[@]}" -gt 0 ]] || die "当前没有可用客户端。"
-  printf '%s' "${prompt_text} [1]: " >&2
-  read -r answer
-  answer="${answer:-1}"
-
-  if [[ "${answer}" =~ ^[0-9]+$ ]]; then
-    selected_index=$((answer - 1))
-    [[ "${selected_index}" -ge 0 && "${selected_index}" -lt "${#client_names[@]}" ]] || die "客户端序号无效：${answer}"
-    selected_client="${client_names[${selected_index}]}"
-  else
-    ensure_node_client_name_format "${answer}"
-    node_client_exists "${answer}" || die "找不到客户端：${answer}"
-    selected_client="${answer}"
-  fi
-
-  printf '%s' "${selected_client}"
-}
-
-list_clients_cmd() {
-  local client_name=""
-
-  while [[ $# -gt 0 ]]; do
-    case "${1}" in
-      --help|-h|help)
-        usage
-        exit 0
-        ;;
-      *)
-        die "未知的 list-clients 参数：${1}"
-        ;;
-    esac
-  done
-
-  load_current_install_context
-  while IFS= read -r client_name; do
-    [[ -n "${client_name}" ]] || continue
-    printf '%s\n' "${client_name}"
-  done < <(node_client_names_text)
-}
-
-select_output_client_if_requested() {
-  local client_name="${1:-}"
-
-  # 这里只是按状态重新生成输出与订阅文件，写入本身是原子的（mktemp + mv），
-  # 所以不另开备份会话：show-links 属于查看类命令，
-  # 开一次会话就会挤掉一份真正的变更备份（默认只保留 5 份）。
-  # 从 add-client 等变更流程调进来时，BACKUP_DIR 已经由该流程设好，
-  # backup_path 会照常写进那一次会话。
-  if [[ -n "${client_name}" ]]; then
-    load_current_install_context
-    node_client_exists "${client_name}" || die "找不到客户端：${client_name}"
-    write_output_file "${client_name}" || return 1
-    return
-  fi
-
-  if [[ -t 0 && -t 1 && -f "${STATE_FILE}" && -f "${XRAY_CONFIG_FILE}" ]]; then
-    load_current_install_context
-    if [[ "$(node_client_count)" -gt 1 ]]; then
-      client_name="$(prompt_node_client_selection "请选择要输出链接的客户端")" || return 1
-      write_output_file "${client_name}" || return 1
-    fi
-  fi
-}
-
 show_links() {
   local show_qr=0
-  local client_name=""
 
   while [[ $# -gt 0 ]]; do
     case "${1}" in
       --qr)
         show_qr=1
-        ;;
-      --client|--client-name)
-        assign_option_value client_name "${1}" "${@:2}"
-        shift
-        ;;
-      --client=*|--client-name=*)
-        client_name="${1#*=}"
         ;;
       --help|-h|help)
         usage
@@ -128,9 +39,7 @@ show_links() {
     shift
   done
 
-  # 重新生成失败就必须停：下面那句 cat 会把上一次留在磁盘上的输出文件原样打出来，
-  # 用户点名要 B 的链接，拿到的却是 A 的——一份看起来完全正常的错链接。
-  select_output_client_if_requested "${client_name}" || return 1
+  # show-links 是纯查看：不重写任何文件，输出文件丢了就明说。
   [[ -f "${OUTPUT_FILE}" ]] || die "找不到输出文件：${OUTPUT_FILE}"
   cat "${OUTPUT_FILE}"
 
@@ -139,89 +48,11 @@ show_links() {
   fi
 }
 
-add_client_cmd() {
-  local client_name=""
-  local reality_uuid=""
-  local xhttp_uuid=""
-  local show_qr=0
-
-  while [[ $# -gt 0 ]]; do
-    if handle_change_common_arg "${1}"; then
-      shift
-      continue
-    fi
-
-    case "${1}" in
-      --name|--client|--client-name)
-        assign_option_value client_name "${1}" "${@:2}"
-        shift 2
-        ;;
-      --name=*|--client=*|--client-name=*)
-        client_name="${1#*=}"
-        shift
-        ;;
-      --reality-uuid)
-        assign_option_value reality_uuid "${1}" "${@:2}"
-        shift 2
-        ;;
-      --reality-uuid=*)
-        reality_uuid="${1#*=}"
-        shift
-        ;;
-      --xhttp-uuid)
-        assign_option_value xhttp_uuid "${1}" "${@:2}"
-        shift 2
-        ;;
-      --xhttp-uuid=*)
-        xhttp_uuid="${1#*=}"
-        shift
-        ;;
-      --qr)
-        show_qr=1
-        shift
-        ;;
-      --*)
-        die "未知的 add-client 参数：${1}"
-        ;;
-      *)
-        [[ -z "${client_name}" ]] || die "只能指定一个客户端名称。"
-        client_name="${1}"
-        shift
-        ;;
-    esac
-  done
-
-  begin_managed_change || return 1
-  if [[ -z "${client_name}" ]]; then
-    prompt_with_default client_name "新客户端名称" ""
-  fi
-
-  reality_uuid="${reality_uuid:-$(random_uuid)}"
-  xhttp_uuid="${xhttp_uuid:-$(random_uuid)}"
-  append_node_client_record "${client_name}" "${reality_uuid}" "${xhttp_uuid}"
-
-  log_step "写入客户端配置。"
-  OUTPUT_CLIENT_NAME="${client_name}"
-  # 失败时里面已经回滚了，这里不停下来就会接着报「已添加」并把链接打出来——
-  # 那是一个跑着的配置里根本不存在的客户端。
-  apply_xray_only_managed_update || return 1
-  log_success "客户端 ${client_name} 已添加。"
-  log "备份目录：${BACKUP_DIR}"
-  # 这个 if 本来就是函数最后一条语句，退出码会原样传出去；写出来是给 lint 看的，
-  # 也免得以后在 fi 后面加一行就把 show_links 的失败悄悄吃掉。
-  if [[ "${show_qr}" -eq 1 ]]; then
-    show_links --client "${client_name}" --qr || return 1
-  else
-    show_links --client "${client_name}" || return 1
-  fi
-}
-
 xray_managed_service_units() {
   printf '%s\n' \
     "xray.service" \
     "haproxy.service" \
     "nginx.service" \
-    "${CORE_HEALTH_TIMER_NAME}" \
     "${NET_SERVICE_NAME}"
 }
 
@@ -229,8 +60,7 @@ restart_service_units() {
   printf '%s\n' \
     "xray.service" \
     "haproxy.service" \
-    "nginx.service" \
-    "${CORE_HEALTH_TIMER_NAME}"
+    "nginx.service"
 
   if [[ "${ENABLE_NET_OPT:-no}" == "yes" ]]; then
     printf '%s\n' "${NET_SERVICE_NAME}"
@@ -285,10 +115,7 @@ diagnose_cmd() {
   local xray_state=""
   local haproxy_state=""
   local nginx_state=""
-  local core_health_state=""
   local warp_probe_result=""
-  local core_1h=""
-  local core_24h=""
   local -a service_failures=()
   local -a port_failures=()
   local -a config_failures=()
@@ -316,14 +143,12 @@ diagnose_cmd() {
   xray_state="$(service_active_state 'xray.service')"
   haproxy_state="$(service_active_state 'haproxy.service')"
   nginx_state="$(service_active_state 'nginx.service')"
-  core_health_state="$(service_active_state "${CORE_HEALTH_TIMER_NAME}")"
 
   printf '%s\n' "Xray 诊断"
   printf '%s\n' "脚本版本: ${SCRIPT_VERSION}"
   printf '%s\n' "xray: ${xray_state}"
   printf '%s\n' "haproxy: ${haproxy_state}"
   printf '%s\n' "nginx: ${nginx_state}"
-  printf '%s\n' "核心巡检: ${core_health_state}"
   printf '%s\n' "监听 443: $(listening_port_text 443)"
   printf '%s\n' "监听 2443: $(listening_port_text 2443)"
   printf '%s\n' "监听 8001: $(listening_port_text 8001)"
@@ -341,13 +166,6 @@ diagnose_cmd() {
     warp_probe_result="$(warp_egress_probe_text)"
     printf '%s\n' "WARP 出口 IP: ${warp_probe_result}"
   fi
-  printf '%s\n' "核心自恢复: $(health_event_text CORE_HEALTH)"
-  printf '%s\n' "最近恢复记录: $(latest_health_history_text)"
-  core_1h="$(health_history_count 1 core)"
-  core_24h="$(health_history_count 24 core)"
-  printf '%s\n' "近1小时恢复: core=${core_1h}"
-  printf '%s\n' "近24小时恢复: core=${core_24h}"
-  printf '%s\n' "稳定性信号: $(stability_signal_text "${core_1h}" "${core_24h}")"
 
   [[ "${xray_state}" == "active" ]] || service_failures+=("xray 未运行")
   [[ "${haproxy_state}" == "active" ]] || service_failures+=("haproxy 未运行")
@@ -436,6 +254,7 @@ apply_config_cmd() {
   start_backup_session
   log_step "读取当前托管安装状态。"
   load_current_install_context
+  remove_legacy_managed_paths || return 1
   ensure_xray_user || return 1
 
   log_step "按当前状态重新生成托管配置。"
@@ -508,21 +327,15 @@ uninstall_cmd() {
   load_existing_state
 
   if [[ "${assume_yes}" -ne 1 ]]; then
+    read -r -p "该操作会停止服务并删除脚本托管文件，但保留已安装的软件包。是否继续？ [y/N]: " answer
+    answer="$(printf '%s' "${answer}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
+      die "已取消卸载。"
+    fi
     if [[ "${purge_packages}" -eq 1 ]]; then
-      printf '%s\n' "该操作会："
-      printf '%s\n' "  1. 停止并禁用 xray、haproxy、nginx、核心巡检与网络优化服务"
-      printf '%s\n' "  2. 删除全部脚本托管文件（含证书、订阅、备份以外的输出）"
-      printf '%s\n' "  3. 尝试卸载 $(managed_package_names | paste -sd' ' -)"
-      printf '%s\n' "  4. 清理 ${ACME_HOME}、${OP_LOG_DIR} 等路径"
-      read -r -p "确认请输入 purge（其它任何输入都会取消）: " answer
+      read -r -p "是否同时卸载软件包？输入 purge 确认（其它任何输入只删托管文件）: " answer
       if [[ "${answer}" != "purge" ]]; then
-        die "已取消卸载。"
-      fi
-    else
-      read -r -p "该操作会停止服务并删除脚本托管文件，但保留已安装的软件包。是否继续？ [y/N]: " answer
-      answer="$(printf '%s' "${answer}" | tr '[:upper:]' '[:lower:]')"
-      if [[ "${answer}" != "y" && "${answer}" != "yes" ]]; then
-        die "已取消卸载。"
+        purge_packages=0
       fi
     fi
   fi
@@ -530,7 +343,6 @@ uninstall_cmd() {
   while IFS= read -r unit_name; do
     stop_and_disable_service_if_present "${unit_name}"
   done < <(xray_managed_service_units)
-  warp_teardown_legacy
 
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" && -x "${ACME_SH_BIN}" && -n "${XHTTP_DOMAIN:-}" ]]; then
     "${ACME_SH_BIN}" --remove -d "${XHTTP_DOMAIN}" --ecc >/dev/null 2>&1 || true
@@ -545,12 +357,7 @@ uninstall_cmd() {
     "${XRAY_CONFIG_DIR}" \
     "${XRAY_ASSET_DIR}" \
     "${WARP_RULES_FILE}" \
-    "${HEALTH_STATE_FILE}" \
-    "${HEALTH_HISTORY_FILE}" \
     "${XRAY_SERVICE_FILE}" \
-    "${CORE_HEALTH_HELPER}" \
-    "${CORE_HEALTH_SERVICE_FILE}" \
-    "${CORE_HEALTH_TIMER_FILE}" \
     "${XRAY_LOGROTATE_FILE}" \
     "${HAPROXY_CONFIG}" \
     "${NGINX_CONFIG_FILE}" \
@@ -566,8 +373,8 @@ uninstall_cmd() {
     "/var/log/xray" \
     "/var/lib/xray" \
     "${OP_LOG_DIR}" \
-    "/var/lib/cloudflare-warp" \
     || return 1
+  remove_legacy_managed_paths || return 1
 
   systemctl daemon-reload
   mapfile -t units < <(xray_managed_service_units)
@@ -592,7 +399,7 @@ uninstall_cmd() {
 show_main_menu() {
   cat <<'EOF'
   1. 安装或重装
-  2. 查看节点链接
+  2. 查看节点链接与订阅地址
   3. 运行诊断
   4. 刷新状态面板
   5. 重启服务
@@ -600,21 +407,15 @@ show_main_menu() {
   7. 升级 Xray 核心
   8. 轮换节点 UUID
   9. 修改 REALITY SNI
-  10. 修改 XHTTP 路径
-  11. 修改节点名前缀
-  12. 开关 WARP 分流
-  13. 修改 WARP 分流规则
-  14. 修改证书模式 / CDN 域名（当前节点全部客户端）
-  15. 续期 / 刷新证书
-  16. 抢修文件权限
-  17. 卸载托管文件
-  18. 完全卸载（含软件包）
-  19. 查看原始服务详情
-  20. 帮助
-  21. 添加客户端
-  22. 查看客户端列表
-  23. 重新应用网络优化
-  24. 重新生成托管配置
+ 10. 修改 XHTTP 路径
+ 11. 开关 WARP 分流
+ 12. 查看 WARP 分流规则
+ 13. 修改证书模式 / CDN 域名
+ 14. 续期 / 刷新证书
+ 15. 抢修文件权限
+ 16. 卸载
+ 17. 重新应用网络优化
+ 18. 重新生成托管配置
   0. 退出
 EOF
 }
@@ -633,19 +434,12 @@ script_lock_command_needs_lock() {
   fi
 
   case "${command}" in
-    menu|status|diagnose|list-clients|help|--help|-h|version|--version|-v)
+    menu|status|diagnose|help|--help|-h|version|--version|-v)
       # 菜单本身不写任何东西；菜单里选中的动作会各自再进一次 run_cli_command 并单独加锁。
       return 1
       ;;
     show-links)
-      # 只读地 cat 输出文件；只有 --client 会重写输出与订阅文件。
-      for arg in "$@"; do
-        case "${arg}" in
-          --client|--client-name|--client=*|--client-name=*)
-            return 0
-            ;;
-        esac
-      done
+      # 只读地 cat 输出文件。
       return 1
       ;;
   esac
@@ -719,9 +513,6 @@ dispatch_cli_command() {
     change-path)
       change_path_cmd "$@"
       ;;
-    change-label-prefix)
-      change_label_prefix_cmd "$@"
-      ;;
     change-warp)
       change_warp_cmd "$@"
       ;;
@@ -737,17 +528,8 @@ dispatch_cli_command() {
     uninstall)
       uninstall_cmd "$@"
       ;;
-    purge)
-      uninstall_cmd --purge "$@"
-      ;;
     show-links)
       show_links "$@"
-      ;;
-    add-client)
-      add_client_cmd "$@"
-      ;;
-    list-clients)
-      list_clients_cmd "$@"
       ;;
     diagnose)
       diagnose_cmd "$@"
@@ -791,20 +573,14 @@ run_menu_choice() {
     8) run_cli_command change-uuid ;;
     9) run_cli_command change-sni ;;
     10) run_cli_command change-path ;;
-    11) run_cli_command change-label-prefix ;;
-    12) run_cli_command change-warp ;;
-    13) run_cli_command change-warp-rules ;;
-    14) run_cli_command change-cert-mode ;;
-    15) run_cli_command renew-cert ;;
-    16) run_cli_command repair-perms ;;
-    17) run_cli_command uninstall ;;
-    18) run_cli_command purge ;;
-    19) run_cli_command status --raw ;;
-    20) run_cli_command help ;;
-    21) run_cli_command add-client ;;
-    22) run_cli_command list-clients ;;
-    23) run_cli_command apply-net-opt ;;
-    24) run_cli_command apply-config ;;
+    11) run_cli_command change-warp ;;
+    12) run_cli_command change-warp-rules --list ;;
+    13) run_cli_command change-cert-mode ;;
+    14) run_cli_command renew-cert ;;
+    15) run_cli_command repair-perms ;;
+    16) run_cli_command uninstall ;;
+    17) run_cli_command apply-net-opt ;;
+    18) run_cli_command apply-config ;;
     *)
       warn "未知的菜单项：${1}"
       return 1
@@ -813,24 +589,26 @@ run_menu_choice() {
 }
 
 main_menu() {
-  local choice=""
-
-  while true; do
-    if [[ -t 1 ]]; then
-      clear >/dev/null 2>&1 || true
-    fi
-    show_dashboard_brief
-    show_main_menu
-    read -r -p "请选择: " choice
-    if [[ "${choice}" == "0" ]]; then
-      exit 0
-    fi
-    IN_MAIN_MENU=1
-    # 这个 `|| true` 是菜单必须的：单次操作失败不能把菜单进程带走。
-    # 代价是它同样会把整条调用链的 errexit 豁免掉（见 run_cli_command 里的说明），
-    # 所以菜单这条路上的失败也只能靠底下的 `|| return 1` 传回来。
-    run_menu_choice "${choice}" || true
-    IN_MAIN_MENU=0
-    pause_after_menu_action
-  done
+  cat <<'EOF'
+  1. 安装或重装
+  2. 查看节点链接与订阅地址
+  3. 运行诊断
+  4. 刷新状态面板
+  5. 重启服务
+  6. 更新脚本本身
+  7. 升级 Xray 核心
+  8. 轮换节点 UUID
+  9. 修改 REALITY SNI
+ 10. 修改 XHTTP 路径
+ 11. 开关 WARP 分流
+ 12. 查看 WARP 分流规则
+ 13. 修改证书模式 / CDN 域名
+ 14. 续期 / 刷新证书
+ 15. 抢修文件权限
+ 16. 卸载
+ 17. 重新应用网络优化
+ 18. 重新生成托管配置
+  0. 退出
+EOF
 }
+

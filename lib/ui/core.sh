@@ -137,9 +137,6 @@ pretty_cert_mode() {
     existing)
       printf '现有证书'
       ;;
-    cf-origin-ca)
-      printf 'Cloudflare Origin CA'
-      ;;
     acme-dns-cf)
       printf 'ACME DNS CF'
       ;;

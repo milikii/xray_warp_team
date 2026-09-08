@@ -20,16 +20,12 @@ usage() {
   ${command_name} change-uuid [参数]
   ${command_name} change-sni [参数]
   ${command_name} change-path [参数]
-  ${command_name} change-label-prefix [参数]
   ${command_name} change-warp [参数]
   ${command_name} change-warp-rules [参数]
   ${command_name} change-cert-mode [参数]
   ${command_name} renew-cert [参数]
   ${command_name} uninstall [--yes] [--purge]
-  ${command_name} purge [--yes]
-  ${command_name} show-links [--client NAME] [--qr]
-  ${command_name} add-client NAME [参数]
-  ${command_name} list-clients
+  ${command_name} show-links [--qr]
   ${command_name} diagnose
   ${command_name} status [--raw]
   ${command_name} restart
@@ -62,11 +58,12 @@ usage() {
   --xhttp-xpadding-header VALUE     xpadding Header 名，默认 Referer。
   --xhttp-xpadding-placement VALUE  xpadding placement，默认 queryInHeader。
   --xhttp-xpadding-method VALUE     xpadding method，默认 tokenish。
-  --cert-mode VALUE           证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
-  --cert-file VALUE           existing / cf-origin-ca 模式使用的证书文件。
-  --key-file VALUE            existing / cf-origin-ca 模式使用的私钥文件。
-  --cert-pem VALUE            existing / cf-origin-ca 模式下仅支持 @文件路径；交互模式可直接粘贴 PEM。
-  --key-pem VALUE             existing / cf-origin-ca 模式下仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --cert-mode VALUE           证书模式：self-signed、existing、acme-dns-cf。
+                              existing 同时接受现有证书文件和 Cloudflare Origin CA 证书。
+  --cert-file VALUE           existing 模式使用的证书文件。
+  --key-file VALUE            existing 模式使用的私钥文件。
+  --cert-pem VALUE            existing 模式下仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --key-pem VALUE             existing 模式下仅支持 @文件路径；交互模式可直接粘贴 PEM。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA，默认 letsencrypt。
   --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
@@ -92,14 +89,6 @@ usage() {
   --reality-only              只轮换 REALITY UUID。
   --xhttp-only                只轮换 XHTTP UUID。
 
-客户端参数:
-  add-client NAME             添加一个命名客户端，并为它生成独立的 REALITY / XHTTP UUID。
-  --client NAME               show-links 使用指定客户端重新生成输出与订阅文件。
-  --client-name VALUE         add-client 使用的客户端名称。
-  --reality-uuid VALUE        为新客户端指定 REALITY UUID；省略时自动生成。
-  --xhttp-uuid VALUE          为新客户端指定 XHTTP UUID；省略时自动生成。
-  list-clients                输出当前可用客户端名称。
-
 变更 SNI 参数:
   --non-interactive           非交互运行。
   --reality-sni VALUE         新的 REALITY 可见 SNI。
@@ -107,10 +96,6 @@ usage() {
 变更路径参数:
   --non-interactive           非交互运行。
   --xhttp-path VALUE          新的 XHTTP 路径。
-
-变更节点名前缀参数:
-  --non-interactive           非交互运行。
-  --node-label-prefix VALUE   新的导出节点名前缀。
 
 变更 WARP 参数:
   --non-interactive           非交互运行。
@@ -135,13 +120,12 @@ usage() {
 
 变更证书模式参数:
   --non-interactive           非交互运行。
-  --cert-mode VALUE           新证书模式：self-signed、existing、cf-origin-ca、acme-dns-cf。
-                              该变更作用于当前 VPS 上共享 XHTTP 域名的全部客户端链接。
+  --cert-mode VALUE           新证书模式：self-signed、existing、acme-dns-cf。
   --xhttp-domain VALUE        新的 XHTTP CDN 域名，可选。
-  --cert-file VALUE           existing / cf-origin-ca 模式使用的证书文件。
-  --key-file VALUE            existing / cf-origin-ca 模式使用的私钥文件。
-  --cert-pem VALUE            existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
-  --key-pem VALUE             existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --cert-file VALUE           existing 模式使用的证书文件。
+  --key-file VALUE            existing 模式使用的私钥文件。
+  --cert-pem VALUE            existing 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --key-pem VALUE             existing 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA。
   --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
@@ -150,10 +134,10 @@ usage() {
 
 续期证书参数:
   --non-interactive           非交互运行。
-  --cert-file VALUE           existing / cf-origin-ca 模式使用的证书文件。
-  --key-file VALUE            existing / cf-origin-ca 模式使用的私钥文件。
-  --cert-pem VALUE            existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
-  --key-pem VALUE             existing / cf-origin-ca 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --cert-file VALUE           existing 模式使用的证书文件。
+  --key-file VALUE            existing 模式使用的私钥文件。
+  --cert-pem VALUE            existing 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
+  --key-pem VALUE             existing 模式仅支持 @文件路径；交互模式可直接粘贴 PEM。
   --acme-email VALUE          acme.sh 注册邮箱。
   --acme-ca VALUE             acme.sh 使用的 CA。
   --cf-dns-token VALUE        acme dns_cf 模式仅支持 @文件路径或环境变量 CF_DNS_TOKEN。
@@ -168,7 +152,7 @@ usage() {
   --raw                       显示原始 systemctl 输出，而不是面板。
 
 诊断命令:
-  diagnose                    一次性输出服务、端口、配置、TLS 与最近自恢复信息。
+  diagnose                    一次性输出服务、端口、配置与 TLS 信息。
 
 脚本维护命令:
   update-script               下载并更新脚本自身的持久化 bundle 与管理命令。
@@ -176,7 +160,6 @@ usage() {
   apply-config                按当前状态重新生成托管配置，让新版模板参数生效。
 
 链接参数:
-  --client NAME               选择要输出的客户端；不传时默认保持原有输出，多客户端交互终端会提示选择。
   --qr                        额外输出分享链接二维码；需要系统已安装 qrencode。
 
 示例:
@@ -190,14 +173,10 @@ usage() {
   ${command_name} change-uuid
   ${command_name} change-sni --reality-sni www.stanford.edu
   ${command_name} change-path --xhttp-path /assets/v3
-  ${command_name} change-label-prefix --node-label-prefix HKG
   ${command_name} change-warp --disable-warp
   ${command_name} change-warp-rules --add-domain chat.openai.com
   ${command_name} change-cert-mode --cert-mode self-signed
-  ${command_name} change-cert-mode --cert-mode cf-origin-ca
   ${command_name} renew-cert
-  ${command_name} add-client phone
-  ${command_name} show-links --client phone
   ${command_name} uninstall --yes
   ${command_name} uninstall --purge --yes
   ${command_name} install --non-interactive \
@@ -245,7 +224,6 @@ option_secret_env_name() {
   case "${1}" in
     --warp-private-key) printf 'WARP_PRIVATE_KEY' ;;
     --warp-profile) printf 'WARP_PROFILE' ;;
-    --cf-api-token) printf 'CF_API_TOKEN' ;;
     --cf-dns-token) printf 'CF_DNS_TOKEN' ;;
     --reality-private-key) printf 'REALITY_PRIVATE_KEY' ;;
     *) return 1 ;;
@@ -254,7 +232,7 @@ option_secret_env_name() {
 
 option_requires_indirect_value() {
   case "${1}" in
-    --warp-private-key|--warp-profile|--cf-api-token|--cf-dns-token|--reality-private-key|--cert-pem|--key-pem)
+    --warp-private-key|--warp-profile|--cf-dns-token|--reality-private-key|--cert-pem|--key-pem)
       return 0
       ;;
     *)

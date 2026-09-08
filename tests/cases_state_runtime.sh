@@ -115,17 +115,6 @@ EOF
 - 指纹: firefox
 EOF
 
-  cat > "${HEALTH_STATE_FILE}" <<'EOF'
-CORE_HEALTH_LAST_CHECK_AT='2026-04-21T12:00:00Z'
-CORE_HEALTH_LAST_ACTION='ok'
-CORE_HEALTH_LAST_REASON='services healthy'
-EOF
-
-  cat > "${HEALTH_HISTORY_FILE}" <<'EOF'
-2026-04-21T12:00:00Z | core | ok | services healthy
-2026-04-21T12:10:00Z | core | restarted | service inactive
-EOF
-
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
   REALITY_PUBLIC_KEY="" XHTTP_UUID="" XHTTP_DOMAIN="" XHTTP_PATH="" XHTTP_VLESS_DECRYPTION="" \
   XHTTP_VLESS_ENCRYPTION_ENABLED="" TLS_ALPN="" SERVER_IP="" NODE_LABEL_PREFIX="" FINGERPRINT="" \
@@ -156,13 +145,6 @@ EOF
   [[ -z "${XHTTP_ECH_FORCE_QUERY}" ]]
   [[ "${XHTTP_XPADDING_ENABLED}" == "no" ]]
   [[ "${XHTTP_XPADDING_KEY}" == "x_padding" ]]
-  [[ "${CORE_HEALTH_LAST_ACTION}" == "ok" ]]
-  [[ "$(latest_health_history_text)" == "2026-04-21T12:10:00Z | core | restarted | service inactive" ]]
-  HEALTH_HISTORY_NOW='2026-04-21T12:30:00Z'
-  [[ "$(health_history_count_text 1 core)" == "1" ]]
-  [[ "$(health_history_count_text 24 core)" == "1" ]]
-  [[ "$(stability_signal_text)" == *"稳定"* ]]
-
   REALITY_UUID="" REALITY_SNI="" REALITY_TARGET="" REALITY_SHORT_ID="" REALITY_PRIVATE_KEY="" \
   REALITY_PUBLIC_KEY="" XHTTP_UUID="" XHTTP_DOMAIN="" XHTTP_PATH="" XHTTP_VLESS_DECRYPTION="" \
   XHTTP_VLESS_ENCRYPTION_ENABLED="" TLS_ALPN="" SERVER_IP="" NODE_LABEL_PREFIX="" FINGERPRINT="" \
@@ -186,8 +168,10 @@ run_state_version_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   cat > "${STATE_FILE}" <<'EOF'
-STATE_VERSION='0'
-TLS_ALPN='h2'
+STATE_VERSION='1'
+CERT_MODE='cf-origin-ca'
+NODE_CLIENTS_TEXT=$'phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444'
+ACME_EMAIL='ops@example.com'
 EOF
 
   warn() {
@@ -195,31 +179,18 @@ EOF
   }
 
   load_existing_state
-  [[ "${TLS_ALPN}" == "h2" ]]
-  printf '%s' "${warned}" | grep -q '旧版本状态文件'
-}
-
-run_health_history_count_without_python_case() {
-  local workdir=""
-
-  workdir="$(mktemp -d)"
-  prepare_workspace "${workdir}"
-  HEALTH_HISTORY_FILE="${workdir}/health-history.log"
-  cat > "${HEALTH_HISTORY_FILE}" <<'EOF'
-2026-04-21T12:00:00Z | core | ok | services healthy
-2026-04-21T12:10:00Z | core | restarted | service inactive
-2026-04-21T12:05:00Z | warp | restarted | warp probe failed
-EOF
-
-  python3() {
-    return 99
-  }
-
-  HEALTH_HISTORY_NOW='2026-04-21T12:30:00Z'
-  [[ "$(health_history_count_text 1 core)" == "1" ]]
-  [[ "$(health_history_count_text 1 warp)" == "1" ]]
-  [[ "$(health_history_count_text 24 core)" == "1" ]]
-  unset -f python3
+  [[ "${CERT_MODE}" == "existing" ]]
+  [[ "${NODE_CLIENTS_TEXT}" == "" ]]
+  printf '%s' "${warned}" | grep -q 'cf-origin-ca 已并入 existing'
+  printf '%s' "${warned}" | grep -q '多客户端功能已移除'
+  write_state_file
+  # 写回后 STATE_VERSION=2 且不含 legacy 键
+  grep -q "STATE_VERSION=2" "${STATE_FILE}"
+  assert_absent "NODE_CLIENTS_TEXT" "${STATE_FILE}"
+  assert_absent "CF_ZONE_ID" "${STATE_FILE}"
+  assert_absent "CF_API_TOKEN" "${STATE_FILE}"
+  assert_absent "CF_CERT_VALIDITY" "${STATE_FILE}"
+  [[ "${ACME_EMAIL}" == "ops@example.com" ]]
 }
 
 run_state_file_decode_case() {
@@ -228,71 +199,17 @@ run_state_file_decode_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
 cat > "${STATE_FILE}" <<'EOF'
-STATE_VERSION=1
-CF_API_TOKEN=tok\'en\ 0\ \[\]
+STATE_VERSION=2
 XHTTP_ECH_CONFIG_LIST=$'line1\nline2'
 WARP_RULES_TEXT=$'geosite:google\ndomain:github.com'
 NODE_CLIENTS_TEXT=$'tab\tbackslash\\done'
 EOF
 
   load_existing_state
-  [[ "${CF_API_TOKEN}" == "tok'en 0 []" ]]
   [[ "${XHTTP_ECH_CONFIG_LIST}" == $'line1\nline2' ]]
   [[ "${WARP_RULES_TEXT}" == $'geosite:google\ndomain:github.com' ]]
+  # legacy 键只读：版本为 2 时照常解码进来，但 state_file_text 永不写出
   [[ "${NODE_CLIENTS_TEXT}" == $'tab\tbackslash\\done' ]]
-}
-
-run_node_client_state_case() {
-  local duplicate_output=""
-  local workdir=""
-
-  workdir="$(mktemp -d)"
-  prepare_workspace "${workdir}"
-  reset_feature_defaults
-
-  SERVER_IP="203.0.113.50"
-  NODE_LABEL_PREFIX="HKG"
-  REALITY_UUID="11111111-1111-1111-1111-111111111111"
-  REALITY_SNI="reality.example.com"
-  REALITY_TARGET="www.scu.edu:443"
-  REALITY_SHORT_ID="abcd1234"
-  REALITY_PRIVATE_KEY="private-key-value"
-  REALITY_PUBLIC_KEY="public-key-value"
-  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
-  XHTTP_DOMAIN="cdn.example.com"
-  XHTTP_PATH="/assets/v3"
-  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
-  XHTTP_VLESS_ENCRYPTION=""
-  XHTTP_VLESS_DECRYPTION="none"
-  TLS_ALPN="h2"
-  FINGERPRINT="chrome"
-  ENABLE_WARP="no"
-  ENABLE_NET_OPT="no"
-  CERT_MODE="existing"
-  NODE_CLIENTS_TEXT=$'phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444\nlaptop|55555555-5555-5555-5555-555555555555|66666666-6666-6666-6666-666666666666'
-
-  write_state_file
-  bash -n "${STATE_FILE}"
-
-  NODE_CLIENTS_TEXT=""
-  load_existing_state
-  [[ "$(node_client_count)" == "3" ]]
-  [[ "$(node_client_names_csv)" == "default, phone, laptop" ]]
-  [[ "$(node_client_record_for_name phone)" == "phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444" ]]
-
-  append_node_client_record tablet "77777777-7777-7777-7777-777777777777" "88888888-8888-8888-8888-888888888888"
-  [[ "$(node_client_count)" == "4" ]]
-  node_client_exists tablet
-
-  if duplicate_output="$(append_node_client_record duplicate-reality "11111111-1111-1111-1111-111111111111" "99999999-9999-9999-9999-999999999999" 2>&1)"; then
-    return 1
-  fi
-  [[ "${duplicate_output}" == *"REALITY UUID 已被客户端 default 使用。"* ]]
-
-  if duplicate_output="$(append_node_client_record duplicate-xhttp "99999999-9999-9999-9999-999999999999" "44444444-4444-4444-4444-444444444444" 2>&1)"; then
-    return 1
-  fi
-  [[ "${duplicate_output}" == *"XHTTP UUID 已被客户端 phone 使用。"* ]]
 }
 
 run_runtime_context_reset_case() {
@@ -301,20 +218,18 @@ run_runtime_context_reset_case() {
   workdir="$(mktemp -d)"
   prepare_workspace "${workdir}"
   WARP_RULES_FILE="${workdir}/missing-rules.list"
-  HEALTH_STATE_FILE="${workdir}/missing-health.env"
-
   REALITY_UUID="stale-reality"
   XHTTP_DOMAIN="stale.example.com"
   ENABLE_WARP="yes"
   WARP_RULES_TEXT="domain:stale.example.com"
-  CORE_HEALTH_LAST_ACTION="restarted"
+  SUB_TOKEN="stale-token"
 
   load_dashboard_context
   [[ -z "${REALITY_UUID}" ]]
   [[ -z "${XHTTP_DOMAIN}" ]]
   [[ -z "${ENABLE_WARP}" ]]
   [[ -z "${WARP_RULES_TEXT}" ]]
-  [[ -z "${CORE_HEALTH_LAST_ACTION}" ]]
+  [[ -z "${SUB_TOKEN}" ]]
   [[ "$(warp_rule_count_text)" == "0" ]]
 }
 
@@ -1333,6 +1248,11 @@ run_dead_global_lint_case() {
 
   while IFS= read -r name; do
     [[ -n "${name}" ]] || continue
+    # 后续阶段的占位常量（docs/PLAN.md §4.1）：阶段 2 用 REALITY_FALLBACK_PORT，
+    # 阶段 3 用 SUB_WEB_ROOT。等对应阶段落地后从这份名单里摘掉。
+    case "${name}" in
+      REALITY_FALLBACK_PORT|SUB_WEB_ROOT) continue ;;
+    esac
     printf '[fail] %s 在 xtun.sh 里赋了值，但全仓库没有任何读取点——要么是拼错了名字，要么该删\n' \
       "${name}" >&2
     violations=$((violations + 1))
@@ -1472,7 +1392,7 @@ run_tls_stage_failure_case() {
   SSL_DIR="${workdir}/ssl"
   TLS_CERT_FILE="${SSL_DIR}/cert.pem"
   TLS_KEY_FILE="${SSL_DIR}/key.pem"
-  CERT_MODE="cf-origin-ca"
+  CERT_MODE="existing"
   XHTTP_DOMAIN="cdn.example.com"
   CERT_SOURCE_PEM=""
   KEY_SOURCE_PEM=""
@@ -1794,7 +1714,7 @@ run_restart_optional_service_case() {
   [[ " ${restarted[*]} " == *" xray.service "* ]]
   [[ " ${restarted[*]} " == *" haproxy.service "* ]]
   [[ " ${restarted[*]} " == *" nginx.service "* ]]
-  [[ " ${restarted[*]} " == *" ${CORE_HEALTH_TIMER_NAME} "* ]]
+  [[ " ${restarted[*]} " != *" xtun-core-health.timer "* ]]
   [[ " ${restarted[*]} " != *" warp-svc.service "* ]]
   [[ " ${restarted[*]} " != *" ${NET_SERVICE_NAME} "* ]]
 

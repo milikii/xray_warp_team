@@ -12,43 +12,12 @@ clear_existing_cert_inputs() {
   KEY_SOURCE_PEM=""
 }
 
-clear_cf_origin_ca_settings() {
-  CF_ZONE_ID=""
-  CF_API_TOKEN=""
-  CF_CERT_VALIDITY="${DEFAULT_CF_CERT_VALIDITY}"
-}
-
 clear_acme_dns_cf_settings() {
   ACME_EMAIL=""
   ACME_CA="${DEFAULT_ACME_CA}"
   CF_DNS_TOKEN=""
   CF_DNS_ACCOUNT_ID=""
   CF_DNS_ZONE_ID=""
-}
-
-prompt_cf_origin_ca_inputs() {
-  resolve_value_source CERT_SOURCE_PEM
-  resolve_value_source KEY_SOURCE_PEM
-
-  if [[ "${NON_INTERACTIVE}" -eq 1 ]]; then
-    if [[ -n "${CERT_SOURCE_FILE}" || -n "${KEY_SOURCE_FILE}" ]]; then
-      [[ -n "${CERT_SOURCE_FILE}" && -n "${KEY_SOURCE_FILE}" ]] || die "cf-origin-ca 模式下，证书文件路径和私钥文件路径必须同时提供。"
-      CERT_SOURCE_PEM=""
-      KEY_SOURCE_PEM=""
-      return
-    fi
-
-    [[ -n "${CERT_SOURCE_PEM}" && -n "${KEY_SOURCE_PEM}" ]] \
-      || die "cf-origin-ca 模式下，请提供 --cert-pem/--key-pem，或 --cert-file/--key-file。"
-    CERT_SOURCE_FILE=""
-    KEY_SOURCE_FILE=""
-    return
-  fi
-
-  CERT_SOURCE_FILE=""
-  KEY_SOURCE_FILE=""
-  prompt_multiline_value CERT_SOURCE_PEM "请输入 Cloudflare Origin CA 证书 PEM 内容"
-  prompt_multiline_value KEY_SOURCE_PEM "请输入 Cloudflare Origin CA 私钥 PEM 内容"
 }
 
 prompt_optional_cloudflare_scope() {
@@ -119,22 +88,14 @@ prompt_cert_mode_inputs() {
   case "${CERT_MODE}" in
     self-signed)
       clear_existing_cert_inputs
-      clear_cf_origin_ca_settings
       clear_acme_dns_cf_settings
       ;;
     existing)
       prepare_existing_cert_inputs
-      clear_cf_origin_ca_settings
-      clear_acme_dns_cf_settings
-      ;;
-    cf-origin-ca)
-      prompt_cf_origin_ca_inputs
-      clear_cf_origin_ca_settings
       clear_acme_dns_cf_settings
       ;;
     acme-dns-cf)
       clear_existing_cert_inputs
-      clear_cf_origin_ca_settings
       prompt_acme_dns_cf_inputs
       ;;
     *)
@@ -341,14 +302,14 @@ stage_and_promote_tls_assets() {
     existing)
       write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
-    cf-origin-ca)
-      write_existing_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
-      ;;
     acme-dns-cf)
       issue_acme_cf_cert "${stage_cert_file}" "${stage_key_file}" || return 1
       ;;
-    *)
+    self-signed)
       write_self_signed_tls_assets "${stage_cert_file}" "${stage_key_file}" || return 1
+      ;;
+    *)
+      die "不支持的证书模式：${CERT_MODE}"
       ;;
   esac
 

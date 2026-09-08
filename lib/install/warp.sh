@@ -175,9 +175,6 @@ ensure_warp_credentials() {
       WARP_PROFILE_SOURCE=""
       warp_import_profile "${profile_text}" || die "导入 WARP profile 失败。"
     else
-      if warp_legacy_team_detected; then
-        log "检测到旧版 WARP Team（warp-svc + SOCKS5）配置，正在迁移到 Xray 原生 wireguard 出站。"
-      fi
       warp_register_free_device \
         || die "无法取得 WARP WireGuard 凭据；请用 --warp-profile @文件路径 导入 wgcf profile.conf，或用 --disable-warp 关闭 WARP 分流。"
     fi
@@ -185,57 +182,4 @@ ensure_warp_credentials() {
   fi
 
   ensure_warp_outbound_format
-}
-
-legacy_warp_paths() {
-  printf '%s\n' \
-    "/var/lib/cloudflare-warp/mdm.xml" \
-    "/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg" \
-    "/etc/apt/sources.list.d/cloudflare-client.list" \
-    "/usr/local/sbin/xtun-warp-health.sh" \
-    "/etc/systemd/system/xtun-warp-health.service" \
-    "/etc/systemd/system/xtun-warp-health.timer"
-}
-
-warp_legacy_team_detected() {
-  local path=""
-
-  [[ "$(config_jq_read '.outbounds[] | select(.tag=="WARP") | .protocol')" == "socks" ]] && return 0
-  service_exists "warp-svc.service" && return 0
-  while IFS= read -r path; do
-    [[ -e "${path}" ]] && return 0
-  done < <(legacy_warp_paths)
-
-  return 1
-}
-
-warp_teardown_legacy() {
-  local paths=()
-  local path=""
-  local had_legacy="no"
-
-  if service_exists "xtun-warp-health.timer" || service_exists "warp-svc.service"; then
-    had_legacy="yes"
-  fi
-  stop_and_disable_service_if_present "xtun-warp-health.timer"
-  stop_and_disable_service_if_present "xtun-warp-health.service"
-  stop_and_disable_service_if_present "warp-svc.service"
-
-  while IFS= read -r path; do
-    if [[ -e "${path}" || -L "${path}" ]]; then
-      paths+=("${path}")
-      had_legacy="yes"
-    fi
-  done < <(legacy_warp_paths)
-
-  [[ "${had_legacy}" == "yes" ]] || return 0
-
-  log_step "清理旧版 WARP Team 托管文件。"
-  if [[ "${#paths[@]}" -gt 0 ]]; then
-    # 出站已经切过去了，这里删不掉旧文件不该把整条 change-warp 判成失败；
-    # 但也不能闷声跳过——下面那句 log 会说「已停用」，得让用户知道没清干净。
-    remove_managed_paths "${paths[@]}" || warn "旧版 WARP Team 托管文件未能全部清理，请手工检查。"
-  fi
-  systemctl daemon-reload >/dev/null 2>&1 || true
-  log "已停用 warp-svc；若要彻底移除守护进程请执行：apt-get purge -y cloudflare-warp && rm -rf /var/lib/cloudflare-warp"
 }

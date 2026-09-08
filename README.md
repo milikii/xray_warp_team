@@ -20,8 +20,7 @@
 
 - `haproxy + nginx + xray` 的混合前置与 `443` 端口复用
 - `Cloudflare WARP` 选择性出站（Xray 原生 WireGuard，无守护进程）
-- `Cloudflare Origin CA`、已有证书、自签证书、`acme.sh + Cloudflare DNS` 证书模式
-- 多客户端独立 UUID 导出
+- 现有证书（含 Cloudflare Origin CA）、自签证书、`acme.sh + Cloudflare DNS` 证书模式
 - `Joey BBRv3 + qdisc + RPS/XPS` 网络优化
 - 安装、变更、升级、卸载过程中的备份、校验、回滚和操作日志
 
@@ -32,7 +31,7 @@
 - 一台 Debian / Ubuntu VPS 同时提供 Reality、XHTTP CDN 和 XHTTP split 节点
 - 希望 Cloudflare CDN 只承载 XHTTP，Reality 走直连或灰云域名
 - 需要让部分目标域名走 Cloudflare WARP，其它流量保持直连
-- 需要后续通过 `xtun` 修改 SNI、路径、UUID、证书、WARP 和客户端导出
+- 需要后续通过 `xtun` 修改 SNI、路径、UUID、证书和 WARP
 
 不适合：
 
@@ -64,7 +63,7 @@ xtun
 
 后续维护都可以直接运行 `xtun`，不用再进入仓库目录。
 
-菜单顶部只画一块精简面板（服务状态、监听 443、WARP 开关、稳定性信号），不跑配置自检和 TLS 握手，所以翻菜单不会卡。需要完整体检时走菜单 `4`、`xtun status` 或 `xtun diagnose`。
+菜单顶部只画一块精简面板（服务状态、监听 443、WARP 开关），不跑配置自检和 TLS 握手，所以翻菜单不会卡。需要完整体检时走菜单 `4`、`xtun status` 或 `xtun diagnose`。
 
 停在菜单提示符上不会占住脚本锁，另一个终端里的 `xtun` 仍然可以正常执行变更；锁只在具体的写命令执行期间持有。
 
@@ -167,7 +166,7 @@ bash xtun.sh install --non-interactive \
 
 ```bash
 CF_DNS_TOKEN=xxxxxxxx xtun renew-cert --non-interactive
-xtun change-cert-mode --cert-mode cf-origin-ca --cert-pem @/root/cf-origin.pem --key-pem @/root/cf-origin.key
+xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key-pem @/root/cf-origin.key
 ```
 
 ## 架构说明
@@ -209,16 +208,10 @@ Reality、XHTTP CDN、XHTTP split 共享同一个 `443`。split 节点不增加�
 | `/etc/haproxy/haproxy.cfg` | haproxy 托管配置 |
 | `/etc/systemd/system/xray.service` | Xray systemd unit |
 | `/usr/local/etc/xray/node-meta.env` | xtun 状态文件 |
-| `/root/xtun-output.md` | 当前客户端的人类可读节点输出 |
-| `/root/xtun-subscriptions/vless-raw.txt` | Raw VLESS 订阅 |
-| `/root/xtun-subscriptions/vless-base64.txt` | Base64 VLESS 订阅 |
-| `/root/xtun-subscriptions/manifest.txt` | 订阅文件清单 |
-| `/root/xtun-subscriptions/qr/` | 可选二维码 PNG |
+| `/root/xtun-output.md` | 人类可读节点输出 |
 | `/root/xtun-backups/` | 变更备份目录 |
 | `/var/log/xtun/operations.log` | 全局操作日志 |
 | `/var/www/xtun-fallback` | 本地静态伪装站 |
-
-如果系统里有 `qrencode`，脚本会生成订阅二维码 PNG；没有时只跳过二维码，不影响安装。
 
 ## 日常命令
 
@@ -228,7 +221,7 @@ Reality、XHTTP CDN、XHTTP split 共享同一个 `443`。split 节点不增加�
 xtun status
 ```
 
-状态面板会显示服务状态、监听端口、证书到期时间、WARP 出站模式、WARP 规则数量、最近备份、自恢复状态和稳定性信号。
+状态面板会显示服务状态、监听端口、证书到期时间、WARP 出站模式、WARP 规则数量和最近备份。
 
 查看原始 systemd 输出：
 
@@ -250,7 +243,6 @@ xtun diagnose
 - nginx 的 `worker_connections`（低于 4096 会给出提示，但不算失败）
 - 本地 TLS 握手
 - WARP 出站配置与 Endpoint 解析
-- 最近核心自恢复记录
 
 关键项失败时会以非 0 退出，适合接入外部监控。
 
@@ -261,38 +253,13 @@ xtun show-links
 xtun show-links --qr
 ```
 
-多客户端场景下，指定客户端：
-
-```bash
-xtun show-links --client phone
-```
-
-`show-links` 属于查看类命令：不加 `--client` 时只读输出文件，加了 `--client` 也只是按当前状态重新生成输出与订阅文件（写入是原子的），不会新开备份会话去挤掉真正的变更备份。
-
-### 多客户端
-
-默认安装会保留一组 `default` 客户端。新增客户端会复用服务端配置，但生成独立的 Reality UUID 和 XHTTP UUID。
-
-```bash
-xtun add-client phone
-xtun list-clients
-xtun show-links --client phone
-```
-
-指定 UUID：
-
-```bash
-xtun add-client phone \
-  --reality-uuid 33333333-3333-3333-3333-333333333333 \
-  --xhttp-uuid 44444444-4444-4444-4444-444444444444
-```
+`show-links` 属于查看类命令：只读输出文件，不重写任何托管文件。加 `--qr` 可额外输出分享链接二维码（需要 `qrencode`）。
 
 ### 常用变更
 
 ```bash
 xtun change-sni --reality-sni reality.example.com
 xtun change-path --xhttp-path /assets/v3
-xtun change-label-prefix --node-label-prefix HKG
 xtun change-uuid
 xtun change-uuid --reality-only
 xtun change-uuid --xhttp-only
@@ -300,7 +267,7 @@ xtun change-uuid --xhttp-only
 
 这些 `change-*` 命令会走现有校验、重启、回滚流程。应用失败时会回滚最近一次托管变更。
 
-回滚只还原托管的配置文件。健康状态、自恢复历史和 `/var/log/xtun` 下的操作日志不进回滚清单——它们本来就不进备份，排障时恰恰要看这份现场记录。
+回滚只还原托管的配置文件。`/var/log/xtun` 下的操作日志不进回滚清单——它本来就不进备份，排障时恰恰要看这份现场记录。
 
 参数支持 `--opt value` 和 `--opt=value` 两种写法，例如 `xtun change-sni --reality-sni=reality.example.com`。
 
@@ -335,7 +302,7 @@ xtun update-script
 xtun apply-config
 ```
 
-`apply-config` 走和 `change-*` 一样的备份、校验、重启、回滚流程，但不改任何客户端参数，所以不会重刷部署文档。
+`apply-config` 走和 `change-*` 一样的备份、校验、重启、回滚流程，但不改节点参数，所以不会重刷部署文档。
 
 ### 托管配置里的自定义片段
 
@@ -415,9 +382,9 @@ xtun uninstall --yes
 xtun uninstall --purge --yes
 ```
 
-`--purge` 会尝试卸载 `haproxy`、`nginx`、`jq`、`uuid-runtime`，并清理 `/root/.acme.sh`、`/var/log/xtun` 等路径。旧版本装过 `cloudflare-warp` 的机器，也会一并清掉遗留的 APT 源、keyring 和 `/var/lib/cloudflare-warp`。
+`--purge` 会尝试卸载 `haproxy`、`nginx`、`jq`、`uuid-runtime`，并清理 `/root/.acme.sh`、`/var/log/xtun` 等路径。旧版本装过 `cloudflare-warp` 或带过核心巡检 timer 的机器，卸载时会一并清掉遗留的 APT 源、keyring、`/var/lib/cloudflare-warp` 和巡检单元。
 
-不带 `--yes` 时会要求二次确认：普通卸载回答 `y`，`--purge` 需要完整输入 `purge`（确认前会先列出这次会做的四件事）。菜单里的 `17. 卸载托管文件` 和 `18. 完全卸载（含软件包）` 同样要走这道确认，不会一按回车就删。
+不带 `--yes` 时会要求二次确认：先回答 `y` 确认停止服务并删除托管文件，再输入 `purge` 才会同时卸载软件包。`--purge` / `--yes` 语义不变。
 
 ## WARP 出站
 
@@ -491,7 +458,7 @@ xtun change-warp-rules --reset-defaults
 
 说明：
 
-- 在交互终端里不带任何修改参数直接跑 `xtun change-warp-rules`（或走菜单 13），会进一个规则编辑器：`a` 添加、`d` 按序号或规则名删除、`r` 恢复默认、`s` 保存并应用、`q` 放弃退出。`q` 不写任何东西
+- 在交互终端里不带任何修改参数直接跑 `xtun change-warp-rules`（或走菜单 12），只打印当前规则和 CLI 用法，不做任何修改
 - 规则和改动前完全一致时直接返回，不会重启服务。分流规则变更要重启 xray/haproxy/nginx，会掐断所有在跑的连接，所以「点进去看一眼」不该付这个代价
 - 备份会话也推迟到确认真有变更之后才开，看一眼不会挤掉真正的变更备份
 - 改完只打印新规则，不再输出整份部署文档：WARP 出站和分流规则都在服务端侧，客户端链接一个字都不会变
@@ -514,11 +481,10 @@ xtun diagnose --warp-probe
 | 模式 | 适合场景 | Cloudflare SSL/TLS |
 | --- | --- | --- |
 | `self-signed` | 快速测试 | `Full` |
-| `existing` | 已有 Cloudflare Origin CA 或 Let's Encrypt 证书 | `Full (strict)` |
-| `cf-origin-ca` | 手动从 Cloudflare 面板生成 Origin CA | `Full (strict)` |
+| `existing` | 已有证书，包括 Let's Encrypt 或 Cloudflare Origin CA 证书 | `Full (strict)` |
 | `acme-dns-cf` | 用 `acme.sh + Cloudflare DNS API` 自动申请公有证书 | `Full (strict)` |
 
-已有证书：
+已有证书（Cloudflare Origin CA 证书同样走这一模式，可以给文件路径，也可以交互粘贴 PEM）：
 
 ```bash
 xtun change-cert-mode --cert-mode existing \
@@ -529,7 +495,7 @@ xtun change-cert-mode --cert-mode existing \
 Cloudflare Origin CA：
 
 ```bash
-xtun change-cert-mode --non-interactive --cert-mode cf-origin-ca \
+xtun change-cert-mode --non-interactive --cert-mode existing \
   --cert-pem @/root/cf-origin.pem \
   --key-pem @/root/cf-origin.key
 ```
@@ -558,7 +524,7 @@ xtun renew-cert
 2. `Reality` 域名建议灰云 / DNS only。
 3. SSL/TLS 模式和证书模式匹配：
    - `self-signed` -> `Full`
-   - `existing` / `cf-origin-ca` / `acme-dns-cf` -> `Full (strict)`
+   - `existing` / `acme-dns-cf` -> `Full (strict)`
 4. 使用 Cloudflare CDN 的 XHTTP 时，建议开启 gRPC。
 5. 为 XHTTP 路径创建缓存绕过规则，避免边缘缓存影响连接稳定性。
 

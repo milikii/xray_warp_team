@@ -63,134 +63,6 @@ EOF
   rm -f "${tmp_file}"
 }
 
-write_core_health_helper() {
-  local tmp_file=""
-
-  tmp_file="$(mktemp)"
-  cat > "${tmp_file}" <<EOF
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
-health_state_file='${HEALTH_STATE_FILE}'
-health_history_file='${HEALTH_HISTORY_FILE}'
-
-check_port() {
-  local port="\${1}"
-  ss -ltnH "( sport = :\${port} )" 2>/dev/null | grep -q .
-}
-
-write_health_state() {
-  local action="\${1}"
-  local reason="\${2}"
-  local tmp_file=""
-
-  mkdir -p "\$(dirname "\${health_state_file}")"
-  tmp_file="\$(mktemp "\$(dirname "\${health_state_file}")/.health-state.tmp.XXXXXX")"
-  if [[ -f "\${health_state_file}" ]]; then
-    grep -v '^CORE_HEALTH_' "\${health_state_file}" > "\${tmp_file}" 2>/dev/null || true
-  fi
-  {
-    printf 'CORE_HEALTH_LAST_CHECK_AT=%q\n' "\$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-    printf 'CORE_HEALTH_LAST_ACTION=%q\n' "\${action}"
-    printf 'CORE_HEALTH_LAST_REASON=%q\n' "\${reason}"
-  } >> "\${tmp_file}"
-  mv -f "\${tmp_file}" "\${health_state_file}"
-  chmod 0640 "\${health_state_file}" 2>/dev/null || true
-}
-
-append_health_history() {
-  local action="\${1}"
-  local reason="\${2}"
-  local tmp_file=""
-
-  mkdir -p "\$(dirname "\${health_history_file}")"
-  tmp_file="\$(mktemp "\$(dirname "\${health_history_file}")/.health-history.tmp.XXXXXX")"
-  if [[ -f "\${health_history_file}" ]]; then
-    tail -n 49 "\${health_history_file}" > "\${tmp_file}" 2>/dev/null || true
-  fi
-  printf '%s | core | %s | %s\n' "\$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "\${action}" "\${reason}" >> "\${tmp_file}"
-  mv -f "\${tmp_file}" "\${health_history_file}"
-  chmod 0640 "\${health_history_file}" 2>/dev/null || true
-}
-
-restart_all() {
-  systemctl restart xray >/dev/null 2>&1 || true
-  systemctl restart haproxy >/dev/null 2>&1 || true
-  systemctl restart nginx >/dev/null 2>&1 || true
-}
-
-if ! systemctl is-active --quiet xray || ! systemctl is-active --quiet haproxy || ! systemctl is-active --quiet nginx; then
-  restart_all
-  sleep 3
-  write_health_state "restarted" "service inactive"
-  append_health_history "restarted" "service inactive"
-  exit 0
-fi
-
-if ! check_port 443 || ! check_port 2443 || ! check_port 8001 || ! check_port ${NGINX_TLS_PORT}; then
-  restart_all
-  write_health_state "restarted" "required listening port missing"
-  append_health_history "restarted" "required listening port missing"
-  exit 0
-fi
-
-write_health_state "ok" "services and listening ports healthy"
-append_health_history "ok" "services and listening ports healthy"
-EOF
-
-  backup_path "${CORE_HEALTH_HELPER}" || return 1
-  install -m 0755 "${tmp_file}" "${CORE_HEALTH_HELPER}" || return 1
-  rm -f "${tmp_file}"
-}
-
-write_core_health_service() {
-  local tmp_file=""
-
-  tmp_file="$(mktemp)"
-  cat > "${tmp_file}" <<EOF
-[Unit]
-Description=Check and recover Xray shared-ingress core services
-After=network-online.target xray.service haproxy.service nginx.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=${CORE_HEALTH_HELPER}
-EOF
-
-  backup_path "${CORE_HEALTH_SERVICE_FILE}" || return 1
-  install -m 0644 "${tmp_file}" "${CORE_HEALTH_SERVICE_FILE}" || return 1
-  rm -f "${tmp_file}"
-}
-
-write_core_health_timer() {
-  local tmp_file=""
-
-  tmp_file="$(mktemp)"
-  cat > "${tmp_file}" <<EOF
-[Unit]
-Description=Run Xray shared-ingress core health check periodically
-
-[Timer]
-OnBootSec=90s
-OnUnitActiveSec=3min
-Unit=${CORE_HEALTH_SERVICE_NAME}
-
-[Install]
-WantedBy=timers.target
-EOF
-
-  backup_path "${CORE_HEALTH_TIMER_FILE}" || return 1
-  install -m 0644 "${tmp_file}" "${CORE_HEALTH_TIMER_FILE}" || return 1
-  rm -f "${tmp_file}"
-}
-
-write_core_health_monitor() {
-  write_core_health_helper || return 1
-  write_core_health_service || return 1
-  write_core_health_timer || return 1
-}
-
 service_exists() {
   local unit_name="${1}"
   local path=""
@@ -221,6 +93,27 @@ remove_managed_paths() {
       rm -rf "${path}" || return 1
     fi
   done
+}
+
+# 0.11 及更早版本写盘、现在已废弃的路径。
+# 统一从这里列出来，升级 / 卸载 / 重装时兜底清一遍。
+# LEGACY_PATH_ROOT 供测试沙箱改写；生产环境留空，路径就是字面的绝对路径。
+legacy_managed_paths() {
+  local prefix="${LEGACY_PATH_ROOT:-}"
+
+  printf '%s\n' \
+    "${prefix}/usr/local/sbin/xtun-core-health.sh" \
+    "${prefix}/etc/systemd/system/xtun-core-health.service" \
+    "${prefix}/etc/systemd/system/xtun-core-health.timer" \
+    "${prefix}/usr/local/etc/xray/health-state.env" \
+    "${prefix}/usr/local/etc/xray/health-history.log" \
+    "${prefix}/root/xtun-subscriptions" \
+    "${prefix}/var/lib/cloudflare-warp/mdm.xml" \
+    "${prefix}/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg" \
+    "${prefix}/etc/apt/sources.list.d/cloudflare-client.list" \
+    "${prefix}/usr/local/sbin/xtun-warp-health.sh" \
+    "${prefix}/etc/systemd/system/xtun-warp-health.service" \
+    "${prefix}/etc/systemd/system/xtun-warp-health.timer"
 }
 
 # 下面这几个「校验 / 重启」函数都是在 `if ! xxx; then 回滚; fi` 里被调用的，
@@ -283,9 +176,6 @@ rollback_managed_runtime_state() {
     "${NGINX_CONFIG_FILE}"
     "${NGINX_LIMITS_DROPIN_FILE}"
     "${WARP_RULES_FILE}"
-    "${CORE_HEALTH_HELPER}"
-    "${CORE_HEALTH_SERVICE_FILE}"
-    "${CORE_HEALTH_TIMER_FILE}"
     "${XRAY_LOGROTATE_FILE}"
     "${FALLBACK_SITE_DIR}"
   )
@@ -318,11 +208,6 @@ rollback_xray_only_managed_state() {
     "${XRAY_CONFIG_FILE}"
     "${STATE_FILE}"
     "${OUTPUT_FILE}"
-    "${SUBSCRIPTION_RAW_FILE}"
-    "${SUBSCRIPTION_BASE64_FILE}"
-    "${SUBSCRIPTION_MANIFEST_FILE}"
-    "${SUBSCRIPTION_RAW_QR_FILE}"
-    "${SUBSCRIPTION_BASE64_QR_FILE}"
   )
 
   warn "检测到 Xray-only 变更应用失败，正在回滚最近一次变更。"
@@ -408,8 +293,34 @@ restart_services() {
   log_success "xray 已启动。"
   reload_or_restart_service haproxy || return 1
   apply_nginx_service_change || return 1
-  systemctl enable --now "${CORE_HEALTH_TIMER_NAME}" || return 1
-  log_success "${CORE_HEALTH_TIMER_NAME} 已启动。"
+}
+
+remove_legacy_managed_paths() {
+  local path=""
+  local had_legacy="no"
+  local -a paths=()
+
+  stop_and_disable_service_if_present "xtun-core-health.timer"
+  stop_and_disable_service_if_present "xtun-warp-health.timer"
+  stop_and_disable_service_if_present "warp-svc.service"
+
+  while IFS= read -r path; do
+    if [[ -e "${path}" || -L "${path}" ]]; then
+      paths+=("${path}")
+      had_legacy="yes"
+    fi
+  done < <(legacy_managed_paths)
+
+  [[ "${had_legacy}" == "yes" ]] || return 0
+
+  log_step "清理旧版本遗留的托管文件。"
+  if [[ "${#paths[@]}" -gt 0 ]]; then
+    # 与 warp_teardown_legacy 同一个取舍：升级路径上删不掉旧文件不该把整次
+    # 变更判成失败，但也不能闷声跳过——下面那句 log 会说「已清理」。
+    remove_managed_paths "${paths[@]}" || warn "旧版本遗留的托管文件未能全部清理，请手工检查。"
+  fi
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  log "旧版本遗留的巡检、WARP Team 与本地订阅目录文件已清理。"
 }
 
 finalize_installation() {

@@ -44,9 +44,6 @@ install_value_specs() {
 --key-file:KEY_SOURCE_FILE
 --cert-pem:CERT_SOURCE_PEM
 --key-pem:KEY_SOURCE_PEM
---cf-zone-id:CF_ZONE_ID
---cf-api-token:CF_API_TOKEN
---cf-cert-validity:CF_CERT_VALIDITY
 --acme-email:ACME_EMAIL
 --acme-ca:ACME_CA
 --cf-dns-token:CF_DNS_TOKEN
@@ -160,13 +157,12 @@ write_install_managed_files() {
   write_tls_assets || return 1
   write_runtime_managed_files || return 1
   write_xray_service || return 1
-  write_core_health_monitor || return 1
   write_xray_logrotate_config || return 1
+  remove_legacy_managed_paths || return 1
 }
 
 install_optional_components() {
   install_network_optimization || return 1
-  warp_teardown_legacy || return 1
 }
 
 install_cmd() {

@@ -13,8 +13,6 @@ run_usage_case() {
   [[ "${output}" == *$'\n  xtun update-script'* ]]
   [[ "${output}" == *$'\n  xtun renew-cert [参数]'* ]]
   [[ "${output}" == *$'\n  xtun change-warp-rules [参数]'* ]]
-  [[ "${output}" == *$'\n  xtun add-client NAME [参数]'* ]]
-  [[ "${output}" == *$'\n  xtun list-clients'* ]]
   [[ "${output}" == *$'\n  xtun diagnose'* ]]
   [[ "${output}" == *$'\n  xtun apply-net-opt'* ]]
   [[ "${output}" == *$'\n  xtun apply-config'* ]]
@@ -1377,14 +1375,11 @@ run_nginx_worker_connections_case() {
 run_cert_mode_input_case() {
   NON_INTERACTIVE=1
 
-  CERT_MODE="cf-origin-ca"
+  CERT_MODE="existing"
   CERT_SOURCE_FILE="/tmp/old-cert.pem"
   KEY_SOURCE_FILE="/tmp/old-key.pem"
   CERT_SOURCE_PEM="old-cert-pem"
   KEY_SOURCE_PEM="old-key-pem"
-  CF_ZONE_ID="zone-id"
-  CF_API_TOKEN="api-token"
-  CF_CERT_VALIDITY="365"
   ACME_EMAIL="ops@example.com"
   ACME_CA="zerossl"
   CF_DNS_TOKEN="dns-token"
@@ -1395,23 +1390,25 @@ run_cert_mode_input_case() {
   [[ "${KEY_SOURCE_FILE}" == "/tmp/old-key.pem" ]]
   [[ -z "${CERT_SOURCE_PEM}" ]]
   [[ -z "${KEY_SOURCE_PEM}" ]]
-  [[ -z "${CF_ZONE_ID}" ]]
-  [[ -z "${CF_API_TOKEN}" ]]
-  [[ "${CF_CERT_VALIDITY}" == "5475" ]]
   [[ -z "${ACME_EMAIL}" ]]
   [[ "${ACME_CA}" == "letsencrypt" ]]
   [[ -z "${CF_DNS_TOKEN}" ]]
   [[ -z "${CF_DNS_ACCOUNT_ID}" ]]
   [[ -z "${CF_DNS_ZONE_ID}" ]]
 
+  # 旧别名 cf-origin-ca 并入 existing
+  CERT_MODE="$(normalize_cert_mode 'cf-origin-ca')"
+  [[ "${CERT_MODE}" == "existing" ]]
+  CERT_MODE="$(normalize_cert_mode '3')"
+  [[ "${CERT_MODE}" == "existing" ]]
+  CERT_MODE="$(normalize_cert_mode '4')"
+  [[ "${CERT_MODE}" == "acme-dns-cf" ]]
+
   CERT_MODE="acme-dns-cf"
   CERT_SOURCE_FILE="/tmp/old-cert.pem"
   KEY_SOURCE_FILE="/tmp/old-key.pem"
   CERT_SOURCE_PEM="old-cert-pem"
   KEY_SOURCE_PEM="old-key-pem"
-  CF_ZONE_ID="zone-id"
-  CF_API_TOKEN="api-token"
-  CF_CERT_VALIDITY="365"
   ACME_EMAIL="ops@example.com"
   ACME_CA="zerossl"
   CF_DNS_TOKEN="dns-token"
@@ -1422,9 +1419,6 @@ run_cert_mode_input_case() {
   [[ -z "${KEY_SOURCE_FILE}" ]]
   [[ -z "${CERT_SOURCE_PEM}" ]]
   [[ -z "${KEY_SOURCE_PEM}" ]]
-  [[ -z "${CF_ZONE_ID}" ]]
-  [[ -z "${CF_API_TOKEN}" ]]
-  [[ "${CF_CERT_VALIDITY}" == "5475" ]]
   [[ "${ACME_EMAIL}" == "ops@example.com" ]]
   [[ "${ACME_CA}" == "zerossl" ]]
   [[ "${CF_DNS_TOKEN}" == "dns-token" ]]
@@ -1436,9 +1430,6 @@ run_cert_mode_input_case() {
   KEY_SOURCE_FILE="/tmp/old-key.pem"
   CERT_SOURCE_PEM="old-cert-pem"
   KEY_SOURCE_PEM="old-key-pem"
-  CF_ZONE_ID="zone-id"
-  CF_API_TOKEN="api-token"
-  CF_CERT_VALIDITY="365"
   ACME_EMAIL="ops@example.com"
   ACME_CA="zerossl"
   CF_DNS_TOKEN="dns-token"
@@ -1449,9 +1440,6 @@ run_cert_mode_input_case() {
   [[ -z "${KEY_SOURCE_FILE}" ]]
   [[ -z "${CERT_SOURCE_PEM}" ]]
   [[ -z "${KEY_SOURCE_PEM}" ]]
-  [[ -z "${CF_ZONE_ID}" ]]
-  [[ -z "${CF_API_TOKEN}" ]]
-  [[ "${CF_CERT_VALIDITY}" == "5475" ]]
   [[ -z "${ACME_EMAIL}" ]]
   [[ "${ACME_CA}" == "letsencrypt" ]]
   [[ -z "${CF_DNS_TOKEN}" ]]
@@ -1521,6 +1509,84 @@ PROFILE
   }
   ensure_warp_credentials
   [[ "${WARP_PRIVATE_KEY}" == "${TEST_WARP_PRIVATE_KEY}" ]]
+  load_functions
+}
+
+run_warp_credential_ensure_failure_case() {
+  local output=""
+
+  if output="$(bash <<EOF 2>&1
+set -Eeuo pipefail
+ROOT_DIR="${ROOT_DIR}"
+source <(sed '\$d' "${ROOT_DIR}/xtun.sh")
+ENABLE_WARP="yes"
+WARP_PRIVATE_KEY=""
+WARP_ADDRESS_V4=""
+WARP_ADDRESS_V6=""
+WARP_PROFILE_SOURCE=""
+warp_legacy_team_detected() { return 1; }
+warp_register_free_device() { return 1; }
+ensure_warp_credentials
+EOF
+)"; then
+    return 1
+  fi
+  printf '%s' "${output}" | grep -q '\-\-warp-profile'
+  printf '%s' "${output}" | grep -q '\-\-disable-warp'
+}
+
+# 0.11 遗留的巡检与 WARP Team 托管文件，升级 / 卸载 / 重装时由
+# remove_legacy_managed_paths 兜底清一遍。路径经 LEGACY_PATH_ROOT 改写进沙箱。
+run_legacy_cleanup_case() {
+  local workdir=""
+  local stopped=""
+  local logged=""
+
+  workdir="$(mktemp -d)"
+  LEGACY_PATH_ROOT="${workdir}"
+  mkdir -p "${workdir}/usr/local/sbin" "${workdir}/etc/systemd/system" "${workdir}/root"
+
+  printf 'legacy\n' > "${workdir}/usr/local/sbin/xtun-core-health.sh"
+  printf 'legacy\n' > "${workdir}/etc/systemd/system/xtun-core-health.service"
+  printf 'legacy\n' > "${workdir}/etc/systemd/system/xtun-core-health.timer"
+  printf 'legacy\n' > "${workdir}/usr/local/etc-xray-stand-in"
+  mkdir -p "${workdir}/root/xtun-subscriptions"
+  printf 'legacy\n' > "${workdir}/root/xtun-subscriptions/vless.txt"
+  printf 'legacy\n' > "${workdir}/var-lib-cloudflare-warp.md"
+  mv "${workdir}/var-lib-cloudflare-warp.md" "${workdir}/keep.md"
+
+  service_exists() { return 1; }
+  stop_and_disable_service_if_present() {
+    stopped+="${1}"$'\n'
+  }
+  log() {
+    logged+="${1}"$'\n'
+  }
+  log_step() {
+    logged+="STEP:${1}"$'\n'
+  }
+
+  remove_legacy_managed_paths
+
+  [[ "${#stopped[@]}" -ne 0 ]]
+  printf '%s' "${stopped}" | grep -q 'xtun-core-health.timer'
+  printf '%s' "${stopped}" | grep -q 'xtun-warp-health.timer'
+  printf '%s' "${stopped}" | grep -q 'warp-svc.service'
+  [[ ! -e "${workdir}/usr/local/sbin/xtun-core-health.sh" ]]
+  [[ ! -e "${workdir}/etc/systemd/system/xtun-core-health.service" ]]
+  [[ ! -e "${workdir}/etc/systemd/system/xtun-core-health.timer" ]]
+  [[ ! -d "${workdir}/root/xtun-subscriptions" ]]
+  printf '%s' "${logged}" | grep -q 'STEP:清理旧版本遗留的托管文件。'
+  [[ -e "${workdir}/keep.md" ]]
+
+  # 没有遗留文件时是安静幂等：不再 log_step，也不碰 systemd
+  stopped=""
+  logged=""
+  remove_legacy_managed_paths
+  [[ -z "${stopped}" ]]
+  [[ -z "${logged}" ]]
+
+  LEGACY_PATH_ROOT=""
   load_functions
 }
 

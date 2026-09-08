@@ -41,60 +41,6 @@ xhttp_xpadding_status_text() {
   printf '否'
 }
 
-selected_output_client_name() {
-  printf '%s' "${OUTPUT_CLIENT_NAME:-$(default_node_client_name)}"
-}
-
-current_link_client_name() {
-  printf '%s' "${LINK_CLIENT_NAME:-$(default_node_client_name)}"
-}
-
-current_link_reality_uuid() {
-  printf '%s' "${LINK_REALITY_UUID:-${REALITY_UUID}}"
-}
-
-current_link_xhttp_uuid() {
-  printf '%s' "${LINK_XHTTP_UUID:-${XHTTP_UUID}}"
-}
-
-client_scoped_node_label() {
-  local client_name="${1}"
-  local suffix="${2}"
-
-  if [[ "${client_name}" == "$(default_node_client_name)" ]]; then
-    prefixed_node_label "${suffix}"
-    return
-  fi
-
-  printf '%s-%s-%s' "$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")" "${client_name}" "${suffix}"
-}
-
-output_client_detail_line() {
-  local client_name=""
-
-  client_name="$(current_link_client_name)"
-  if [[ "${client_name}" != "$(default_node_client_name)" ]]; then
-    printf '%s\n' "- 客户端: ${client_name}"
-  fi
-}
-
-output_client_summary_block() {
-  local client_name=""
-  local client_count=""
-
-  client_name="$(current_link_client_name)"
-  client_count="$(node_client_count)"
-  if [[ "${client_name}" == "$(default_node_client_name)" && "${client_count}" -le 1 ]]; then
-    return
-  fi
-
-  cat <<EOF
-## 客户端
-- 当前导出: ${client_name}
-- 可用客户端: $(node_client_names_csv)
-EOF
-}
-
 effective_tls_alpn() {
   printf '%s' "${TLS_ALPN:-${DEFAULT_TLS_ALPN}}"
 }
@@ -143,7 +89,7 @@ build_xhttp_uri() {
   [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
 
   printf 'vless://%s@%s:443?mode=auto&path=%s&security=tls&alpn=%s&encryption=%s&insecure=0&host=%s&fp=%s&fingerprint=%s&type=xhttp&allowInsecure=0&sni=%s%s%s#%s' \
-    "$(current_link_xhttp_uuid)" \
+    "${XHTTP_UUID}" \
     "${XHTTP_DOMAIN}" \
     "${path_component}" \
     "$(effective_tls_alpn)" \
@@ -169,7 +115,7 @@ build_xhttp_reality_uri() {
   [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
 
   printf 'vless://%s@%s:443?encryption=%s&security=reality&sni=%s&fp=%s&fingerprint=%s&pbk=%s&sid=%s&type=xhttp&path=%s&mode=auto%s#%s' \
-    "$(current_link_xhttp_uuid)" \
+    "${XHTTP_UUID}" \
     "${SERVER_IP}" \
     "${encryption_value}" \
     "${REALITY_SNI}" \
@@ -378,8 +324,6 @@ build_xhttp_reverse_split_extra_json() {
 }
 
 build_link_context() {
-  local requested_client_name="${1:-$(selected_output_client_name)}"
-  local client_record=""
   local xhttp_path_component=""
   local xhttp_ech_component=""
   local xhttp_vlessenc_component=""
@@ -397,17 +341,14 @@ build_link_context() {
   local reverse_split_extra_json=""
   local reverse_split_extra_component=""
 
-  client_record="$(node_client_record_for_name "${requested_client_name}")" || die "找不到客户端：${requested_client_name}"
-  IFS='|' read -r LINK_CLIENT_NAME LINK_REALITY_UUID LINK_XHTTP_UUID <<< "${client_record}"
-
   xhttp_path_component="$(path_to_uri_component "${XHTTP_PATH}")"
   xhttp_ech_component="$(uri_encode "${XHTTP_ECH_CONFIG_LIST}")"
   xhttp_vlessenc_component="$(uri_encode "${XHTTP_VLESS_ENCRYPTION}")"
-  reality_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "REALITY")"
-  xhttp_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-CDN")"
-  xhttp_split_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-SPLIT-CDN-REALITY")"
-  xhttp_reality_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-REALITY")"
-  xhttp_reverse_split_label="$(client_scoped_node_label "${LINK_CLIENT_NAME}" "XHTTP-SPLIT-REALITY-CDN")"
+  reality_label="$(prefixed_node_label "REALITY")"
+  xhttp_label="$(prefixed_node_label "XHTTP-CDN")"
+  xhttp_split_label="$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")"
+  xhttp_reality_label="$(prefixed_node_label "XHTTP-REALITY")"
+  xhttp_reverse_split_label="$(prefixed_node_label "XHTTP-SPLIT-REALITY-CDN")"
 
   REALITY_URI="$(build_reality_uri "${reality_label}")"
   reality_extra_json="$(build_xhttp_reality_extra_json)"
@@ -424,81 +365,14 @@ build_link_context() {
   XHTTP_REVERSE_SPLIT_URI="$(build_xhttp_reality_uri "${xhttp_reverse_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${reverse_split_extra_component}")"
 }
 
-subscription_raw_text() {
-  build_link_context "$(selected_output_client_name)"
+vless_links_text() {
+  build_link_context
   printf '%s\n%s\n%s\n%s\n%s\n' \
     "${REALITY_URI}" \
     "${XHTTP_REALITY_URI}" \
     "${XHTTP_URI}" \
     "${XHTTP_SPLIT_URI}" \
     "${XHTTP_REVERSE_SPLIT_URI}"
-}
-
-subscription_base64_text() {
-  subscription_raw_text | base64 | tr -d '\n'
-  printf '\n'
-}
-
-subscription_qr_status_text() {
-  if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" || -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then
-    printf '已生成'
-    return
-  fi
-
-  printf '未生成'
-}
-
-subscription_manifest_text() {
-  cat <<EOF
-# Xray 订阅文件
-
-Raw VLESS:
-${SUBSCRIPTION_RAW_FILE}
-
-Base64 VLESS:
-${SUBSCRIPTION_BASE64_FILE}
-
-Raw QR PNG:
-$(if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_RAW_QR_FILE}"; else printf '未生成'; fi)
-
-Base64 QR PNG:
-$(if [[ -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_BASE64_QR_FILE}"; else printf '未生成'; fi)
-EOF
-}
-
-write_subscription_qr_png() {
-  local content_file="${1}"
-  local output_file="${2}"
-  local tmp_file=""
-
-  command -v qrencode >/dev/null 2>&1 || return 2
-  [[ -f "${content_file}" ]] || return 1
-  mkdir -p "$(dirname "${output_file}")"
-  tmp_file="$(mktemp "$(dirname "${output_file}")/.$(basename "${output_file}").tmp.XXXXXX")"
-  if ! qrencode -o "${tmp_file}" -s 8 -m 2 "$(<"${content_file}")"; then
-    rm -f "${tmp_file}"
-    return 1
-  fi
-  mv -f "${tmp_file}" "${output_file}"
-}
-
-write_subscription_files() {
-  mkdir -p "${SUBSCRIPTION_DIR}" "${SUBSCRIPTION_QR_DIR}" || return 1
-  write_generated_file_atomically "${SUBSCRIPTION_RAW_FILE}" subscription_raw_text || return 1
-  chmod 0644 "${SUBSCRIPTION_RAW_FILE}" || return 1
-  write_generated_file_atomically "${SUBSCRIPTION_BASE64_FILE}" subscription_base64_text || return 1
-  chmod 0644 "${SUBSCRIPTION_BASE64_FILE}" || return 1
-
-  if command -v qrencode >/dev/null 2>&1; then
-    write_subscription_qr_png "${SUBSCRIPTION_RAW_FILE}" "${SUBSCRIPTION_RAW_QR_FILE}" || warn "生成 Raw VLESS 订阅二维码失败，已跳过。"
-    write_subscription_qr_png "${SUBSCRIPTION_BASE64_FILE}" "${SUBSCRIPTION_BASE64_QR_FILE}" || warn "生成 Base64 VLESS 订阅二维码失败，已跳过。"
-  else
-    rm -f "${SUBSCRIPTION_RAW_QR_FILE}" "${SUBSCRIPTION_BASE64_QR_FILE}"
-    warn "系统中未找到 qrencode，已跳过订阅二维码 PNG。"
-  fi
-
-  write_generated_file_atomically "${SUBSCRIPTION_MANIFEST_FILE}" subscription_manifest_text || return 1
-  chmod 0644 "${SUBSCRIPTION_MANIFEST_FILE}"
 }
 
 prefixed_node_label() {
@@ -525,7 +399,7 @@ build_reality_uri() {
   local label="${1}"
 
   printf 'vless://%s@%s:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&fingerprint=%s&pbk=%s&sid=%s&type=tcp&headerType=none#%s' \
-    "$(current_link_reality_uuid)" \
+    "${REALITY_UUID}" \
     "${SERVER_IP}" \
     "${REALITY_SNI}" \
     "$(effective_fingerprint)" \
@@ -542,10 +416,9 @@ output_reality_block() {
 ## 节点 1
 - 类型: VLESS + REALITY + Vision
 - 节点名前缀: ${NODE_LABEL_PREFIX}
-$(output_client_detail_line)
 - 地址: ${SERVER_IP}
 - 端口: 443
-- UUID: $(current_link_reality_uuid)
+- UUID: ${REALITY_UUID}
 - SNI: ${REALITY_SNI}
 - 公钥: ${REALITY_PUBLIC_KEY}
 - 短 ID: ${REALITY_SHORT_ID}
@@ -564,7 +437,7 @@ output_xhttp_block() {
 ## ${title}
 - 地址: ${XHTTP_DOMAIN}
 - 端口: 443
-- UUID: $(current_link_xhttp_uuid)
+- UUID: ${XHTTP_UUID}
 EOF
 }
 
@@ -617,10 +490,9 @@ output_xhttp_reality_block() {
 ## 节点 2
 - 类型: VLESS + XHTTP + Reality（上下行不分离）
 - 节点名前缀: ${NODE_LABEL_PREFIX}
-$(output_client_detail_line)
 - 地址: ${SERVER_IP}
 - 端口: 443
-- UUID: $(current_link_xhttp_uuid)
+- UUID: ${XHTTP_UUID}
 - SNI: ${REALITY_SNI}
 - 公钥: ${REALITY_PUBLIC_KEY}
 - 短 ID: ${REALITY_SHORT_ID}
@@ -639,10 +511,9 @@ output_xhttp_reverse_split_block() {
 ## 节点 5
 - 类型: 上行 XHTTP + Reality ｜ 下行 XHTTP + TLS + CDN
 - 节点名前缀: ${NODE_LABEL_PREFIX}
-$(output_client_detail_line)
 - 上行地址: ${SERVER_IP}（Reality）
 - 下行地址: ${XHTTP_DOMAIN}（CDN+TLS）
-- UUID: $(current_link_xhttp_uuid)
+- UUID: ${XHTTP_UUID}
 - 上行 SNI: ${REALITY_SNI}
 - 公钥: ${REALITY_PUBLIC_KEY}
 - 短 ID: ${REALITY_SHORT_ID}
@@ -668,11 +539,6 @@ output_runtime_summary_block() {
 - Nginx 配置: ${NGINX_CONFIG_FILE}
 - 安装状态文件: ${STATE_FILE}
 - 链接输出文件: ${OUTPUT_FILE}
-- Raw VLESS 订阅: ${SUBSCRIPTION_RAW_FILE}
-- Base64 VLESS 订阅: ${SUBSCRIPTION_BASE64_FILE}
-- 订阅文件清单: ${SUBSCRIPTION_MANIFEST_FILE}
-- Raw VLESS 订阅二维码: $(if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_RAW_QR_FILE}"; else printf '未生成'; fi)
-- Base64 VLESS 订阅二维码: $(if [[ -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then printf '%s' "${SUBSCRIPTION_BASE64_QR_FILE}"; else printf '未生成'; fi)
 
 ## WARP
 - 已启用: ${ENABLE_WARP}
@@ -747,13 +613,11 @@ EOF
 output_file_text() {
   local cf_ssl_mode=""
 
-  build_link_context "$(selected_output_client_name)"
+  build_link_context
   cf_ssl_mode="$(cloudflare_ssl_mode_text)"
 
   cat <<EOF
 # Xray 部署信息
-
-$(output_client_summary_block)
 
 $(output_reality_block "${REALITY_URI}")
 
@@ -772,8 +636,6 @@ EOF
 }
 
 write_output_file() {
-  OUTPUT_CLIENT_NAME="${1:-$(selected_output_client_name)}"
-  write_subscription_files || return 1
   write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
   chmod 0644 "${OUTPUT_FILE}"
 }

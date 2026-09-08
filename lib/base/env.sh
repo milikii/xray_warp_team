@@ -139,10 +139,10 @@ normalize_cert_mode() {
       printf 'existing'
       ;;
     3)
-      printf 'cf-origin-ca'
+      printf 'existing'
       ;;
-    cf-origin-ca|cloudflare-origin-ca|cloudflare-origin|cf-origin|origin-ca|cfca|cloudflare-originca|cloudflare-ca|cf-origin-ca证书|cf-origin-ca模式)
-      printf 'cf-origin-ca'
+    cf-origin-ca|cloudflare-origin-ca|cloudflare-origin|cf-origin|origin-ca|cfca|cloudflare-originca|cloudflare-ca)
+      printf 'existing'
       ;;
     4)
       printf 'acme-dns-cf'
@@ -164,11 +164,8 @@ cert_mode_choice_value() {
     existing)
       printf '2'
       ;;
-    cf-origin-ca)
-      printf '3'
-      ;;
     acme-dns-cf)
-      printf '4'
+      printf '3'
       ;;
   esac
 }

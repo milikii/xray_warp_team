@@ -83,7 +83,6 @@ change_sni_cmd() {
     "新的 REALITY 可见 SNI" \
     "REALITY SNI 已更新。" \
     "未知的 change-sni 参数：" \
-    "runtime" \
     "" \
     "ensure_reality_sni_format" \
     "$@"
@@ -96,22 +95,8 @@ change_path_cmd() {
     "新的 XHTTP 路径" \
     "XHTTP 路径已更新。" \
     "未知的 change-path 参数：" \
-    "runtime" \
     "" \
     "ensure_xhttp_path_format" \
-    "$@"
-}
-
-change_label_prefix_cmd() {
-  run_single_value_change_cmd \
-    "--node-label-prefix" \
-    "NODE_LABEL_PREFIX" \
-    "新的节点名前缀" \
-    "节点名前缀已更新。" \
-    "未知的 change-label-prefix 参数：" \
-    "output" \
-    "normalize_node_label_prefix" \
-    "" \
     "$@"
 }
 
@@ -171,9 +156,6 @@ renew_cert_cmd() {
     "key_source_file:KEY_SOURCE_FILE" \
     "cert_source_pem:CERT_SOURCE_PEM" \
     "key_source_pem:KEY_SOURCE_PEM" \
-    "cf_zone_id:CF_ZONE_ID" \
-    "cf_api_token:CF_API_TOKEN" \
-    "cf_cert_validity:CF_CERT_VALIDITY" \
     "acme_email:ACME_EMAIL" \
     "acme_ca:ACME_CA" \
     "cf_dns_token:CF_DNS_TOKEN" \
@@ -266,11 +248,14 @@ change_warp_rules_cmd() {
   elif [[ "${#add_rules[@]}" -eq 0 && "${#del_rules[@]}" -eq 0 ]] \
     && [[ "${NON_INTERACTIVE}" -eq 0 && -t 0 && -t 1 ]]; then
     # 不带任何修改参数又是交互终端，说明是从菜单点进来的：
-    # 给一个能看能改的界面，而不是闷头重启一遍服务再吐一整份部署文档。
-    updated_text="$(prompt_warp_rules_editor)" || {
-      log "已放弃修改，WARP 分流规则保持不变。"
-      return 0
-    }
+    # 只打印当前规则和 CLI 用法，不再进交互编辑器。
+    printf '%s\n' "当前 WARP 分流规则（命中的域名走 WARP，其它流量直连）:"
+    printf '%s\n' "${original_text}"
+    printf '%s\n' "修改规则请使用 CLI，例如："
+    printf '%s\n' "  xtun change-warp-rules --add-domain example.com"
+    printf '%s\n' "  xtun change-warp-rules --del-domain example.com"
+    printf '%s\n' "  xtun change-warp-rules --reset-defaults"
+    return 0
   else
     for line in "${current_rules[@]}"; do
       skip_rule=0

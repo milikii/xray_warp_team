@@ -74,8 +74,6 @@ sandbox_managed_paths() {
   XRAY_SERVICE_FILE="${root}/etc/systemd/system/xray.service"
   XRAY_LOGROTATE_FILE="${root}/etc/logrotate.d/xtun"
   STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
-  HEALTH_STATE_FILE="${XRAY_CONFIG_DIR}/health-state.env"
-  HEALTH_HISTORY_FILE="${XRAY_CONFIG_DIR}/health-history.log"
   WARP_RULES_FILE="${XRAY_CONFIG_DIR}/warp-domains.list"
   HAPROXY_CONFIG="${root}/etc/haproxy/haproxy.cfg"
   NGINX_CONF_DIR="${root}/etc/nginx/conf.d"
@@ -86,9 +84,6 @@ sandbox_managed_paths() {
   SSL_DIR="${root}/etc/ssl/xtun"
   TLS_CERT_FILE="${SSL_DIR}/cert.pem"
   TLS_KEY_FILE="${SSL_DIR}/key.pem"
-  CORE_HEALTH_HELPER="${root}/usr/local/sbin/xtun-core-health.sh"
-  CORE_HEALTH_SERVICE_FILE="${root}/etc/systemd/system/${CORE_HEALTH_SERVICE_NAME}"
-  CORE_HEALTH_TIMER_FILE="${root}/etc/systemd/system/${CORE_HEALTH_TIMER_NAME}"
   NET_SYSCTL_CONF="${root}/etc/sysctl.d/98-xtun-net.conf"
   NET_HELPER_PATH="${root}/usr/local/sbin/xtun-net-optimize.sh"
   NET_SERVICE_FILE="${root}/etc/systemd/system/${NET_SERVICE_NAME}"
@@ -98,16 +93,10 @@ sandbox_managed_paths() {
   OP_LOG_DIR="${root}/var/log/xtun"
   OP_LOG_FILE="${OP_LOG_DIR}/operations.log"
   OUTPUT_FILE="${root}/root/xtun-output.md"
-  SUBSCRIPTION_DIR="${root}/root/xtun-subscriptions"
-  SUBSCRIPTION_RAW_FILE="${SUBSCRIPTION_DIR}/vless-raw.txt"
-  SUBSCRIPTION_BASE64_FILE="${SUBSCRIPTION_DIR}/vless-base64.txt"
-  SUBSCRIPTION_MANIFEST_FILE="${SUBSCRIPTION_DIR}/manifest.txt"
-  SUBSCRIPTION_QR_DIR="${SUBSCRIPTION_DIR}/qr"
-  SUBSCRIPTION_RAW_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-raw.png"
-  SUBSCRIPTION_BASE64_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-base64.png"
   BACKUP_ROOT="${root}/root/xtun-backups"
   INSTALL_DRAFT_FILE="${root}/root/.xtun-install-draft.env"
   SCRIPT_LOCK_FILE="${root}/run/xtun.lock"
+  LEGACY_PATH_ROOT="${root}"
 }
 
 load_functions() {
@@ -151,11 +140,6 @@ reset_feature_defaults() {
   XHTTP_SPLIT_URI=""
   XHTTP_REALITY_URI=""
   XHTTP_REVERSE_SPLIT_URI=""
-  NODE_CLIENTS_TEXT=""
-  OUTPUT_CLIENT_NAME=""
-  LINK_CLIENT_NAME=""
-  LINK_REALITY_UUID=""
-  LINK_XHTTP_UUID=""
 }
 
 stub_side_effects() {

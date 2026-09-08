@@ -27,8 +27,6 @@ run_warp_enabled_case() {
   ENABLE_NET_OPT="no"
   set_test_warp_credentials
   CERT_MODE="existing"
-  CF_ZONE_ID="zone-id"
-  CF_CERT_VALIDITY="5475"
   ACME_EMAIL="ops@example.com"
   ACME_CA="letsencrypt"
   CF_DNS_ACCOUNT_ID="account-id"
@@ -43,7 +41,6 @@ run_warp_enabled_case() {
 
   write_xray_config
   write_state_file
-  OUTPUT_CLIENT_NAME=""
   write_output_file
 
   jq -e '.routing.rules | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
@@ -64,10 +61,6 @@ run_warp_enabled_case() {
   if grep -q "${TEST_WARP_PRIVATE_KEY}" "${OUTPUT_FILE}"; then
     return 1
   fi
-  if grep -q "${TEST_WARP_PRIVATE_KEY}" "${SUBSCRIPTION_MANIFEST_FILE}"; then
-    return 1
-  fi
-
   assert_contains '&ech=' "${OUTPUT_FILE}"
   assert_contains 'extra=' "${OUTPUT_FILE}"
   assert_contains 'xPaddingObfsMode' "${OUTPUT_FILE}"
@@ -80,8 +73,6 @@ run_warp_enabled_case() {
   assert_contains 'encryption=enc-value-%2B%3D%3F%26' "${OUTPUT_FILE}"
   assert_contains '已启用: 是' "${OUTPUT_FILE}"
   assert_contains '## XHTTP 缓存绕过（重要）' "${OUTPUT_FILE}"
-  assert_contains "Raw VLESS 订阅: ${SUBSCRIPTION_RAW_FILE}" "${OUTPUT_FILE}"
-  assert_contains "Base64 VLESS 订阅: ${SUBSCRIPTION_BASE64_FILE}" "${OUTPUT_FILE}"
   assert_contains '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
   assert_contains '推荐操作步骤：' "${OUTPUT_FILE}"
   assert_contains 'Cache eligibility' "${OUTPUT_FILE}"
@@ -91,72 +82,8 @@ run_warp_enabled_case() {
   if grep -q '## sing-box outbound 片段' "${OUTPUT_FILE}"; then
     return 1
   fi
-  [[ -f "${SUBSCRIPTION_RAW_FILE}" ]]
-  [[ -f "${SUBSCRIPTION_BASE64_FILE}" ]]
-  [[ -f "${SUBSCRIPTION_MANIFEST_FILE}" ]]
-  [[ "$(grep -c '^vless://' "${SUBSCRIPTION_RAW_FILE}")" -eq 5 ]]
-  base64 -d "${SUBSCRIPTION_BASE64_FILE}" | grep -q '^vless://'
-  if [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" || -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]; then
-    return 1
-  fi
-}
-
-run_multi_client_config_output_case() {
-  local workdir=""
-
-  workdir="$(mktemp -d)"
-  prepare_workspace "${workdir}"
-  reset_feature_defaults
-
-  SERVER_IP="203.0.113.40"
-  NODE_LABEL_PREFIX="HKG"
-  REALITY_UUID="11111111-1111-1111-1111-111111111111"
-  REALITY_SNI="reality.example.com"
-  REALITY_TARGET="www.scu.edu:443"
-  REALITY_SHORT_ID="abcd1234"
-  REALITY_PRIVATE_KEY="private-key-value"
-  REALITY_PUBLIC_KEY="public-key-value"
-  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
-  XHTTP_DOMAIN="cdn.example.com"
-  XHTTP_PATH="/assets/v3"
-  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
-  XHTTP_VLESS_ENCRYPTION=""
-  XHTTP_VLESS_DECRYPTION="none"
-  TLS_ALPN="h2"
-  FINGERPRINT="chrome"
-  ENABLE_WARP="no"
-  ENABLE_NET_OPT="no"
-  CERT_MODE="existing"
-  NODE_CLIENTS_TEXT="phone|33333333-3333-3333-3333-333333333333|44444444-4444-4444-4444-444444444444"
-
-  write_xray_config
-  write_output_file phone
-
-  jq -e '.inbounds[] | select(.tag == "reality-vision") | .settings.clients | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
-  jq -e '.inbounds[] | select(.tag == "reality-vision") | .settings.clients[] | select(.email == "phone-reality-vision") | .id == "33333333-3333-3333-3333-333333333333"' "${XRAY_CONFIG_FILE}" >/dev/null
-  jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .settings.clients[] | select(.email == "phone-xhttp-cdn") | .id == "44444444-4444-4444-4444-444444444444"' "${XRAY_CONFIG_FILE}" >/dev/null
-
-  assert_contains 'HKG-phone-REALITY' "${OUTPUT_FILE}"
-  assert_contains 'HKG-phone-XHTTP-CDN' "${OUTPUT_FILE}"
-  assert_contains '- 当前导出: phone' "${OUTPUT_FILE}"
-  assert_contains '- UUID: 33333333-3333-3333-3333-333333333333' "${OUTPUT_FILE}"
-  assert_contains '- UUID: 44444444-4444-4444-4444-444444444444' "${OUTPUT_FILE}"
-  assert_contains '33333333-3333-3333-3333-333333333333@203.0.113.40:443' "${SUBSCRIPTION_RAW_FILE}"
-  assert_contains '44444444-4444-4444-4444-444444444444@cdn.example.com:443' "${SUBSCRIPTION_RAW_FILE}"
-  if grep -q '11111111-1111-1111-1111-111111111111' "${SUBSCRIPTION_RAW_FILE}"; then
-    return 1
-  fi
-  if grep -q '22222222-2222-2222-2222-222222222222' "${SUBSCRIPTION_RAW_FILE}"; then
-    return 1
-  fi
-  [[ "$(grep -c '^vless://' "${SUBSCRIPTION_RAW_FILE}")" -eq 5 ]]
-
-  OUTPUT_CLIENT_NAME=""
-  write_output_file
-  assert_contains 'HKG-REALITY' "${OUTPUT_FILE}"
-  if grep -q 'HKG-phone-REALITY' "${OUTPUT_FILE}"; then
-    return 1
-  fi
+  [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 5 ]]
+  vless_links_text | base64 | base64 -d | grep -q '^vless://'
 }
 
 run_warp_disabled_case() {
@@ -324,17 +251,9 @@ run_service_config_helper_case() {
   NGINX_TLS_PORT="8443"
   TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
   TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
-  CORE_HEALTH_HELPER="${workdir}/core-health.sh"
-  CORE_HEALTH_SERVICE_FILE="${workdir}/core-health.service"
-  CORE_HEALTH_TIMER_FILE="${workdir}/core-health.timer"
-  CORE_HEALTH_SERVICE_NAME="xtun-core-health.service"
-  CORE_HEALTH_TIMER_NAME="xtun-core-health.timer"
-  HEALTH_STATE_FILE="${workdir}/health-state.env"
-  HEALTH_HISTORY_FILE="${workdir}/health-history.log"
 
   write_nginx_config
   write_haproxy_config
-  write_core_health_monitor
 
   assert_contains 'server_name cdn.example.com;' "${NGINX_CONFIG_FILE}"
   assert_contains 'root /var/www/xtun-fallback;' "${NGINX_CONFIG_FILE}"
@@ -362,16 +281,6 @@ run_service_config_helper_case() {
   # nbthread 由 HAProxy 自己按 CPU 数决定，写死只会把线程数改少
   assert_absent '^ *nbthread' "${HAPROXY_CONFIG}"
   assert_contains 'server nginx_cdn 127.0.0.1:8443 check' "${HAPROXY_CONFIG}"
-  assert_contains 'check_port 443' "${CORE_HEALTH_HELPER}"
-  assert_contains 'check_port 2443' "${CORE_HEALTH_HELPER}"
-  assert_contains 'check_port 8001' "${CORE_HEALTH_HELPER}"
-  assert_contains "health_state_file='${HEALTH_STATE_FILE}'" "${CORE_HEALTH_HELPER}"
-  assert_contains "health_history_file='${workdir}/health-history.log'" "${CORE_HEALTH_HELPER}"
-  assert_contains 'dirname "${health_state_file}"' "${CORE_HEALTH_HELPER}"
-  assert_contains '$(date -u '\''+%Y-%m-%dT%H:%M:%SZ'\'')' "${CORE_HEALTH_HELPER}"
-  assert_contains "ExecStart=${CORE_HEALTH_HELPER}" "${CORE_HEALTH_SERVICE_FILE}"
-  assert_contains 'OnUnitActiveSec=3min' "${CORE_HEALTH_TIMER_FILE}"
-  assert_contains "Unit=${CORE_HEALTH_SERVICE_NAME}" "${CORE_HEALTH_TIMER_FILE}"
   XRAY_LOGROTATE_FILE="${workdir}/xray-logrotate"
   write_xray_logrotate_config
   assert_contains '/var/log/xray/access.log /var/log/xray/error.log /var/log/xtun/operations.log {' "${XRAY_LOGROTATE_FILE}"
@@ -597,57 +506,6 @@ run_generated_file_atomic_failure_case() {
   if find "${workdir}" -name '.*.tmp.*' | grep -q .; then
     return 1
   fi
-}
-
-run_subscription_qr_success_case() {
-  local workdir=""
-  local fakebin=""
-
-  workdir="$(mktemp -d)"
-  prepare_workspace "${workdir}"
-  reset_feature_defaults
-  fakebin="${workdir}/bin"
-  mkdir -p "${fakebin}"
-  cat > "${fakebin}/qrencode" <<'EOF'
-#!/usr/bin/env bash
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    -o)
-      shift
-      printf 'png\n' > "$1"
-      exit 0
-      ;;
-  esac
-  shift
-done
-exit 0
-EOF
-  chmod +x "${fakebin}/qrencode"
-  PATH="${fakebin}:${PATH}"
-
-  SERVER_IP="203.0.113.30"
-  NODE_LABEL_PREFIX="HKG"
-  REALITY_UUID="11111111-1111-1111-1111-111111111111"
-  REALITY_SNI="reality.example.com"
-  REALITY_TARGET="www.scu.edu:443"
-  REALITY_SHORT_ID="abcd1234"
-  REALITY_PUBLIC_KEY="public-key-value"
-  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
-  XHTTP_DOMAIN="cdn.example.com"
-  XHTTP_PATH="/assets/v3"
-  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
-  XHTTP_VLESS_ENCRYPTION=""
-  XHTTP_VLESS_DECRYPTION="none"
-  ENABLE_WARP="no"
-  ENABLE_NET_OPT="no"
-  CERT_MODE="existing"
-
-  write_output_file
-
-  [[ -f "${SUBSCRIPTION_RAW_QR_FILE}" ]]
-  [[ -f "${SUBSCRIPTION_BASE64_QR_FILE}" ]]
-  assert_contains "Raw QR PNG:" "${SUBSCRIPTION_MANIFEST_FILE}"
-  assert_contains "${SUBSCRIPTION_RAW_QR_FILE}" "${OUTPUT_FILE}"
 }
 
 run_warp_outbound_json_shape_case() {
