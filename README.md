@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`1.0.0`
+当前版本：`1.1.0`
 
 ## 能安装什么
 
@@ -197,7 +197,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
 | `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
 | `change-cert-mode` / `renew-cert` | 换证书模式 / 续期证书 |
-| `show-links [--qr]` | 查看节点链接 |
+| `show-links [--qr]` | 查看节点链接；`--qr` 追加每条链接的终端二维码 |
 | `diagnose [--warp-probe] [--net]` | 一次性诊断 / 网络栈体检 |
 | `status [--raw]` | 状态面板 / 原始 systemctl 输出 |
 | `restart` / `repair-perms` | 重启服务 / 抢修文件权限 |
@@ -220,7 +220,8 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `/etc/haproxy/haproxy.cfg` | haproxy 托管配置 |
 | `/etc/systemd/system/xray.service` | Xray systemd unit |
 | `/usr/local/etc/xray/node-meta.env` | xtun 状态文件 |
-| `/root/xtun-output.md` | 人类可读节点输出 |
+| `/root/xtun-output.md` | 人类可读节点输出（节点 1–9 + 二维码段） |
+| `/root/xtun-qr/` | 节点二维码 PNG（每条节点一张，随链接重建） |
 | `/root/xtun-backups/` | 变更备份目录 |
 | `/var/log/xtun/operations.log` | 全局操作日志 |
 | `/var/www/xtun-fallback` | 本地静态伪装站 |
@@ -268,7 +269,7 @@ xtun status --raw
 
 任一不满足时整段功能自动关闭，`xtun diagnose` 会给出原因。
 
-启用后：nginx 直接在公网 UDP 443 监听 QUIC（`listen 443 quic reuseport`，有 IPv6 再加 `[::]:443`），TLS 在 nginx 终结，并下发 `Alt-Svc: h3=":443"`。链接追加 `XHTTP-TLS-H3`（H3 直连）与 `XHTTP-SPLIT-CDN-H3`（上行 CDN h2、下行 H3 直连）。防火墙需放行 UDP 443；`xtun diagnose` 会探测 QUIC 监听并在缺失时报出。
+启用后：nginx 直接在公网 UDP 443 监听 QUIC（`listen 443 quic reuseport`，有 IPv6 再加 `[::]:443`），TLS 在 nginx 终结，并下发 `Alt-Svc: h3=":443"`。链接追加 `XHTTP-TLS-H3`（H3 直连）与 `XHTTP-SPLIT-CDN-H3`（上行 CDN h2、下行 H3 直连），这两条对应输出文件的节点 8 / 9。防火墙需放行 UDP 443；`xtun diagnose` 会探测 QUIC 监听并在缺失时报出。
 
 ### 一次性诊断
 
@@ -278,12 +279,15 @@ xtun diagnose
 
 `diagnose` 会检查：
 
-- `xray / haproxy / nginx` 状态
-- `443 / 2443 / 8001 / 8443` 监听
-- Xray/nginx/haproxy 配置自检
-- nginx 的 `worker_connections`（低于 4096 会给出提示，但不算失败）
+- `xray / haproxy / nginx` 服务状态
+- `443 / 2443 / 2444 / 8001 / 8443` 监听
+- XHTTP H3 是否启用、QUIC（UDP 443）是否监听、`[::]:443` IPv6 监听
+- Xray / nginx / haproxy 配置自检
+- nginx 的 `worker_connections`（低于阈值会给出建议，不算失败）
 - 本地 TLS 握手
-- WARP 出站配置与 Endpoint 解析
+- 路由拦截状态
+- 证书到期
+- WARP 出站配置与 Endpoint 解析（`--warp-probe` 额外探测出口 IP，`--net` 额外检查网络栈）
 
 关键项失败时会以非 0 退出，适合接入外部监控。
 
@@ -294,7 +298,13 @@ xtun show-links
 xtun show-links --qr
 ```
 
-`show-links` 属于查看类命令：只读输出文件，不重写任何托管文件。加 `--qr` 可额外输出分享链接二维码（需要 `qrencode`）。
+`show-links` 属于查看类命令：只读打印输出文件，不重写任何托管文件。加 `--qr` 在末尾逐条打印每个分享链接的终端二维码（ANSI，按节点名标注）。
+
+上下行分离节点的链接有 1100–1700 字符，终端里画出来是 137×137 个字符块，手机对着终端扫成功率很低——这几条建议改用 PNG：
+
+- PNG 目录在 `/root/xtun-qr/`（`0700`），每条节点一张，文件名「位次-节点名.png」（`01-…` 到 `09-…`），随链接一起重新生成
+- 取回本地：`scp root@<本机 IP>:/root/xtun-qr/'*.png' .`
+- `qrencode` 由安装器安装；已装节点缺它时 `apt-get install -y qrencode && xtun apply-config` 即可补齐 PNG
 
 ### 常用变更
 
@@ -344,6 +354,14 @@ xtun apply-config
 ```
 
 `apply-config` 走和 `change-*` 一样的备份、校验、重启、回滚流程，但不改节点参数，所以不会重刷部署文档。
+
+### 从 1.0.x 升级到 1.1.0 的注意点
+
+1.1.0 起不再提供订阅地址与 mihomo yaml：客户端里已添加的 `https://<域名>/sub/<token>/…` 订阅会 404。请删掉客户端里的旧订阅，改用分享链接或扫码重新导入（`xtun show-links` / `/root/xtun-qr/` 里的 PNG）。
+
+- Cloudflare 缓存绕过规则里的 `/sub/` 子句可以删也可以留，不影响任何东西
+- 旧的 `/var/www/xtun-sub` 订阅目录会在 `install` / `apply-config` / `uninstall` 的遗留清理里自动删掉
+- 客户端不支持的旧字段（如订阅式导入）不再生成；mihomo 用户请改用链接手工导
 
 ### 托管配置里的自定义片段
 
@@ -401,13 +419,7 @@ xtun apply-config
 LimitNOFILE=1048576
 ```
 
-`worker_connections` 只能写在 `/etc/nginx/nginx.conf` 的 `events` 块里，而 xtun 只接管 `conf.d/` 下的一个 server 段，够不着它。发行版默认值 768 在反代场景下要打对折——每个 worker 实际只够 384 个客户端。`xtun diagnose` 会把当前值报出来，低于 4096 时提示手工调整：
-
-```text
-events {
-    worker_connections 8192;
-}
-```
+`worker_connections` 只能写在 `/etc/nginx/nginx.conf` 的 `events` 块里。xtun 接管主配置时（新装默认接管，`apply-config --manage-nginx-main` 可补开）直接写 `worker_connections 65535` + `multi_accept`；未接管的旧节点，`diagnose` 会报当前值并提示运行 `apply-config --manage-nginx-main` 由 xtun 接管，或手工在 `events` 块里调大。
 
 ### 卸载
 
@@ -423,7 +435,7 @@ xtun uninstall --yes
 xtun uninstall --purge --yes
 ```
 
-`--purge` 会尝试卸载 `haproxy`、`nginx`、`jq`、`uuid-runtime`，并清理 `/root/.acme.sh`、`/var/log/xtun` 等路径。旧版本装过 `cloudflare-warp` 或带过核心巡检 timer 的机器，卸载时会一并清掉遗留的 APT 源、keyring、`/var/lib/cloudflare-warp` 和巡检单元。
+`--purge` 会尝试卸载 `haproxy`、`nginx`、`jq`、`uuid-runtime`、`qrencode`，并清理 `/root/.acme.sh`、`/var/log/xtun` 等路径。旧版本装过 `cloudflare-warp`、带过核心巡检 timer，或用过 1.0.0 的 `/var/www/xtun-sub` 订阅目录的机器，卸载时会一并清掉遗留的 APT 源、keyring、`/var/lib/cloudflare-warp`、巡检单元和订阅目录。
 
 不带 `--yes` 时会要求二次确认：先回答 `y` 确认停止服务并删除托管文件，再输入 `purge` 才会同时卸载软件包。`--purge` / `--yes` 语义不变。
 
@@ -482,7 +494,7 @@ xtun change-warp --disable-warp
 xtun change-warp --enable-warp
 ```
 
-从旧版本升级上来的机器，第一次执行 `change-warp` 会顺手停用并清理 `warp-svc`、`xtun-warp-health.timer`、MDM XML、APT 源和 keyring。彻底删包需要自己跑一次：
+旧版 `warp-svc` / `xtun-warp-health.timer` / MDM XML / APT 源 / keyring 由 `install`、`apply-config`、`uninstall` 的遗留清理统一处理；彻底删包需要自己跑一次：
 
 ```bash
 apt-get purge -y cloudflare-warp && rm -rf /var/lib/cloudflare-warp
@@ -499,7 +511,7 @@ xtun change-warp-rules --reset-defaults
 
 说明：
 
-- 在交互终端里不带任何修改参数直接跑 `xtun change-warp-rules`（或走菜单 12），只打印当前规则和 CLI 用法，不做任何修改
+- 在交互终端里不带任何修改参数直接跑 `xtun change-warp-rules`（或走菜单 13），只打印当前规则和 CLI 用法，不做任何修改
 - 规则和改动前完全一致时直接返回，不会重启服务。分流规则变更要重启 xray/haproxy/nginx，会掐断所有在跑的连接，所以「点进去看一眼」不该付这个代价
 - 备份会话也推迟到确认真有变更之后才开，看一眼不会挤掉真正的变更备份
 - 改完只打印新规则，不再输出整份部署文档：WARP 出站和分流规则都在服务端侧，客户端链接一个字都不会变
