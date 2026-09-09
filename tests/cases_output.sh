@@ -409,7 +409,7 @@ run_user_block_marker_whitespace_case() {
 
   # 结束标记后面的托管内容一行都不许被搬进用户块
   [[ "$(grep -c '^frontend fe_tls_shared_443$' "${HAPROXY_CONFIG}")" -eq 1 ]]
-  [[ "$(grep -c 'bind :443' "${HAPROXY_CONFIG}")" -eq 1 ]]
+  [[ "$(grep -c "bind :::443 v4v6" "${HAPROXY_CONFIG}")" -eq 1 ]]
   [[ "$(grep -c '^backend be_xhttp_cdn$' "${HAPROXY_CONFIG}")" -eq 1 ]]
   [[ "$(grep -c 'xtun-user:haproxy-extra' "${HAPROXY_CONFIG}")" -eq 2 ]]
   [[ "$(grep -c 'xtun-user:haproxy-defaults' "${HAPROXY_CONFIG}")" -eq 2 ]]

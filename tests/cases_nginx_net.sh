@@ -181,3 +181,94 @@ EOF
   rm -rf "${workdir}"
   load_functions
 }
+
+run_ipv6_links_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  SERVER_IP6="2408:8120::1234"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION=""
+  XHTTP_VLESS_DECRYPTION="none"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+
+  # 7 条链接，v6 节点地址带 []
+  [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 7 ]]
+  vless_links_text > "${workdir}/links.txt"
+  grep -qF "vless://${REALITY_UUID}@[2408:8120::1234]:443" "${workdir}/links.txt"
+  vless_links_text | grep -q "HKG-REALITY-V6"
+  vless_links_text | grep -q "vless://${XHTTP_UUID}@\[2408:8120::1234\]:443"
+  # 节点 7 的 downloadSettings.address 是 IPv6（URL 编码后是 %22%5B...%5D%22）
+  grep -qF 'address%22%3A%22%5B2408%3A8120%3A%3A1234%5D%22' "${workdir}/links.txt"
+  vless_links_text | grep -q "HKG-XHTTP-SPLIT-CDN-REALITY-V6"
+
+  # 输出文件有节点 6 / 节点 7
+  write_output_file
+  assert_contains '## 节点 6' "${OUTPUT_FILE}"
+  assert_contains '## 节点 7' "${OUTPUT_FILE}"
+  assert_contains '\[2408:8120::1234\]（Reality）' "${OUTPUT_FILE}"
+
+  # mihomo 同步 7 条
+  [[ "$(grep -c '^  - name:' <(mihomo_nodes_yaml_text))" -eq 7 ]]
+  # 别用管道 + grep -q：grep 命中就关读端，heredoc 生成器吃 SIGPIPE 退 141
+  mihomo_nodes_yaml_text > "${workdir}/mihomo.yaml"
+  grep -qF 'server: "[2408:8120::1234]"' "${workdir}/mihomo.yaml"
+
+  # SERVER_IP6 为空时回到 5 条
+  SERVER_IP6=""
+  [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 5 ]]
+  [[ "$(grep -c '^  - name:' <(mihomo_nodes_yaml_text))" -eq 5 ]]
+
+  # guess_server_ip6：非全局单播返回空
+  ip() {
+    case "${1}" in
+      -6) printf '2606:4700:4700::1111 from ::1 via ... src fe80::1 dev eth0' ;;
+      *) printf '' ;;
+    esac
+  }
+  [[ -z "$(guess_server_ip6)" ]]
+  ip() {
+    case "${1}" in
+      -6) printf '2606:4700:4700::1111 from 2606:4700::1 via ... src 2408:8120::1234 dev eth0' ;;
+      *) printf '' ;;
+    esac
+  }
+  [[ "$(guess_server_ip6)" == "2408:8120::1234" ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+run_haproxy_bind_v4v6_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  HAPROXY_CONFIG="${workdir}/haproxy.cfg"
+  reset_feature_defaults
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  NGINX_TLS_PORT="8443"
+
+  write_haproxy_config
+
+  assert_contains 'bind :::443 v4v6' "${HAPROXY_CONFIG}"
+  assert_absent '^ *bind :443$' "${HAPROXY_CONFIG}"
+
+  rm -rf "${workdir}"
+  load_functions
+}

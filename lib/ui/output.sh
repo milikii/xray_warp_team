@@ -80,17 +80,19 @@ build_xhttp_uri() {
   local encoded_encryption="${3}"
   local ech_component="${4:-}"
   local extra_component="${5:-}"
+  local address="${6:-}"
   local ech_query=""
   local extra_query=""
   local encryption_value=""
 
+  address="${address:-${XHTTP_DOMAIN}}"
   encryption_value="$(xhttp_uri_encryption_value "${encoded_encryption}")"
   [[ -n "${ech_component}" ]] && ech_query="&ech=${ech_component}"
   [[ -n "${extra_component}" ]] && extra_query="&extra=${extra_component}"
 
   printf 'vless://%s@%s:443?mode=auto&path=%s&security=tls&alpn=%s&encryption=%s&insecure=0&host=%s&fp=%s&fingerprint=%s&type=xhttp&allowInsecure=0&sni=%s%s%s#%s' \
     "${XHTTP_UUID}" \
-    "${XHTTP_DOMAIN}" \
+    "${address}" \
     "${path_component}" \
     "$(effective_tls_alpn)" \
     "${encryption_value}" \
@@ -153,7 +155,9 @@ build_download_xhttp_extra_json() {
     '{xmux: $xmux} | '"${xpadding_filter}"
 }
 
+# $1 = downloadSettings.address（默认 SERVER_IP；IPv6 split 节点传 [v6]）
 build_xhttp_split_extra_json() {
+  local download_address="${1:-}"
   local xmux_json=""
   local download_extra_json=""
   local xpadding_root_prefix='.'
@@ -175,7 +179,7 @@ build_xhttp_split_extra_json() {
     --argjson xmux "${xmux_json}" \
     --argjson download_extra "${download_extra_json}" \
     --argjson sc_min_posts_interval_ms "${DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS}" \
-    --arg address "${SERVER_IP}" \
+    --arg address "${download_address:-${SERVER_IP}}" \
     --arg server_name "${REALITY_SNI}" \
     --arg fingerprint "$(effective_fingerprint)" \
     --arg short_id "${REALITY_SHORT_ID}" \
@@ -358,11 +362,21 @@ build_link_context() {
   xhttp_extra_component="$(uri_encode "${xhttp_extra_json}")"
   XHTTP_URI="$(build_xhttp_uri "${xhttp_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${xhttp_extra_component}")"
   split_extra_json="$(build_xhttp_split_extra_json)"
+  split_extra_v6_json="$(build_xhttp_split_extra_json "[${SERVER_IP6}]")"
   split_extra_component="$(uri_encode "${split_extra_json}")"
   XHTTP_SPLIT_URI="$(build_xhttp_uri "${xhttp_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${split_extra_component}")"
   reverse_split_extra_json="$(build_xhttp_reverse_split_extra_json)"
   reverse_split_extra_component="$(uri_encode "${reverse_split_extra_json}")"
   XHTTP_REVERSE_SPLIT_URI="$(build_xhttp_reality_uri "${xhttp_reverse_split_label}" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${reverse_split_extra_component}")"
+
+  REALITY_V6_URI=""
+  XHTTP_SPLIT_CDN_REALITY_V6_URI=""
+  if [[ -n "${SERVER_IP6:-}" ]]; then
+    REALITY_V6_URI="$(build_reality_uri "$(prefixed_node_label "REALITY-V6")" "[${SERVER_IP6}]")"
+    local split_v6_component=""
+    split_v6_component="$(uri_encode "${split_extra_v6_json}")"
+    XHTTP_SPLIT_CDN_REALITY_V6_URI="$(build_xhttp_uri "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY-V6")" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "${split_v6_component}" "[${SERVER_IP6}]")"
+  fi
 }
 
 vless_links_text() {
@@ -373,6 +387,9 @@ vless_links_text() {
     "${XHTTP_URI}" \
     "${XHTTP_SPLIT_URI}" \
     "${XHTTP_REVERSE_SPLIT_URI}"
+  if [[ -n "${SERVER_IP6:-}" ]]; then
+    printf '%s\n%s\n' "${REALITY_V6_URI}" "${XHTTP_SPLIT_CDN_REALITY_V6_URI}"
+  fi
 }
 
 # YAML 标量一律双引号包裹，转义反斜杠与双引号，避免 vlessenc 字串里的字符被误读。
@@ -613,6 +630,69 @@ EOF
     mihomo_ech_lines "        "
   fi
   mihomo_reuse_settings_lines "      "
+
+  if [[ -n "${SERVER_IP6:-}" ]]; then
+    cat <<EOF
+
+  - name: $(yaml_quote "$(prefixed_node_label "REALITY-V6")")
+    type: vless
+    server: $(yaml_quote "[${SERVER_IP6}]")
+    port: 443
+    uuid: $(yaml_quote "${REALITY_UUID}")
+    udp: true
+    tls: true
+    network: tcp
+    flow: xtls-rprx-vision
+    servername: $(yaml_quote "${REALITY_SNI}")
+    client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+    reality-opts:
+      public-key: $(yaml_quote "${REALITY_PUBLIC_KEY}")
+      short-id: $(yaml_quote "${REALITY_SHORT_ID}")
+
+  - name: $(yaml_quote "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY-V6")")
+    type: vless
+    server: $(yaml_quote "${XHTTP_DOMAIN}")
+    port: 443
+    uuid: $(yaml_quote "${XHTTP_UUID}")
+EOF
+    if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+      printf '    encryption: %s\n' "$(yaml_quote "${XHTTP_VLESS_ENCRYPTION}")"
+    fi
+    cat <<EOF
+    udp: true
+    tls: true
+    network: xhttp
+    alpn: [h2]
+    servername: $(yaml_quote "${XHTTP_DOMAIN}")
+    client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+EOF
+    if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
+      mihomo_ech_lines "    "
+    fi
+    cat <<EOF
+    xhttp-opts:
+      host: $(yaml_quote "${XHTTP_DOMAIN}")
+      path: $(yaml_quote "${XHTTP_PATH}")
+EOF
+    mihomo_xhttp_base_lines "    "
+    cat <<EOF
+      download-settings:
+        server: $(yaml_quote "[${SERVER_IP6}]")
+        port: 443
+        tls: true
+        servername: $(yaml_quote "${REALITY_SNI}")
+        client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+        reality-opts:
+          public-key: $(yaml_quote "${REALITY_PUBLIC_KEY}")
+          short-id: $(yaml_quote "${REALITY_SHORT_ID}")
+        path: $(yaml_quote "${XHTTP_PATH}")
+        mode: auto
+EOF
+    if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+      mihomo_xpadding_lines "        "
+    fi
+    mihomo_reuse_settings_lines "      "
+  fi
 }
 
 # 旧 token 目录在轮换后立刻失效：写新目录前先清掉所有非当前 token 的目录。
@@ -655,10 +735,12 @@ cloudflare_xhttp_cache_bypass_expression() {
 
 build_reality_uri() {
   local label="${1}"
+  local address="${2:-}"
 
+  address="${address:-${SERVER_IP}}"
   printf 'vless://%s@%s:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=%s&fp=%s&fingerprint=%s&pbk=%s&sid=%s&type=tcp&headerType=none#%s' \
     "${REALITY_UUID}" \
-    "${SERVER_IP}" \
+    "${address}" \
     "${REALITY_SNI}" \
     "$(effective_fingerprint)" \
     "$(effective_fingerprint)" \
@@ -783,6 +865,41 @@ ${uri}
 EOF
 }
 
+# SERVER_IP6 非空时追加节点 6 / 节点 7。
+output_ipv6_blocks() {
+  if [[ -z "${SERVER_IP6:-}" ]]; then
+    return 0
+  fi
+
+  cat <<EOF
+## 节点 6
+- 类型: VLESS + REALITY + Vision（IPv6）
+- 地址: [${SERVER_IP6}]
+- 端口: 443
+- UUID: ${REALITY_UUID}
+- SNI: ${REALITY_SNI}
+- 公钥: ${REALITY_PUBLIC_KEY}
+- 短 ID: ${REALITY_SHORT_ID}
+- 指纹: $(effective_fingerprint)
+
+链接:
+${REALITY_V6_URI}
+
+## 节点 7
+- 类型: 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + Reality（IPv6）
+- 上行地址: ${XHTTP_DOMAIN}（CDN+TLS）
+- 下行地址: [${SERVER_IP6}]（Reality）
+- UUID: ${XHTTP_UUID}
+- 下行 SNI: ${REALITY_SNI}
+- 公钥: ${REALITY_PUBLIC_KEY}
+- 短 ID: ${REALITY_SHORT_ID}
+$(output_xhttp_shared_details)
+
+链接:
+${XHTTP_SPLIT_CDN_REALITY_V6_URI}
+EOF
+}
+
 output_runtime_summary_block() {
   local cf_ssl_mode="${1}"
 
@@ -892,6 +1009,7 @@ $(output_xhttp_cdn_block "${XHTTP_URI}")
 $(output_xhttp_split_block "${XHTTP_SPLIT_URI}")
 
 $(output_xhttp_reverse_split_block "${XHTTP_REVERSE_SPLIT_URI}")
+$(output_ipv6_blocks)
 
 $(output_runtime_summary_block "${cf_ssl_mode}")
 

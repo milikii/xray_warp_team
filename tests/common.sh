@@ -141,6 +141,9 @@ reset_feature_defaults() {
   XHTTP_SPLIT_URI=""
   XHTTP_REALITY_URI=""
   XHTTP_REVERSE_SPLIT_URI=""
+  REALITY_V6_URI=""
+  XHTTP_SPLIT_CDN_REALITY_V6_URI=""
+  SERVER_IP6=""
 }
 
 stub_side_effects() {

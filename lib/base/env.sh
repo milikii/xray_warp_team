@@ -29,6 +29,28 @@ guess_server_ip() {
   printf '%s' "${fallback}"
 }
 
+# 取本机全局单播 IPv6：路由探测 + 2000::/3（含 3xxx）前缀校验。
+# 链路本地 / ULA / 探测失败一律返回空，视为不支持双栈。
+guess_server_ip6() {
+  local guessed=""
+
+  guessed="$(ip -6 route get 2606:4700:4700::1111 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+  is_global_ipv6 "${guessed}" || return 0
+  printf '%s' "${guessed}"
+}
+
+is_global_ipv6() {
+  local ip="${1:-}"
+
+  [[ -n "${ip}" ]] || return 1
+  [[ "${ip}" == *:* ]] || return 1
+  case "${ip}" in
+    fe*|fd*|fc*|[0-9]:|[0-9][0-9]:) return 1 ;;
+  esac
+  # 2000::/3：首字符 2 或 3（2001::、2408::、2606::、3fff:: 等全是全局单播）
+  [[ "${ip}" =~ ^[23] ]]
+}
+
 is_ipv4() {
   local ip="${1:-}"
 

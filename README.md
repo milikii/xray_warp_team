@@ -289,6 +289,18 @@ xtun change-sub-token
 
 轮换后旧 token 目录即刻失效（写入新目录前会清掉所有非当前 token 的目录）。Cloudflare 缓存绕过表达式已包含 `/sub/` 路径。
 
+### IPv6 双栈
+
+安装时脚本会探测本机全局单播 IPv6（`ip -6 route get 2606:4700:4700::1111`，只认 `2000::/3`），问到「REALITY 直连节点 IPv6」时直接给默认值；留空（或 `--no-ipv6`）跳过。
+
+有 IPv6 时：
+
+- haproxy 监听改为 `bind :::443 v4v6`（无 IPv6 的机器同样合法，IPv4 走 mapped 地址）
+- 追加两条链接：`REALITY-V6`（节点 1 的 IPv6 版）与 `XHTTP-SPLIT-CDN-REALITY-V6`（节点 4 的 IPv6 下行），mihomo yaml 同步追加
+- `xtun status` 面板与 `xtun diagnose` 会显示 IPv6 状态
+
+也可以显式指定：`--server-ip6 2408:8120::xxx`。
+
 ### mihomo 导入
 
 订阅里的 `mihomo.yaml` 含 5 条节点（与 `show-links` 一一对应），需要 mihomo >= 1.19.24（xhttp + x-padding + vless encryption 支持）。ECH / xpadding / VLESS Encryption 开关开启时，yaml 会带上 `ech-opts`、`x-padding-*`、`encryption:` 对应键。

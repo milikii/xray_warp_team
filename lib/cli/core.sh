@@ -159,6 +159,7 @@ diagnose_cmd() {
   printf '%s\n' "监听 ${REALITY_FALLBACK_PORT}: $(listening_port_text "${REALITY_FALLBACK_PORT}")"
   printf '%s\n' "监听 8001: $(listening_port_text 8001)"
   printf '%s\n' "监听 8443: $(listening_port_text 8443)"
+  printf '%s\n' "监听 [::]:443: $(if ss -ltnH '( sport = :443 )' 2>/dev/null | grep -q '\[::\|\*:'; then printf '运行中'; else printf '未监听'; fi)"
   printf '%s\n' "Xray 配置: $(xray_config_check_text)"
   printf '%s\n' "Nginx 配置: $(nginx_config_check_text)"
   printf '%s\n' "Nginx worker_connections: $(nginx_worker_connections_text)"

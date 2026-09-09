@@ -27,6 +27,8 @@ EOF
 install_value_specs() {
   cat <<'EOF'
 --server-ip:SERVER_IP
+--server-ip6:SERVER_IP6
+--no-ipv6:SERVER_IP6:
 --node-label-prefix:NODE_LABEL_PREFIX
 --reality-uuid:REALITY_UUID
 --reality-sni:REALITY_SNI

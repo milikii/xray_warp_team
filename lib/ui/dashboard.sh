@@ -25,6 +25,7 @@ show_dashboard_brief() {
     panel_row "安装状态" "$(style_text "${C_GREEN}" "已托管")  脚本 v${SCRIPT_VERSION}"
     panel_row "REALITY" "${SERVER_IP:-未知}:443  sni=${REALITY_SNI:-未知}"
     panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-未知}:443  path=${XHTTP_PATH:-未知}"
+  panel_row "IPv6 直连" "$(if [[ -n "${SERVER_IP6:-}" ]]; then style_text "${C_GREEN}" "[${SERVER_IP6}]"; else printf '未启用'; fi)"
   else
     panel_row "安装状态" "$(style_text "${C_YELLOW}" "未安装")  脚本 v${SCRIPT_VERSION}"
   fi
@@ -71,6 +72,7 @@ show_dashboard() {
     panel_row "证书模式" "$(pretty_cert_mode)"
     panel_row "REALITY" "${SERVER_IP:-未知}:443  sni=${REALITY_SNI:-未知}"
     panel_row "XHTTP CDN" "${XHTTP_DOMAIN:-未知}:443  path=${XHTTP_PATH:-未知}"
+  panel_row "IPv6 直连" "$(if [[ -n "${SERVER_IP6:-}" ]]; then style_text "${C_GREEN}" "[${SERVER_IP6}]"; else printf '未启用'; fi)"
     panel_row "节点前缀" "${NODE_LABEL_PREFIX:-未知}"
     panel_row "REALITY UUID" "$(short_value "${REALITY_UUID:-未知}")"
     panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-未知}")"

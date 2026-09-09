@@ -253,6 +253,8 @@ main() {
     run_nginx_http2_compat_case
     run_diagnose_net_case
     run_bbr_kernel_switch_case
+    run_ipv6_links_case
+    run_haproxy_bind_v4v6_case
   )
 
   load_functions

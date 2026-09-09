@@ -18,10 +18,17 @@
 # 所以 `|| exit 1` 接得住；写成 `local X="$(...)"` 就接不住了（shellcheck SC2155）。
 prepare_install_inputs() {
   local guessed_ip=""
+  local guessed_ip6=""
 
   guessed_ip="$(guess_server_ip)"
 
   prompt_with_default SERVER_IP "REALITY 直连节点地址或 IP" "${guessed_ip}"
+  guessed_ip6="$(guess_server_ip6)"
+  if [[ -n "${guessed_ip6}" ]]; then
+    prompt_with_default SERVER_IP6 "REALITY 直连节点 IPv6（留空跳过）" "${guessed_ip6}"
+  elif [[ "${NON_INTERACTIVE}" -ne 1 ]]; then
+    read -r -p "REALITY 直连节点 IPv6（留空跳过）: " SERVER_IP6
+  fi
   prompt_with_default NODE_LABEL_PREFIX "导出链接使用的节点名前缀" "$(default_node_label_prefix)"
   prompt_with_default REALITY_UUID "REALITY UUID" "$(random_uuid)"
   prompt_with_default REALITY_SNI "REALITY 可见 SNI" "${DEFAULT_REALITY_SNI}"

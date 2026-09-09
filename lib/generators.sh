@@ -739,7 +739,8 @@ EOF
 haproxy_frontend_config() {
   cat <<EOF
 frontend fe_tls_shared_443
-    bind :443
+    # :::443 + v4v6：无 IPv6 的机器照样绑（IPv4 走 mapped 地址）；有 IPv6 时自动双栈。
+    bind :::443 v4v6
     mode tcp
     tcp-request inspect-delay 5s
     tcp-request content accept if { req.ssl_hello_type 1 }
