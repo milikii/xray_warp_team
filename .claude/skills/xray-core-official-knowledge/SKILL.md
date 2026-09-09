@@ -12,9 +12,9 @@ description: >
 license: MIT
 metadata:
   snapshot_policy: versioned
-  current_stable: ""
-  current_beta: ""
-  last_sync: ""
+  current_stable: v26.3.27
+  current_beta: v26.9.9
+  last_sync: "2026-09-09"
   repository: https://github.com/XTLS/Xray-core
 ---
 
@@ -49,6 +49,18 @@ network path unless you also note that real-world testing is required.
 
 This skill is organized into four layers. When answering, prefer lower-numbered
 layers for factual claims; use higher layers only when lower layers are silent.
+
+### Confidence tiers (read this first)
+
+- **Primary sources (ground truth):** `docs/` (official documentation snapshot)
+  and `source/` (Xray-core source code snapshot). Every factual claim should
+  trace back here.
+- **Human summaries (verify before citing):** `extracted/`, `changelog/`, and
+  `citations/` are hand-written digests. Historical revisions of these files
+  contained errors (e.g. reversed `dest`/`target` and `publicKey`/`password`
+  rename directions, and `allowInsecure` described as removed when it is only
+  deprecated). Before citing anything from these layers, confirm it against
+  `docs/stable/config/` or `source/`.
 
 ### Layer 1 — Official Documentation (`docs/`)
 
@@ -242,7 +254,7 @@ skills/xray-core-official-knowledge/
 | "What does X do?" | `docs/stable/` | `extracted/parameters/` |
 | "What is the default?" | `extracted/defaults/` | `source/config/` |
 | "Do I set this on client or server?" | `extracted/parameters/` | `source/config/` |
-| "When was X added?" | `changelog/` | `source/commits/` |
+| "When was X added?" | `source/commits/` + upstream git history | `changelog/` (summary only; `source/releases/` notes are sparse for pre-releases) |
 | "Why does X behave this way?" | `source/config/` or `source/transport/` | `citations/` |
 | "Is X deprecated?" | `extracted/deprecations/` | `changelog/` |
 | "Generate a config" | `examples/` + `extracted/parameters/` | `docs/stable/` |

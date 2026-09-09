@@ -4,11 +4,12 @@
 
 metadata:
   skill_name: xray-core-official-knowledge
-  last_sync: "2025-09-09T14:40:00Z"
+  last_sync: "2026-09-09T14:40:00Z"
   sync_method: automated+manual
   maintainer_note: >
     Snapshot generated from XTLS/Xray-core main branch at commit 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
-    and XTLS/Xray-docs-next main branch. Covers releases up to v26.9.9.
+    and XTLS/Xray-docs-next main branch. Covers the latest pre-release (v26.9.9); the latest
+    stable release (v26.3.27) is tracked via covered_versions.stable.
 
 upstream:
   repository:
@@ -25,21 +26,21 @@ upstream:
 # Versions currently represented in this knowledge base.
 covered_versions:
   stable:
+    version: v26.3.27
+    tag: v26.3.27
+    commit: d2758a0 (short SHA reported by the v26.3.27 binary; full SHA per tag)
+    docs_snapshot_date: "2026-09-09T14:40:00Z"
+    source_snapshot_date: "2026-09-09T14:40:00Z"
+  beta:
     version: v26.9.9
     tag: v26.9.9
     commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
-    docs_snapshot_date: "2025-09-09T14:40:00Z"
-    source_snapshot_date: "2025-09-09T14:40:00Z"
-  beta:
-    version: ""
-    tag: ""
-    commit: ""
-    docs_snapshot_date: ""
-    source_snapshot_date: ""
+    docs_snapshot_date: "2026-09-09T14:40:00Z"
+    source_snapshot_date: "2026-09-09T14:40:00Z"
   dev:
     branch: main
     commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
-    snapshot_date: "2025-09-09T14:40:00Z"
+    snapshot_date: "2026-09-09T14:40:00Z"
 
 # Known gaps in the current knowledge base.
 gaps:
@@ -73,15 +74,15 @@ provenance:
   docs/stable/:
     source_repo: XTLS/Xray-docs-next
     source_path: docs/
-    extraction_date: "2025-09-09T14:40:00Z"
+    extraction_date: "2026-09-09T14:40:00Z"
   source/config/:
     source_repo: XTLS/Xray-core
     source_path: infra/conf/
-    extraction_date: "2025-09-09T14:40:00Z"
+    extraction_date: "2026-09-09T14:40:00Z"
   source/transport/:
     source_repo: XTLS/Xray-core
     source_path: transport/internet/
-    extraction_date: "2025-09-09T14:40:00Z"
+    extraction_date: "2026-09-09T14:40:00Z"
   source/releases/:
     source_api: https://api.github.com/repos/XTLS/Xray-core/releases
-    extraction_date: "2025-09-09T14:40:00Z"
+    extraction_date: "2026-09-09T14:40:00Z"

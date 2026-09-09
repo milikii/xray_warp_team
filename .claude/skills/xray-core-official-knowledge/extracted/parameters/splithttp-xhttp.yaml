@@ -1,6 +1,6 @@
 name: SplitHTTPConfig (XHTTP)
 component: transport/internet/splithttp
-version_introduced: v1.8.0 (SplitHTTP, renamed to XHTTP later)
+version_introduced: unknown (SplitHTTP added mid-2024, several minor releases after REALITY's v1.8.0; exact release not verifiable from this snapshot)
 version_deprecated: ""
 version_removed: ""
 status: stable

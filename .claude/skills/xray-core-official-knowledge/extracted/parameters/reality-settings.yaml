@@ -21,7 +21,7 @@ fields:
     server_client: server-only
     notes: >
       服务端目标地址。可以是端口号或地址字符串。
-      旧字段名为 target，现已由 dest 统一替代。
+      旧名为 dest，现名为 target，两字段互为 alias（docs/stable/config/transports/reality.md:74-78；source/config/transport_security.go:30-31）。
 
   - name: type
     type: string
