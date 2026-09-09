@@ -149,6 +149,9 @@ reset_feature_defaults() {
 stub_side_effects() {
   ensure_managed_permissions() { :; }
   backup_path() { :; }
+  # H3 是否可用依赖宿主机 nginx 编译选项，默认按不可用处理；
+  # 需要 H3 的用例自己覆盖 h3_enabled。
+  h3_enabled() { return 1; }
 }
 
 set_test_warp_credentials() {

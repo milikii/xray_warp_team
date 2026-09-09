@@ -105,6 +105,80 @@ build_xhttp_uri() {
     "${label}"
 }
 
+# H3 直连节点：地址是 SERVER_IP，SNI/Host 用 CDN 域名（证书是它），alpn=h3。
+build_xhttp_h3_uri() {
+  local label="${1}"
+  local path_component="${2}"
+  local encoded_encryption="${3}"
+  local address="${4}"
+  local encryption_value=""
+
+  encryption_value="$(xhttp_uri_encryption_value "${encoded_encryption}")"
+
+  printf 'vless://%s@%s:443?mode=auto&path=%s&security=tls&alpn=h3&encryption=%s&insecure=0&host=%s&fp=%s&fingerprint=%s&type=xhttp&allowInsecure=0&sni=%s#%s' \
+    "${XHTTP_UUID}" \
+    "${address}" \
+    "${path_component}" \
+    "${encryption_value}" \
+    "${XHTTP_DOMAIN}" \
+    "$(effective_fingerprint)" \
+    "$(effective_fingerprint)" \
+    "${XHTTP_DOMAIN}" \
+    "${label}"
+}
+
+# 上行 CDN h2（同节点 3 的 extra），下行 H3 直连。
+build_xhttp_split_h3_extra_json() {
+  local xmux_json=""
+  local xpadding_prefix='.'
+
+  xmux_json="$(build_xmux_json)"
+
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    xpadding_prefix='{
+      xPaddingObfsMode: true,
+      xPaddingMethod: $xhttp_xpadding_method,
+      xPaddingPlacement: $xhttp_xpadding_placement,
+      xPaddingHeader: $xhttp_xpadding_header,
+      xPaddingKey: $xhttp_xpadding_key
+    } + .'
+  fi
+
+  jq -cn \
+    --argjson xmux "${xmux_json}" \
+    --argjson sc_min_posts_interval_ms "${DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS}" \
+    --arg address "${SERVER_IP}" \
+    --arg server_name "${XHTTP_DOMAIN}" \
+    --arg alpn "$(effective_tls_alpn)" \
+    --arg fingerprint "$(effective_fingerprint)" \
+    --arg path "${XHTTP_PATH}" \
+    --arg xhttp_xpadding_key "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}" \
+    --arg xhttp_xpadding_header "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}" \
+    --arg xhttp_xpadding_placement "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}" \
+    --arg xhttp_xpadding_method "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}" \
+    '{
+      scMinPostsIntervalMs: $sc_min_posts_interval_ms,
+      xmux: $xmux,
+      downloadSettings: {
+        address: $address,
+        port: 443,
+        network: "xhttp",
+        security: "tls",
+        alpn: ["h3"],
+        tlsSettings: {
+          serverName: $server_name,
+          allowInsecure: false,
+          fingerprint: $fingerprint
+        },
+        xhttpSettings: {
+          host: "",
+          path: $path,
+          mode: "auto"
+        }
+      }
+    } | '"${xpadding_prefix}"
+}
+
 build_xhttp_reality_uri() {
   local label="${1}"
   local path_component="${2}"
@@ -371,6 +445,14 @@ build_link_context() {
 
   REALITY_V6_URI=""
   XHTTP_SPLIT_CDN_REALITY_V6_URI=""
+  XHTTP_H3_URI=""
+  XHTTP_SPLIT_CDN_H3_URI=""
+  if h3_enabled; then
+    # XHTTP-TLS-H3：H3 直连（地址 SERVER_IP，TLS 由本机 nginx 终结）
+    XHTTP_H3_URI="$(build_xhttp_h3_uri "$(prefixed_node_label "XHTTP-TLS-H3")" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${SERVER_IP}")"
+    # XHTTP-SPLIT-CDN-H3：上行走 CDN h2，下行 H3 直连
+    XHTTP_SPLIT_CDN_H3_URI="$(build_xhttp_uri "$(prefixed_node_label "XHTTP-SPLIT-CDN-H3")" "${xhttp_path_component}" "${xhttp_vlessenc_component}" "${xhttp_ech_component}" "$(uri_encode "$(build_xhttp_split_h3_extra_json)")")"
+  fi
   if [[ -n "${SERVER_IP6:-}" ]]; then
     REALITY_V6_URI="$(build_reality_uri "$(prefixed_node_label "REALITY-V6")" "[${SERVER_IP6}]")"
     local split_v6_component=""
@@ -389,6 +471,9 @@ vless_links_text() {
     "${XHTTP_REVERSE_SPLIT_URI}"
   if [[ -n "${SERVER_IP6:-}" ]]; then
     printf '%s\n%s\n' "${REALITY_V6_URI}" "${XHTTP_SPLIT_CDN_REALITY_V6_URI}"
+  fi
+  if h3_enabled; then
+    printf '%s\n%s\n' "${XHTTP_H3_URI}" "${XHTTP_SPLIT_CDN_H3_URI}"
   fi
 }
 

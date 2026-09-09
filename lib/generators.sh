@@ -540,9 +540,19 @@ nginx_server_config() {
   else
     listen_line="listen 127.0.0.1:${NGINX_TLS_PORT} ssl http2;"
   fi
+  quic_block=""
+  # haproxy 只占 TCP 443，UDP 443 空着：nginx 直接在公网地址监听 QUIC，
+  # TLS 也在 nginx 终结，grpc_pass 不变。条件不满足时整段关闭。
+  if h3_enabled; then
+    quic_block="    # XHTTP H3 直连下行：UDP 443 需在防火墙放行
+    listen 443 quic reuseport;
+$(if [[ -n "${SERVER_IP6:-}" ]]; then printf '    listen [::]:443 quic reuseport;\n'; fi)
+    add_header Alt-Svc 'h3=\":443\"; ma=86400' always;"
+  fi
   cat <<EOF
 server {
     ${listen_line}
+${quic_block}
     server_name ${XHTTP_DOMAIN};
 
     ssl_certificate ${TLS_CERT_FILE};

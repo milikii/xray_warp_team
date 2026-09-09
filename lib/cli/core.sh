@@ -159,6 +159,8 @@ diagnose_cmd() {
   printf '%s\n' "监听 ${REALITY_FALLBACK_PORT}: $(listening_port_text "${REALITY_FALLBACK_PORT}")"
   printf '%s\n' "监听 8001: $(listening_port_text 8001)"
   printf '%s\n' "监听 8443: $(listening_port_text 8443)"
+  printf '%s\n' "XHTTP H3: $(if h3_enabled; then printf '已启用（Alt-Svc h3=:443）'; else printf '未启用（%s）' "$(h3_disabled_reason)"; fi)"
+  printf '%s\n' "QUIC (UDP 443): $(if quic_port_listening; then printf '运行中'; else printf '未监听'; fi)"
   printf '%s\n' "监听 [::]:443: $(if ss -ltnH '( sport = :443 )' 2>/dev/null | grep -q '\[::\|\*:'; then printf '运行中'; else printf '未监听'; fi)"
   printf '%s\n' "Xray 配置: $(xray_config_check_text)"
   printf '%s\n' "Nginx 配置: $(nginx_config_check_text)"
@@ -194,6 +196,9 @@ diagnose_cmd() {
   [[ "$(subscription_self_check_state)" != "fail" ]] || config_failures+=("订阅自检失败")
   if [[ "${run_net_check}" -eq 1 ]]; then
     [[ "$(net_stack_state)" == "ok" ]] || config_failures+=("拥塞控制不是 bbr 系")
+  fi
+  if h3_enabled; then
+    quic_port_listening || port_failures+=("QUIC (UDP 443) 未监听")
   fi
 
   if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then

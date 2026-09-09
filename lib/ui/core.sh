@@ -521,6 +521,36 @@ net_stack_text() {
   printf '已建立连接拥塞算法分布:  %s   (ss -tin)\n' "$(net_cc_distribution)"
 }
 
+# nginx 编译里有没有 http_v3 模块。
+nginx_v3_capable() {
+  command -v nginx >/dev/null 2>&1 || return 1
+  nginx -V 2>&1 | grep -q -- '-with-http_v3_module\|http_v3_module'
+}
+
+# H3 直连下行的启用条件：模块在 + 证书模式客户端能校验（自签名不行）。
+# 两者任一不满足整段功能自动关闭，h3_disabled_reason 给出原因。
+h3_disabled_reason() {
+  if ! nginx_v3_capable; then
+    printf '当前 nginx 未编译 http_v3 模块（Debian 13 自带；Debian 12 / Ubuntu 24.04 需 nginx.org 官方源）'
+    return
+  fi
+  case "${CERT_MODE:-}" in
+    existing|acme-dns-cf) return ;;
+    self-signed) printf '证书为自签名，客户端无法校验 H3（需 existing / acme-dns-cf 模式）' ;;
+    *) printf '证书模式未就绪' ;;
+  esac
+}
+
+h3_enabled() {
+  [[ -z "$(h3_disabled_reason)" ]]
+}
+
+# UDP 443（QUIC）监听探测
+quic_port_listening() {
+  command -v ss >/dev/null 2>&1 || return 1
+  ss -lunH '( sport = :443 )' 2>/dev/null | grep -q .
+}
+
 subscription_base_url() {
   printf 'https://%s/sub/%s' "${XHTTP_DOMAIN}" "${SUB_TOKEN}"
 }

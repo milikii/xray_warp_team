@@ -272,3 +272,98 @@ run_haproxy_bind_v4v6_case() {
   rm -rf "${workdir}"
   load_functions
 }
+
+run_h3_nginx_listen_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  NGINX_CONF_DIR="${workdir}/conf.d"
+  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+  mkdir -p "${NGINX_CONF_DIR}"
+  reset_feature_defaults
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_LOCAL_PORT="8001"
+  NGINX_TLS_PORT="8443"
+  TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
+  TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
+  SUB_WEB_ROOT="/var/www/xtun-sub"
+  CERT_MODE="existing"
+  nginx_version_at_least() { return 0; }
+  h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }
+
+  # 条件满足：quic 监听 + Alt-Svc
+  nginx_v3_capable() { return 0; }
+  write_nginx_config
+  assert_contains 'listen 443 quic reuseport;' "${NGINX_CONFIG_FILE}"
+  assert_contains "Alt-Svc 'h3=" "${NGINX_CONFIG_FILE}"
+  assert_contains 'ma=86400' "${NGINX_CONFIG_FILE}"
+
+  # 有 IPv6 时加 [::]:443
+  SERVER_IP6="2408:8120::1234"
+  write_nginx_config
+  assert_contains 'listen \[::\]:443 quic reuseport;' "${NGINX_CONFIG_FILE}"
+
+  # 条件不满足：整段关闭
+  SERVER_IP6=""
+  nginx_v3_capable() { return 1; }
+  write_nginx_config
+  assert_absent 'quic reuseport' "${NGINX_CONFIG_FILE}"
+  assert_absent 'Alt-Svc' "${NGINX_CONFIG_FILE}"
+  [[ -n "$(h3_disabled_reason)" ]]
+
+  # 自签名证书同样关闭
+  nginx_v3_capable() { return 0; }
+  CERT_MODE="self-signed"
+  [[ -n "$(h3_disabled_reason)" ]]
+  write_nginx_config
+  assert_absent 'quic reuseport' "${NGINX_CONFIG_FILE}"
+
+  rm -rf "${workdir}"
+  load_functions
+}
+
+run_h3_links_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION=""
+  XHTTP_VLESS_DECRYPTION="none"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  nginx_v3_capable() { return 0; }
+  h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }
+
+  # 5 + 2 条 H3 链接
+  [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 7 ]]
+  vless_links_text > "${workdir}/links.txt"
+  grep -qF 'HKG-XHTTP-TLS-H3' "${workdir}/links.txt"
+  grep -qF "vless://${XHTTP_UUID}@203.0.113.30:443" "${workdir}/links.txt"
+  grep -qF 'alpn=h3' "${workdir}/links.txt"
+  grep -qF 'sni=cdn.example.com' "${workdir}/links.txt"
+  grep -qF 'HKG-XHTTP-SPLIT-CDN-H3' "${workdir}/links.txt"
+  # split 节点下行 alpn=h3 且地址是 SERVER_IP
+  grep -qF 'alpn%22%3A%5B%22h3%22%5D' "${workdir}/links.txt"
+
+  # 模块缺失时回到 5 条
+  nginx_v3_capable() { return 1; }
+  [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 5 ]]
+
+  rm -rf "${workdir}"
+  load_functions
+}

@@ -255,6 +255,8 @@ main() {
     run_bbr_kernel_switch_case
     run_ipv6_links_case
     run_haproxy_bind_v4v6_case
+    run_h3_nginx_listen_case
+    run_h3_links_case
   )
 
   load_functions

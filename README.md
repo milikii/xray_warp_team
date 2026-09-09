@@ -301,6 +301,17 @@ xtun change-sub-token
 
 也可以显式指定：`--server-ip6 2408:8120::xxx`。
 
+### XHTTP H3 直连下行
+
+满足以下两个条件时自动启用（`xtun status` 面板可见）：
+
+1. nginx 编译含 `http_v3` 模块（Debian 13 的 1.26 自带；Debian 12 / Ubuntu 24.04 需 nginx.org 官方源）
+2. 证书模式为 `existing` / `acme-dns-cf`（客户端要能校验证书，自签名不行）
+
+任一不满足时整段功能自动关闭，`xtun diagnose` 会给出原因。
+
+启用后：nginx 直接在公网 UDP 443 监听 QUIC（`listen 443 quic reuseport`，有 IPv6 再加 `[::]:443`），TLS 在 nginx 终结，并下发 `Alt-Svc: h3=":443"`。链接追加 `XHTTP-TLS-H3`（H3 直连）与 `XHTTP-SPLIT-CDN-H3`（上行 CDN h2、下行 H3 直连）。防火墙需放行 UDP 443；`xtun diagnose` 会探测 QUIC 监听并在缺失时报出。
+
 ### mihomo 导入
 
 订阅里的 `mihomo.yaml` 含 5 条节点（与 `show-links` 一一对应），需要 mihomo >= 1.19.24（xhttp + x-padding + vless encryption 支持）。ECH / xpadding / VLESS Encryption 开关开启时，yaml 会带上 `ech-opts`、`x-padding-*`、`encryption:` 对应键。
