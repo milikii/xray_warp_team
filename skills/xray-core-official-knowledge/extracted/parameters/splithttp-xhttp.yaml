@@ -1,0 +1,177 @@
+name: SplitHTTPConfig (XHTTP)
+component: transport/internet/splithttp
+version_introduced: v1.8.0 (SplitHTTP, renamed to XHTTP later)
+version_deprecated: ""
+version_removed: ""
+status: stable
+server_client: server-and-client
+source:
+  docs: https://xtls.github.io/config/transports/splithttp.html
+  code: infra/conf/transport_method.go, transport/internet/splithttp/*.go
+  commit: current
+notes: >
+  SplitHTTP 是 XHTTP 传输的实现。源码中 mode 默认 "auto"。
+  服务端和客户端很多字段含义不同或仅一方有效。
+
+fields:
+  - name: host
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: >
+      HTTP Host 头。客户端优先级：host > serverName > address。
+      不能放在 headers 中重复设置。
+
+  - name: path
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: HTTP 请求路径。
+
+  - name: mode
+    type: string
+    required: false
+    default: "auto"
+    server_client: server-and-client
+    notes: >
+      传输模式。可选值：auto, packet-up, stream-up, stream-one。
+      "auto" 为默认值。
+
+  - name: headers
+    type: map[string]string
+    required: false
+    server_client: server-and-client
+    notes: >
+      额外 HTTP 头。不能包含 "host"（大小写不敏感），否则报错。
+
+  - name: xPaddingBytes
+    type: Int32Range {From, To}
+    required: false
+    default: {From:1, To:1} (implicit via protobuf, but source enforces >0 if set)
+    server_client: server-and-client
+    notes: >
+      X-Padding 头字节数范围。若设置则 From/To 必须 >0，不能禁用。
+      若未设置，则由底层决定。
+
+  - name: xPaddingObfsMode
+    type: bool
+    required: false
+    server_client: server-and-client
+    notes: X-Padding 混淆模式。
+
+  - name: xPaddingKey
+    type: string
+    required: false
+    default: "x_padding"
+    server_client: server-and-client
+    notes: X-Padding 密钥。
+
+  - name: xPaddingHeader
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: X-Padding 使用的 header 名称。
+
+  - name: xPaddingPlacement
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: X-Padding 放置位置。
+
+  - name: xPaddingMethod
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: X-Padding 方法。
+
+  - name: uplinkHTTPMethod
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: 上行 HTTP 方法。
+
+  - name: sessionIDPlacement / sessionIDKey / sessionIDTable / sessionIDLength
+    type: varies
+    required: false
+    server_client: server-and-client
+    notes: 会话 ID 相关设置。
+
+  - name: seqPlacement / seqKey
+    type: varies
+    required: false
+    server_client: server-and-client
+    notes: 序列号相关设置。
+
+  - name: uplinkDataPlacement / uplinkDataKey / uplinkChunkSize
+    type: varies
+    required: false
+    server_client: server-and-client
+    notes: 上行数据相关设置。
+
+  - name: noGRPCHeader
+    type: bool
+    required: false
+    server_client: server-and-client
+    notes: 禁用 gRPC 头。
+
+  - name: noSSEHeader
+    type: bool
+    required: false
+    server_client: server-and-client
+    notes: 禁用 SSE 头。
+
+  - name: scMaxEachPostBytes
+    type: Int32Range
+    required: false
+    server_client: server-and-client
+    notes: >
+      Stream-Up 模式下每个 POST 的最大字节数。
+
+  - name: scMinPostsIntervalMs
+    type: Int32Range
+    required: false
+    server_client: server-and-client
+    notes: >
+      Stream-Up 模式下 POST 之间的最小间隔（毫秒）。
+
+  - name: scMaxBufferedPosts
+    type: int64
+    required: false
+    server_client: server-and-client
+    notes: 服务端最大缓冲 POST 数。
+
+  - name: scStreamUpServerSecs
+    type: Int32Range
+    required: false
+    server_client: server-and-client
+    notes: Stream-Up 服务端超时秒数。
+
+  - name: serverMaxHeaderBytes
+    type: int32
+    required: false
+    server_client: server-only
+    notes: 服务端最大 header 字节数。
+
+  - name: xmux
+    type: XmuxConfig
+    required: false
+    server_client: client-only (mostly)
+    notes: >
+      连接复用配置。包含 maxConcurrency, maxConnections,
+      cMaxReuseTimes, hMaxRequestTimes, hMaxReusableSecs, hKeepAlivePeriod。
+
+  - name: downloadSettings
+    type: StreamConfig
+    required: false
+    server_client: client-only
+    notes: 独立的下载连接配置。
+
+  - name: extra
+    type: json.RawMessage
+    required: false
+    server_client: server-and-client
+    notes: >
+      额外配置。若提供，会反序列化并覆盖除 Host/Path/Mode 外的字段。
+      用于高级自定义。
+
+confidence: source-confirmed

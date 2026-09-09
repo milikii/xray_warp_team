@@ -1,0 +1,78 @@
+# Xray Core Official Knowledge — Sources Index
+# This file tracks the provenance and currency of all knowledge base content.
+# Update this file every time the knowledge base is synchronized.
+
+metadata:
+  skill_name: xray-core-official-knowledge
+  last_sync: "2025-09-09T14:40:00Z"
+  sync_method: automated+manual
+  maintainer_note: >
+    Snapshot generated from XTLS/Xray-core main branch at commit 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+    and XTLS/Xray-docs-next main branch. Covers releases up to v26.9.9.
+
+upstream:
+  repository:
+    name: XTLS/Xray-core
+    url: https://github.com/XTLS/Xray-core
+    primary_branch: main
+  documentation:
+    primary: https://xtls.github.io/
+    config_reference: https://xtls.github.io/config/
+  releases:
+    api: https://api.github.com/repos/XTLS/Xray-core/releases
+    page: https://github.com/XTLS/Xray-core/releases
+
+# Versions currently represented in this knowledge base.
+covered_versions:
+  stable:
+    version: v26.9.9
+    tag: v26.9.9
+    commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+    docs_snapshot_date: "2025-09-09T14:40:00Z"
+    source_snapshot_date: "2025-09-09T14:40:00Z"
+  beta:
+    version: ""
+    tag: ""
+    commit: ""
+    docs_snapshot_date: ""
+    source_snapshot_date: ""
+  dev:
+    branch: main
+    commit: 52a412d9e2f5c2a5142b1b4e2ab3771dacb8b120
+    snapshot_date: "2025-09-09T14:40:00Z"
+
+# Known gaps in the current knowledge base.
+gaps:
+  - area: XHTTP extra headers
+    status: partial
+    note: Header manipulation parameters extracted from source; advanced obfuscation options need deeper review.
+  - area: REALITY handshake flow
+    status: partial
+    note: High-level config fields captured; low-level crypto flow in transport/internet/reality/ needs deeper extraction.
+  - area: mKCP / QUIC transport
+    status: not-extracted
+    note: Legacy transports present in source but not yet documented in extracted/parameters/.
+  - area: Hysteria2 / WireGuard / TUN
+    status: partial
+    note: Config structs present in source/config/ but not yet extracted to YAML.
+  - area: Full protobuf defaults
+    status: partial
+    note: Only infra/conf Go structs are captured; protobuf-generated defaults in *.pb.go files not yet fully mapped.
+
+# File-to-source mapping for major sections.
+provenance:
+  docs/stable/:
+    source_repo: XTLS/Xray-docs-next
+    source_path: docs/
+    extraction_date: "2025-09-09T14:40:00Z"
+  source/config/:
+    source_repo: XTLS/Xray-core
+    source_path: infra/conf/
+    extraction_date: "2025-09-09T14:40:00Z"
+  source/transport/:
+    source_repo: XTLS/Xray-core
+    source_path: transport/internet/
+    extraction_date: "2025-09-09T14:40:00Z"
+  source/releases/:
+    source_api: https://api.github.com/repos/XTLS/Xray-core/releases
+    extraction_date: "2025-09-09T14:40:00Z"

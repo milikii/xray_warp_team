@@ -1,0 +1,129 @@
+name: TLSConfig
+component: transport/internet/tls
+version_introduced: v1.0.0
+version_deprecated: ""
+version_removed: ""
+status: stable
+server_client: depends
+source:
+  docs: https://xtls.github.io/config/transport.html#tlssettings
+  code: infra/conf/transport_security.go
+  commit: current
+fields:
+  - name: certificates
+    type: []TLSCertConfig
+    required: false
+    server_client: server-only (mostly)
+    notes: >
+      证书列表。服务端必须提供；客户端在验证服务端证书时不需要。
+      包含 certificateFile/certificate, keyFile/key, usage, ocspStapling, oneTimeLoading, buildChain。
+
+  - name: serverName
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: >
+      服务端：留空则使用入站地址；
+      客户端：用于验证服务端证书和发送 SNI。
+
+  - name: alpn
+    type: []string
+    required: false
+    server_client: server-and-client
+    notes: >
+      应用层协议协商列表。若包含 fromMitm 相关值，则只能有一个元素。
+
+  - name: enableSessionResumption
+    type: bool
+    required: false
+    default: false
+    server_client: server-and-client
+    notes: 是否启用会话恢复。
+
+  - name: disableSystemRoot
+    type: bool
+    required: false
+    default: false
+    server_client: client-only (typical)
+    notes: 禁用系统根证书。
+
+  - name: minVersion / maxVersion
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: TLS 最低/最高版本，如 "1.2", "1.3"。
+
+  - name: cipherSuites
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: 密码套件列表。
+
+  - name: fingerprint
+    type: string
+    required: false
+    server_client: client-only (typical)
+    notes: >
+      TLS 指纹。客户端使用。不能为 "unsafe"。
+      服务端也可设置但通常不需要。
+
+  - name: rejectUnknownSni
+    type: bool
+    required: false
+    default: false
+    server_client: server-only
+    notes: 服务端拒绝未知 SNI 连接。
+
+  - name: curvePreferences
+    type: []string
+    required: false
+    server_client: server-and-client
+    notes: 椭圆曲线偏好列表。
+
+  - name: masterKeyLog
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: NSS 密钥日志文件路径（调试用）。
+
+  - name: allowInsecure
+    type: bool
+    required: false
+    server_client: client-only
+    notes: >
+      **已移除**。源码中若设为 true 会报错并提示使用
+      pinnedPeerCertSha256(pcs) 或 verifyPeerCertByName(vcn)。
+
+  - name: pinnedPeerCertSha256
+    type: string (逗号分隔的 SHA256 十六进制)
+    required: false
+    server_client: client-only
+    notes: >
+      固定对端证书 SHA256。可用于替代 allowInsecure。
+      每项长度必须为 32 字节（64 十六进制字符）。
+
+  - name: verifyPeerCertByName
+    type: string (逗号分隔)
+    required: false
+    server_client: client-only
+    notes: 按名称验证对端证书。
+
+  - name: echServerKeys
+    type: string (base64.StdEncoding)
+    required: false
+    server_client: server-only
+    notes: ECH 服务端私钥。
+
+  - name: echConfigList
+    type: string
+    required: false
+    server_client: server-and-client
+    notes: ECH 配置列表。
+
+  - name: echSockopt
+    type: SocketConfig
+    required: false
+    server_client: server-only
+    notes: ECH 套接字选项。
+
+confidence: source-confirmed

@@ -1,0 +1,60 @@
+name: VLessOutboundConfig
+component: proxy/vless/outbound
+version_introduced: v1.0.0
+version_deprecated: ""
+version_removed: ""
+status: stable
+server_client: client-only
+source:
+  docs: https://xtls.github.io/config/outbounds/vless.html
+  code: infra/conf/vless.go
+  commit: current
+fields:
+  - name: vnext
+    type: []VLessOutboundVnext
+    required: true
+    server_client: client-only
+    notes: >
+      目标服务器列表。当前源码限制：只能且必须包含一个成员。
+      每个成员包含 address, port, users。
+
+  - name: address / port / users
+    type: simplified
+    required: false
+    server_client: client-only
+    notes: >
+      简写模式：可直接在 settings 下写 address, port, level, email, id, flow 等，
+      源码会自动包装为 vnext[0]。不建议与新结构混用。
+
+  - name: id
+    type: string (UUID)
+    required: true
+    server_client: client-only
+    notes: 用户 UUID。出站时必须提供。
+
+  - name: flow
+    type: string
+    required: false
+    default: ""
+    server_client: client-only
+    notes: >
+      支持的值："" 或 "xtls-rprx-vision"（vless.XRV）或 "xtls-rprx-vision-udp443"。
+
+  - name: encryption
+    type: string
+    required: true
+    default: none
+    server_client: client-only
+    notes: >
+      客户端用户加密。必须设为 "none"。
+      也支持 mlkem768x25519plus 前缀实验性格式。
+
+  - name: reverse
+    type: VLessReverseConfig
+    required: false
+    server_client: client-only
+    notes: >
+      反向代理配置（实验性）。简写模式下可用，
+      完整 vnext 模式下不可使用。
+
+confidence: source-confirmed
