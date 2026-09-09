@@ -403,6 +403,124 @@ xray_routing_block_text() {
   fi
 }
 
+# ------------------------------
+# 网络栈探测（diagnose --net）
+# 下面这些读取函数测试里整函数覆盖成固定值；组装函数只做拼装与判定。
+# ------------------------------
+
+net_kernel_version() {
+  uname -r 2>/dev/null || true
+}
+
+net_current_cc() {
+  if [[ -r /proc/sys/net/ipv4/tcp_congestion_control ]]; then
+    cat /proc/sys/net/ipv4/tcp_congestion_control
+  else
+    sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null || true
+  fi
+}
+
+net_tcp_bbr_version() {
+  bbr_module_version
+}
+
+net_default_qdisc() {
+  if [[ -r /proc/sys/net/core/default_qdisc ]]; then
+    cat /proc/sys/net/core/default_qdisc
+  else
+    sysctl -n net.core.default_qdisc 2>/dev/null || true
+  fi
+}
+
+net_default_nic() {
+  ip -o -4 route show to default 2>/dev/null | awk '{print $5; exit}'
+}
+
+net_nic_qdisc_line() {
+  local nic="${1}"
+
+  command -v tc >/dev/null 2>&1 || return 0
+  tc qdisc show dev "${nic}" root 2>/dev/null | head -n 1
+}
+
+net_nic_mtu() {
+  local nic="${1}"
+
+  cat "/sys/class/net/${nic}/mtu" 2>/dev/null || true
+}
+
+net_sysctl_value() {
+  local key="${1}"
+
+  if [[ -r "/proc/sys/${key//.//}" ]]; then
+    cat "/proc/sys/${key//.//}"
+  else
+    sysctl -n "${key}" 2>/dev/null || true
+  fi
+}
+
+net_nginx_worker_rlimit_text() {
+  local wc_value=""
+  local rl_value=""
+
+  wc_value="$(nginx_worker_connections_value)" || wc_value="未知"
+  rl_value="$(awk '$1 == "worker_rlimit_nofile" { sub(/;.*/, "", $2); print $2; exit }' "${NGINX_MAIN_CONFIG}" 2>/dev/null)"
+  printf '%s / %s' "${wc_value:-未知}" "${rl_value:-未知}"
+}
+
+net_nginx_master_limitnofile() {
+  local pid=""
+  local limit=""
+
+  pid="$(pgrep -o -x nginx 2>/dev/null || true)"
+  [[ -n "${pid}" ]] || { printf '未知'; return; }
+  limit="$(awk '/Max open files/ { print $4; exit }' "/proc/${pid}/limits" 2>/dev/null)"
+  printf '%s' "${limit:-未知}"
+}
+
+net_haproxy_maxconn() {
+  awk '$1 == "maxconn" { sub(/;.*/, "", $2); print $2; exit }' "${HAPROXY_CONFIG}" 2>/dev/null || true
+}
+
+net_cc_distribution() {
+  command -v ss >/dev/null 2>&1 || return 0
+  ss -tin 2>/dev/null | grep -oE '(cubic|bbr1|bbr|reno)' | sort | uniq -c     | awk '{ printf "%s=%s ", $2, $1 }' | sed 's/ $//'
+}
+
+# 拥塞控制不在 bbr 系时计一次失败；其它读取失败只显示未知，不算失败。
+net_stack_state() {
+  local cc=""
+
+  cc="$(net_current_cc)"
+  if cc_has_bbr " ${cc:-} "; then
+    printf 'ok'
+  else
+    printf 'fail'
+  fi
+}
+
+net_stack_text() {
+  local nic=""
+  local qdisc_line=""
+
+  nic="$(net_default_nic)"
+  printf '内核:            %s\n' "$(net_kernel_version)"
+  printf '拥塞控制:        %s  (可用: %s)\n' "$(net_current_cc)" "$(available_cc)"
+  printf 'tcp_bbr 模块:    version %s\n' "$(net_tcp_bbr_version)"
+  printf '默认 qdisc:      %s\n' "$(net_default_qdisc)"
+  if [[ -n "${nic}" ]]; then
+    qdisc_line="$(net_nic_qdisc_line "${nic}")"
+    printf '出网网卡 qdisc:  %s   (tc qdisc show dev %s root)\n' "${qdisc_line:-未知}" "${nic}"
+    printf 'MTU:             %s\n' "$(net_nic_mtu "${nic}")"
+  fi
+  printf 'tcp_notsent_lowat: %s\n' "$(net_sysctl_value net.ipv4.tcp_notsent_lowat)"
+  printf 'fs.file-max:     %s\n' "$(net_sysctl_value fs.file-max)"
+  printf 'nginx worker_connections / worker_rlimit_nofile:  %s\n' "$(net_nginx_worker_rlimit_text)"
+  printf 'nginx master LimitNOFILE:  %s   (/proc/<pid>/limits)\n' "$(net_nginx_master_limitnofile)"
+  printf 'haproxy maxconn: %s\n' "$(net_haproxy_maxconn)"
+  printf '已建立连接拥塞算法分布:  %s   (ss -tin)\n' "$(net_cc_distribution)"
+}
+
 subscription_base_url() {
   printf 'https://%s/sub/%s' "${XHTTP_DOMAIN}" "${SUB_TOKEN}"
 }
@@ -497,6 +615,22 @@ nginx_config_check_text() {
 # 上游一个），发行版默认的 768 实际只够 384 个客户端。改不了就至少报出来。
 NGINX_WORKER_CONNECTIONS_ADVISED="4096"
 
+# 与 1.25.1 比较；nginx 不存在或读不到版本时按「不满足」处理。
+nginx_version_at_least() {
+  local want="${1}"
+  local have=""
+
+  command -v nginx >/dev/null 2>&1 || return 1
+  have="$(nginx -v 2>&1 | sed -n 's/^nginx version: nginx\///p')"
+  [[ -n "${have}" ]] || return 1
+
+  [[ "$(printf '%s\n' "${want}" "${have}" | sort -V | head -n 1)" == "${want}" ]]
+}
+
+nginx_main_managed() {
+  [[ "${NGINX_MAIN_MANAGED:-no}" == "yes" ]]
+}
+
 nginx_worker_connections_value() {
   local value=""
 
@@ -531,8 +665,13 @@ nginx_worker_connections_text() {
   fi
 
   if [[ "$(nginx_worker_connections_state)" == "low" ]]; then
-    printf '%s（每 worker 只够 %s 条被代理的连接；建议在 %s 的 events 块里调到 %s 以上）' \
-      "${value}" "$((value / 2))" "${NGINX_MAIN_CONFIG}" "${NGINX_WORKER_CONNECTIONS_ADVISED}"
+    if nginx_main_managed; then
+      printf '%s（每 worker 只够 %s 条被代理的连接；建议在 %s 的 events 块里调到 %s 以上）' \
+        "${value}" "$((value / 2))" "${NGINX_MAIN_CONFIG}" "${NGINX_WORKER_CONNECTIONS_ADVISED}"
+    else
+      printf '%s（每 worker 只够 %s 条被代理的连接；建议在 %s 的 events 块里调到 %s 以上，或运行 xtun apply-config --manage-nginx-main 交由 xtun 接管）' \
+        "${value}" "$((value / 2))" "${NGINX_MAIN_CONFIG}" "${NGINX_WORKER_CONNECTIONS_ADVISED}"
+    fi
     return
   fi
 

@@ -239,6 +239,7 @@ xtun change-sni --reality-sni www.example.com        # 同样先预检，可用 
 | `/usr/local/lib/xtun` | 脚本 bundle |
 | `/usr/local/etc/xray/config.json` | Xray 配置 |
 | `/etc/nginx/conf.d/xtun.conf` | nginx 托管配置 |
+| `/etc/nginx/nginx.conf` | 仅 `--manage-nginx-main` 接管时由 xtun 整体重写 |
 | `/etc/systemd/system/nginx.service.d/xtun-limits.conf` | nginx 的 fd 限额 drop-in |
 | `/etc/haproxy/haproxy.cfg` | haproxy 托管配置 |
 | `/etc/systemd/system/xray.service` | Xray systemd unit |
@@ -659,7 +660,8 @@ bash xtun.sh install --non-interactive \
 
 - 交互式安装时会询问“是否启用网络优化”，默认是 `y`
 - 非交互安装时传入 `--enable-net-opt` 会自动执行；传入 `--disable-net-opt` 会跳过
-- 已安装过旧版网络优化的机器，更新脚本后可直接运行 `xtun apply-net-opt` 重新应用新版 Joey BBRv3 网络优化
+- 启用网络优化后还会问一次“是否安装 Joey BBRv3 第三方内核”，默认 `y`；不想装第三方内核用 `--bbr-kernel none`（只写 sysctl / helper / service，不改内核）
+- 已安装过旧版网络优化的机器，更新脚本后可直接运行 `xtun apply-net-opt` 重新应用；`--bbr-kernel joey|none` 可切换内核策略并写回状态
 - 当前网络优化只面向 Debian / Ubuntu 系，并要求当前机器架构能匹配上面的 `amd64` 或 `arm64`
 - 如果当前已经运行 Joey BBRv3，脚本只会刷新 sysctl、helper 和 systemd 服务，不会重复安装内核
 
@@ -682,12 +684,31 @@ xtun apply-net-opt
 - `tcp_fastopen / tcp_mtu_probing / tcp_slow_start_after_idle / tcp_keepalive_*`
 - `tcp_tw_reuse = 1`（内核默认的 `2` 只对 loopback 生效，而代理机烧本地端口的是出网那一侧）
 - `tcp_fin_timeout = 15`（默认 60s 的 FIN-WAIT-2 对建了就拆的代理连接太长）
+- `tcp_notsent_lowat = 131072`（未发送数据超过 128KB 就不再往 socket 缓冲里塞，h2 多路复用下的小流不用排在大流后面）
 - `fs.file-max` 按 `MemTotal` 的 1/4 给、封顶 200 万，兜住 `xray.service` 里的 `LimitNOFILE=1048576`；内存撑不到就不写，交给内核自己估
 - systemd oneshot 开机后重新应用 qdisc（`fq limit 100000 flow_limit 1000`）、`RPS`、`XPS`，并把出网网卡和默认路由的 MTU 夹到 1500
 
 如果当前内核还不是 Joey BBRv3，但对应内核包已经安装，脚本会保留配置并提示重启；重启后再运行 `xtun status` 或 `modinfo tcp_bbr` 可确认生效。
 
 关于 MTU：部分云厂商的 DHCP 会下发巨帧 MTU（例如 Oracle VCN 给 9000）。对一台流量全走公网的代理机来说这只有坏处——每条新连接从 `advmss 8960` 起步，先白吃一轮 PMTU 探测才退回 1500 附近。helper 只往下夹、不往上抬：链路或默认路由的 MTU 大于 1500 才改，PPPoE / 隧道那种 1492、1450 的链路原样保留。
+
+网络栈体检：
+
+```bash
+xtun diagnose --net
+```
+
+输出内核版本、拥塞控制与可用算法、`tcp_bbr` 模块版本、默认/网卡 qdisc、MTU、`tcp_notsent_lowat`、`fs.file-max`、nginx 的 `worker_connections / worker_rlimit_nofile` 与 master 进程的 `LimitNOFILE`、haproxy `maxconn`，以及 `ss -tin` 统计的已建立连接拥塞算法分布。拥塞控制不在 bbr 系时计入失败。`xtun status` 面板也有一行「拥塞控制 / qdisc」。
+
+### nginx 主配置接管
+
+`worker_connections` / `worker_rlimit_nofile` 只能写在 `/etc/nginx/nginx.conf`。新装默认接管（交互问一次，默认 `y`；`--no-manage-nginx-main` 可关闭）。从旧版本升级的节点默认不接管，确认后用下面命令开启：
+
+```bash
+xtun apply-config --manage-nginx-main
+```
+
+接管模板：`worker_rlimit_nofile 1048576`、`worker_connections 65535` + `multi_accept`，并保留两个用户块（`xtun-user:nginx-main` / `xtun-user:nginx-http`），手工调优写在标记之间就能活过每次重写。卸载时若备份目录里有接管前的 `nginx.conf` 会自动还原，否则写回发行版默认模板。Ubuntu 24.04 的 nginx 1.24 不认独立的 `http2 on;` 指令，脚本会自动退回 `listen ... ssl http2;` 老语法。
 
 相关文件：
 

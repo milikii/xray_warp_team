@@ -1098,6 +1098,8 @@ run_net_sysctl_content_case() {
   assert_contains 'net.ipv4.tcp_tw_reuse = 1' "${NET_SYSCTL_CONF}"
   assert_contains 'net.ipv4.tcp_fin_timeout = 15' "${NET_SYSCTL_CONF}"
   assert_contains 'fs.file-max = 1048576' "${NET_SYSCTL_CONF}"
+  # §7.2：未发送数据上限，h2 多路复用下防小流被大流堵住
+  assert_contains 'net.ipv4.tcp_notsent_lowat = 131072' "${NET_SYSCTL_CONF}"
 
   # 读不到内存信息时整段跳过，而不是写一行空值把 sysctl --system 弄失败。
   net_tcp_mem_values() { return 1; }

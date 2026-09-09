@@ -8,6 +8,7 @@ set -Eeuo pipefail
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_change.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_cli_and_install.sh"
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_sni.sh"
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/cases_nginx_net.sh"
 
 # 失败现场：哪条命令、在哪个函数的哪一行挂的。用例跑在子 shell 里，变量传不回来，
 # 所以走一个临时文件。
@@ -248,6 +249,10 @@ main() {
     run_change_sub_token_case
     run_nginx_sub_location_case
     run_mihomo_yaml_case
+    run_nginx_main_config_case
+    run_nginx_http2_compat_case
+    run_diagnose_net_case
+    run_bbr_kernel_switch_case
   )
 
   load_functions

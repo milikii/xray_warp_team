@@ -192,6 +192,10 @@ rollback_managed_runtime_state() {
     paths+=("${XRAY_SERVICE_FILE}")
   fi
 
+  if [[ "${NGINX_MAIN_MANAGED:-no}" == "yes" ]]; then
+    paths+=("${NGINX_MAIN_CONFIG}")
+  fi
+
   warn "检测到托管配置应用失败，正在回滚最近一次变更。"
   rollback_managed_paths "${paths[@]}"
   attempt_runtime_service_recovery
@@ -295,6 +299,26 @@ restart_services() {
   apply_nginx_service_change || return 1
 }
 
+# 接管过的节点卸载时把 nginx 主配置还回去：优先用备份目录里最早的一份
+# （接管前的手工配置就在那里），找不到再写回 Debian 默认模板。
+restore_nginx_main_config() {
+  local found=""
+
+  [[ -f "${NGINX_MAIN_CONFIG}" ]] || return 0
+  found="$(find "${BACKUP_ROOT:-/root/xtun-backups}" -mindepth 3 -maxdepth 3 \
+    -path '*/etc/nginx/nginx.conf' 2>/dev/null | sort | head -n 1)"
+  if [[ -n "${found}" ]]; then
+    mkdir -p "$(dirname "${NGINX_MAIN_CONFIG}")"
+    cp -a "${found}" "${NGINX_MAIN_CONFIG}"
+    log "已从备份还原 ${NGINX_MAIN_CONFIG}。"
+    return 0
+  fi
+
+  nginx_main_config_debian_default_text > "${NGINX_MAIN_CONFIG}" || return 1
+  chmod 0644 "${NGINX_MAIN_CONFIG}"
+  log "${NGINX_MAIN_CONFIG} 已写回发行版默认模板。"
+}
+
 remove_legacy_managed_paths() {
   local path=""
   local had_legacy="no"
@@ -366,6 +390,7 @@ write_runtime_managed_files() {
   write_xray_config || return 1
   write_haproxy_config || return 1
   write_nginx_config || return 1
+  write_nginx_main_config || return 1
   write_nginx_limits_dropin || return 1
 }
 

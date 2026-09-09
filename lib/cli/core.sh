@@ -113,6 +113,7 @@ status_cmd() {
 diagnose_cmd() {
   local failures=0
   local run_warp_probe=0
+  local run_net_check=0
   local xray_state=""
   local haproxy_state=""
   local nginx_state=""
@@ -127,6 +128,9 @@ diagnose_cmd() {
     case "${1}" in
       --warp-probe)
         run_warp_probe=1
+        ;;
+      --net)
+        run_net_check=1
         ;;
       --help|-h|help)
         usage
@@ -170,6 +174,10 @@ diagnose_cmd() {
     warp_probe_result="$(warp_egress_probe_text)"
     printf '%s\n' "WARP 出口 IP: ${warp_probe_result}"
   fi
+  if [[ "${run_net_check}" -eq 1 ]]; then
+    printf '%s\n' "-- 网络栈 --"
+    net_stack_text
+  fi
 
   [[ "${xray_state}" == "active" ]] || service_failures+=("xray 未运行")
   [[ "${haproxy_state}" == "active" ]] || service_failures+=("haproxy 未运行")
@@ -183,6 +191,9 @@ diagnose_cmd() {
   [[ "$(haproxy_config_check_state)" == "ok" ]] || config_failures+=("HAProxy 配置校验失败")
   [[ "$(local_tls_probe_state)" == "ok" ]] || tls_failures+=("本地 TLS 探测失败")
   [[ "$(subscription_self_check_state)" != "fail" ]] || config_failures+=("订阅自检失败")
+  if [[ "${run_net_check}" -eq 1 ]]; then
+    [[ "$(net_stack_state)" == "ok" ]] || config_failures+=("拥塞控制不是 bbr 系")
+  fi
 
   if [[ "${ENABLE_WARP:-no}" == "yes" ]]; then
     config_has_warp_outbound || warp_failures+=("config.json 缺少 WARP 出站")
@@ -392,6 +403,8 @@ uninstall_cmd() {
   if [[ "${CERT_MODE:-}" == "acme-dns-cf" && -x "${ACME_SH_BIN}" && -n "${XHTTP_DOMAIN:-}" ]]; then
     "${ACME_SH_BIN}" --remove -d "${XHTTP_DOMAIN}" --ecc >/dev/null 2>&1 || true
   fi
+
+  restore_nginx_main_config || return 1
 
   # 删不掉就别往下报「已卸载」：config.json 和证书里有机密，留在盘上而用户以为
   # 已经清干净了，是这条命令上最糟的结果。重跑一次是幂等的。

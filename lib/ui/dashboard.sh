@@ -31,7 +31,7 @@ show_dashboard_brief() {
   panel_row "服务" "xray $(service_badge "${xray_state}")   haproxy $(service_badge "${haproxy_state}")   nginx $(service_badge "${nginx_state}")"
   panel_row "监听 :443" "$(listening_port_text 443)"
   panel_row "WARP 分流" "$(bool_badge "${ENABLE_WARP:-no}")  规则=$(warp_rule_count_text)"
-  panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")"
+  panel_row "网络优化" "$(bool_badge "${ENABLE_NET_OPT:-no}")  cc=$(net_current_cc)  qdisc=$(net_default_qdisc)"
   panel_row "完整体检" "菜单 4 / xtun status / xtun diagnose"
   divider
 }
@@ -106,6 +106,7 @@ show_dashboard() {
   panel_row "监听 :${REALITY_FALLBACK_PORT}" "$(listening_port_text "${REALITY_FALLBACK_PORT}")"
   panel_row "监听 :8001" "$(listening_port_text 8001)"
   panel_row "监听 :8443" "$(listening_port_text 8443)"
+  panel_row "拥塞控制 / qdisc" "$(net_current_cc) / $(net_default_qdisc)"
   panel_row "Xray 自检" "$(xray_config_check_text)"
   panel_row "Nginx 自检" "$(nginx_config_check_text)"
   panel_row "HAProxy 自检" "$(haproxy_config_check_text)"

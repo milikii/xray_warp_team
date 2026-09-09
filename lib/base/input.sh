@@ -31,8 +31,8 @@ usage() {
   ${command_name} status [--raw]
   ${command_name} restart
   ${command_name} repair-perms
-  ${command_name} apply-net-opt
-  ${command_name} apply-config
+  ${command_name} apply-net-opt [--bbr-kernel joey|none]
+  ${command_name} apply-config [--manage-nginx-main]
   ${command_name} version
   ${command_name} help
 
@@ -74,6 +74,12 @@ usage() {
   --disable-warp              禁用 WARP 出站。
   --enable-net-opt            启用 Joey BBRv3 内核 + fq/RPS 网络优化。
   --disable-net-opt           禁用网络优化。
+  --bbr-kernel joey|none      是否安装 Joey BBRv3 第三方内核（默认 joey）；none 只做 sysctl/helper。
+  --manage-nginx-main         接管 /etc/nginx/nginx.conf（worker_connections / fd 限额）。
+  --no-manage-nginx-main      不接管 nginx 主配置。
+  --skip-sni-check            跳过 Reality 目标域名预检。
+  --block-cn                  拦截回国流量（geoip:cn / geosite:cn）。
+  --no-block-cn               不拦截回国流量（默认）。
   --warp-private-key VALUE    WARP WireGuard 私钥；仅支持 @文件路径或环境变量 WARP_PRIVATE_KEY。
   --warp-profile VALUE        导入 wgcf profile.conf；仅支持 @文件路径或环境变量 WARP_PROFILE。
   --warp-address-v4 VALUE     WARP WireGuard IPv4 内网地址。
@@ -163,8 +169,8 @@ check-sni 参数:
 
 脚本维护命令:
   update-script               下载并更新脚本自身的持久化 bundle 与管理命令。
-  apply-net-opt               在已安装节点上重新应用 Joey BBRv3 网络优化。
-  apply-config                按当前状态重新生成托管配置，让新版模板参数生效。
+  apply-net-opt               重新应用网络优化；--bbr-kernel joey|none 可切换内核策略并写回状态。
+  apply-config                按当前状态重新生成托管配置；--manage-nginx-main 可开启 nginx 主配置接管。
 
 链接参数:
   --qr                        额外输出分享链接二维码；需要系统已安装 qrencode。

@@ -46,7 +46,15 @@ prepare_install_inputs() {
   prompt_yes_no ENABLE_NET_OPT "是否启用网络优化？ [y/n]" "y"
   ENABLE_NET_OPT="$(normalize_yes_no_value "ENABLE_NET_OPT" "${ENABLE_NET_OPT}")" || exit 1
 
+  if [[ "${ENABLE_NET_OPT}" == "yes" ]]; then
+    prompt_yes_no NET_BBR_KERNEL "是否安装 Joey BBRv3 第三方内核？ [y/n]" "y"
+    NET_BBR_KERNEL="$(normalize_net_bbr_kernel_value "${NET_BBR_KERNEL}")" || exit 1
+  fi
+
   NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
+
+  prompt_yes_no NGINX_MAIN_MANAGED "是否接管 /etc/nginx/nginx.conf（连接数与 fd 限额主配置）？ [y/n]" "y"
+  NGINX_MAIN_MANAGED="$(normalize_yes_no_value "NGINX_MAIN_MANAGED" "${NGINX_MAIN_MANAGED}")" || exit 1
 
   prompt_yes_no ROUTE_BLOCK_CN "是否拦截回国流量（geoip:cn / geosite:cn）？ [y/n]" "n"
   ROUTE_BLOCK_CN="$(normalize_yes_no_value "ROUTE_BLOCK_CN" "${ROUTE_BLOCK_CN}")" || exit 1
@@ -83,6 +91,17 @@ default_reality_target_for_sni() {
   local sni="${1}"
   [[ -n "${sni}" ]] || return 0
   printf '%s:443' "${sni}"
+}
+
+normalize_net_bbr_kernel_value() {
+  local value=""
+
+  value="$(printf '%s' "${1}" | tr '[:upper:]' '[:lower:]')"
+  case "${value}" in
+    y|yes|joey) printf 'joey' ;;
+    n|no|none|stock) printf 'none' ;;
+    *) die "NET_BBR_KERNEL 只能是 joey 或 none。" ;;
+  esac
 }
 
 normalize_yes_no_value() {

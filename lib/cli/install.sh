@@ -60,6 +60,7 @@ install_value_specs() {
 --warp-endpoint:WARP_ENDPOINT
 --warp-reserved:WARP_RESERVED
 --warp-mtu:WARP_MTU
+--bbr-kernel:NET_BBR_KERNEL
 EOF
 }
 

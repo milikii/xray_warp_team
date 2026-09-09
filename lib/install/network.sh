@@ -390,6 +390,9 @@ net.ipv4.tcp_no_metrics_save = 1
 net.ipv4.tcp_keepalive_time = 600
 net.ipv4.tcp_keepalive_intvl = 30
 net.ipv4.tcp_keepalive_probes = 5
+# 未发送数据超过 128KB 就不再往 socket 缓冲里塞，h2 多路复用下的小流不用排在大流后面。
+# Cloudflare 边缘用 16KB；跨境高 BDP 链路上给到 128KB 更稳，不会卡住吞吐。
+net.ipv4.tcp_notsent_lowat = 131072
 
 net.ipv4.udp_rmem_min = 262144
 net.ipv4.udp_wmem_min = 262144
@@ -525,7 +528,10 @@ install_network_optimization() {
 
   [[ "${ENABLE_NET_OPT}" == "yes" ]] || return 0
 
-  install_joey_bbrv3_kernel_if_needed || return 1
+  # NET_BBR_KERNEL=none 时跳过第三方内核安装，sysctl / helper / service 照常。
+  if [[ "${NET_BBR_KERNEL:-joey}" != "none" ]]; then
+    install_joey_bbrv3_kernel_if_needed || return 1
+  fi
 
   cc="$(available_cc)"
   if ! cc_has_bbr "${cc}"; then
