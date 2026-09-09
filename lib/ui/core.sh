@@ -551,46 +551,6 @@ quic_port_listening() {
   ss -lunH '( sport = :443 )' 2>/dev/null | grep -q .
 }
 
-subscription_base_url() {
-  printf 'https://%s/sub/%s' "${XHTTP_DOMAIN}" "${SUB_TOKEN}"
-}
-
-# 订阅自检：经 CDN 域名（resolve 到本机）拉一份，和磁盘文件逐字节比。
-subscription_self_check_state() {
-  local url=""
-  local tmp_file=""
-
-  if [[ -z "${SUB_TOKEN}" || -z "${XHTTP_DOMAIN}" || ! -f "${SUB_WEB_ROOT}/${SUB_TOKEN}/vless.txt" ]]; then
-    printf 'unknown'
-    return
-  fi
-
-  if ! command -v curl >/dev/null 2>&1; then
-    printf 'unknown'
-    return
-  fi
-
-  tmp_file="$(mktemp "${TMPDIR:-/tmp}/xtun-sub-check.XXXXXX")"
-  # self-signed 模式下 -k 是必需的
-  if ! curl -k -sS --max-time 5 --resolve "${XHTTP_DOMAIN}:443:127.0.0.1"     "https://${XHTTP_DOMAIN}/sub/${SUB_TOKEN}/vless.txt" -o "${tmp_file}" >/dev/null 2>&1; then
-    rm -f "${tmp_file}"
-    printf 'fail'
-    return
-  fi
-
-  if cmp -s "${tmp_file}" "${SUB_WEB_ROOT}/${SUB_TOKEN}/vless.txt"; then
-    rm -f "${tmp_file}"
-    printf 'ok'
-  else
-    rm -f "${tmp_file}"
-    printf 'fail'
-  fi
-}
-
-subscription_self_check_text() {
-  check_badge "$(subscription_self_check_state)"
-}
-
 check_badge() {
   case "${1}" in
     ok)

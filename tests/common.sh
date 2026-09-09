@@ -97,7 +97,6 @@ sandbox_managed_paths() {
   INSTALL_DRAFT_FILE="${root}/root/.xtun-install-draft.env"
   SCRIPT_LOCK_FILE="${root}/run/xtun.lock"
   LEGACY_PATH_ROOT="${root}"
-  SUB_WEB_ROOT="${root}/var/www/xtun-sub"
 }
 
 load_functions() {
@@ -117,13 +116,7 @@ prepare_workspace() {
   XRAY_CONFIG_FILE="${XRAY_CONFIG_DIR}/config.json"
   STATE_FILE="${XRAY_CONFIG_DIR}/node-meta.env"
   OUTPUT_FILE="${workdir}/output.md"
-  SUBSCRIPTION_DIR="${workdir}/subscriptions"
-  SUBSCRIPTION_RAW_FILE="${SUBSCRIPTION_DIR}/vless-raw.txt"
-  SUBSCRIPTION_BASE64_FILE="${SUBSCRIPTION_DIR}/vless-base64.txt"
-  SUBSCRIPTION_MANIFEST_FILE="${SUBSCRIPTION_DIR}/manifest.txt"
-  SUBSCRIPTION_QR_DIR="${SUBSCRIPTION_DIR}/qr"
-  SUBSCRIPTION_RAW_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-raw.png"
-  SUBSCRIPTION_BASE64_QR_FILE="${SUBSCRIPTION_QR_DIR}/vless-base64.png"
+  QR_OUTPUT_DIR="${workdir}/root/xtun-qr"
   mkdir -p "${XRAY_CONFIG_DIR}"
 }
 

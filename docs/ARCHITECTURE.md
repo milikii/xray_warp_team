@@ -51,9 +51,12 @@ xtun 采用 Xray-examples 的官方「without being stolen」模板：
 
 不配置 `limitFallbackUpload/Download`：官方明言回落限速是一种特征，一键脚本若用必须随机化。有了 SNI 过滤，剩余风险只剩「借你转发到目标站本身」，由 `check-sni` 第 9 项劝阻 CDN 目标缓解。
 
-## 订阅为什么要走 nginx 托管
+## 为什么 1.1.0 不再提供订阅与 mihomo 输出
 
-订阅文件放在 `/root/xtun-subscriptions` 时没人拉得到（脚本是装在 VPS 上的，不是客户端）。托管在 CDN 域名下的 `/sub/<token>/` 路径后，任何客户端都能经 Cloudflare 拉；`Cache-Control: no-store` 保证订阅内容不被边缘缓存；token 可随时 `change-sub-token` 轮换，旧的立刻失效。
+- 单人节点，导入是一次性的动作，链接 + 二维码是所有客户端的公共分母。
+- 订阅是一个匿名可拉取的 HTTPS 路径，token 再长也是一个常驻的攻击面，而它换来的「多设备自动同步」在单人场景里用不上。
+- mihomo 的 xhttp 字段随版本漂移，仓库里没有本地校验器（`mihomo -t` 需要另下二进制），生成器只能靠人肉对照 wiki，维护成本高于收益。
+- 分离节点的链接 1100–1700 字符，终端二维码不实用，所以 1.1.0 起改为终端二维码 + PNG 文件（`/root/xtun-qr/`，随链接重建）。
 
 ## nginx 主配置为什么要接管
 

@@ -562,17 +562,6 @@ ${quic_block}
 
 ${fallback_location}
 
-    location ^~ /sub/ {
-        alias ${SUB_WEB_ROOT}/;
-        try_files \$uri =404;
-        autoindex off;
-        access_log off;
-        types { text/plain txt; application/yaml yaml yml; }
-        default_type text/plain;
-        add_header Cache-Control "no-store, max-age=0" always;
-        add_header X-Robots-Tag "noindex, nofollow" always;
-    }
-
 ${xhttp_location}
 
 $(render_user_block nginx-server "${NGINX_CONFIG_FILE}" "    ")

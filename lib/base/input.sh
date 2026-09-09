@@ -173,7 +173,7 @@ check-sni 参数:
   apply-config                按当前状态重新生成托管配置；--manage-nginx-main 可开启 nginx 主配置接管。
 
 链接参数:
-  --qr                        额外输出分享链接二维码；需要系统已安装 qrencode。
+  --qr                        额外输出每条分享链接的终端二维码（qrencode 由安装器安装）。
 
 示例:
   ${command_name}

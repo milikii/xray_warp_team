@@ -1552,8 +1552,9 @@ run_legacy_cleanup_case() {
   printf 'legacy\n' > "${workdir}/etc/systemd/system/xtun-core-health.service"
   printf 'legacy\n' > "${workdir}/etc/systemd/system/xtun-core-health.timer"
   printf 'legacy\n' > "${workdir}/usr/local/etc-xray-stand-in"
-  mkdir -p "${workdir}/root/xtun-subscriptions"
+  mkdir -p "${workdir}/root/xtun-subscriptions" "${workdir}/var/www/xtun-sub/tok1234"
   printf 'legacy\n' > "${workdir}/root/xtun-subscriptions/vless.txt"
+  printf 'legacy\n' > "${workdir}/var/www/xtun-sub/tok1234/vless.txt"
   printf 'legacy\n' > "${workdir}/var-lib-cloudflare-warp.md"
   mv "${workdir}/var-lib-cloudflare-warp.md" "${workdir}/keep.md"
 
@@ -1578,6 +1579,7 @@ run_legacy_cleanup_case() {
   [[ ! -e "${workdir}/etc/systemd/system/xtun-core-health.service" ]]
   [[ ! -e "${workdir}/etc/systemd/system/xtun-core-health.timer" ]]
   [[ ! -d "${workdir}/root/xtun-subscriptions" ]]
+  [[ ! -d "${workdir}/var/www/xtun-sub" ]]
   printf '%s' "${logged}" | grep -q 'STEP:清理旧版本遗留的托管文件。'
   [[ -e "${workdir}/keep.md" ]]
 

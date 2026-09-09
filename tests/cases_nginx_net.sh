@@ -19,7 +19,6 @@ run_nginx_main_config_case() {
   NGINX_TLS_PORT="8443"
   TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
   TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
-  SUB_WEB_ROOT="/var/www/xtun-sub"
   nginx_version_at_least() { return 0; }
 
   # 未接管时不写主配置
@@ -69,7 +68,6 @@ run_nginx_http2_compat_case() {
   NGINX_TLS_PORT="8443"
   TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
   TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
-  SUB_WEB_ROOT="/var/www/xtun-sub"
 
   # >= 1.25.1：独立 http2 on;
   nginx_version_at_least() { return 0; }
@@ -223,16 +221,9 @@ run_ipv6_links_case() {
   assert_contains '## 节点 7' "${OUTPUT_FILE}"
   assert_contains '\[2408:8120::1234\]（Reality）' "${OUTPUT_FILE}"
 
-  # mihomo 同步 7 条
-  [[ "$(grep -c '^  - name:' <(mihomo_nodes_yaml_text))" -eq 7 ]]
-  # 别用管道 + grep -q：grep 命中就关读端，heredoc 生成器吃 SIGPIPE 退 141
-  mihomo_nodes_yaml_text > "${workdir}/mihomo.yaml"
-  grep -qF 'server: "[2408:8120::1234]"' "${workdir}/mihomo.yaml"
-
   # SERVER_IP6 为空时回到 5 条
   SERVER_IP6=""
   [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 5 ]]
-  [[ "$(grep -c '^  - name:' <(mihomo_nodes_yaml_text))" -eq 5 ]]
 
   # guess_server_ip6：非全局单播返回空
   ip() {
@@ -287,7 +278,6 @@ run_h3_nginx_listen_case() {
   NGINX_TLS_PORT="8443"
   TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
   TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
-  SUB_WEB_ROOT="/var/www/xtun-sub"
   CERT_MODE="existing"
   nginx_version_at_least() { return 0; }
   h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }

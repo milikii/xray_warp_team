@@ -222,14 +222,12 @@ run_runtime_context_reset_case() {
   XHTTP_DOMAIN="stale.example.com"
   ENABLE_WARP="yes"
   WARP_RULES_TEXT="domain:stale.example.com"
-  SUB_TOKEN="stale-token"
 
   load_dashboard_context
   [[ -z "${REALITY_UUID}" ]]
   [[ -z "${XHTTP_DOMAIN}" ]]
   [[ -z "${ENABLE_WARP}" ]]
   [[ -z "${WARP_RULES_TEXT}" ]]
-  [[ -z "${SUB_TOKEN}" ]]
   [[ "$(warp_rule_count_text)" == "0" ]]
 }
 
@@ -452,8 +450,7 @@ errexit_guarded_step_names() {
   printf '%s\n' \
     install_packages install_self_command install_xray ensure_xray_bind_capability \
     generate_reality_keys_if_needed write_tls_assets write_runtime_managed_files \
-    write_xray_service write_core_health_monitor write_core_health_helper \
-    write_core_health_service write_core_health_timer write_xray_logrotate_config \
+    write_xray_service write_xray_logrotate_config \
     install_network_optimization deploy_fallback_site write_warp_rules_file \
     write_xray_config write_haproxy_config write_nginx_config write_nginx_limits_dropin \
     write_generated_file_atomically ensure_warp_credentials \
@@ -462,10 +459,10 @@ errexit_guarded_step_names() {
     write_net_sysctl_conf write_net_helper_script write_net_service \
     apply_managed_files apply_managed_update apply_managed_runtime_update \
     apply_xray_only_managed_update write_state_file write_output_file \
-    write_subscription_files write_acme_reload_helper \
+    write_acme_reload_helper \
     write_existing_tls_assets write_self_signed_tls_assets \
     ensure_xray_user ensure_managed_permissions \
-    begin_managed_change finish_managed_change select_output_client_if_requested
+    begin_managed_change finish_managed_change
 }
 
 

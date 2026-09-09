@@ -108,6 +108,7 @@ legacy_managed_paths() {
     "${prefix}/usr/local/etc/xray/health-state.env" \
     "${prefix}/usr/local/etc/xray/health-history.log" \
     "${prefix}/root/xtun-subscriptions" \
+    "${prefix}/var/www/xtun-sub" \
     "${prefix}/var/lib/cloudflare-warp/mdm.xml" \
     "${prefix}/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg" \
     "${prefix}/etc/apt/sources.list.d/cloudflare-client.list" \
@@ -347,7 +348,7 @@ remove_legacy_managed_paths() {
     remove_managed_paths "${paths[@]}" || warn "旧版本遗留的托管文件未能全部清理，请手工检查。"
   fi
   systemctl daemon-reload >/dev/null 2>&1 || true
-  log "旧版本遗留的巡检、WARP Team 与本地订阅目录文件已清理。"
+  log "旧版本遗留的巡检、WARP Team、本地订阅目录与 nginx 订阅目录文件已清理。"
 }
 
 finalize_installation() {
@@ -363,7 +364,6 @@ finalize_installation() {
     return 1
   fi
 
-  ensure_sub_token || return 1
   write_state_file || return 1
   write_output_file
 }
@@ -425,7 +425,6 @@ apply_managed_files() {
     return 1
   fi
 
-  ensure_sub_token || return 1
   write_state_file || return 1
   write_output_file
 }

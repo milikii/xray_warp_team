@@ -96,8 +96,12 @@ run_dispatch_case() {
     dispatched="check-sni"
     dispatched_args="$*"
   }
-  change_sub_token_cmd() {
-    dispatched="change-sub-token"
+  change_cert_mode_cmd() {
+    dispatched="change-cert-mode"
+    dispatched_args="$*"
+  }
+  repair_perms_cmd() {
+    dispatched="repair-perms"
     dispatched_args="$*"
   }
 
@@ -124,7 +128,7 @@ run_dispatch_case() {
   run_cli_command
   [[ "${dispatched}" == "menu" ]]
 
-  run_menu_choice 20
+  run_menu_choice 19
   [[ "${dispatched}" == "uninstall" ]]
 
   run_menu_choice 15
@@ -132,10 +136,6 @@ run_dispatch_case() {
 
   run_menu_choice 13
   [[ "${dispatched}" == "change-warp-rules" ]]
-
-  run_menu_choice 16
-  [[ "${dispatched}" == "change-sub-token" ]]
-  [[ -z "${dispatched_args}" ]]
 
   run_menu_choice 3
   [[ "${dispatched}" == "diagnose" ]]
@@ -146,11 +146,14 @@ run_dispatch_case() {
   run_menu_choice 10
   [[ "${dispatched}" == "check-sni" ]]
 
-  run_menu_choice 17
+  run_menu_choice 16
   [[ "${dispatched}" == "apply-net-opt" ]]
 
-  run_menu_choice 18
+  run_menu_choice 17
   [[ "${dispatched}" == "apply-config" ]]
+
+  run_menu_choice 18
+  [[ "${dispatched}" == "repair-perms" ]]
 
   local version_output=""
   version_output="$(run_cli_command version)"

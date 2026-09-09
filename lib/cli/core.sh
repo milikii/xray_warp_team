@@ -45,7 +45,6 @@ show_links() {
 
   if [[ "${show_qr}" -eq 1 ]]; then
     render_output_file_qr
-    render_subscription_qr
   fi
 }
 
@@ -168,7 +167,6 @@ diagnose_cmd() {
   printf '%s\n' "HAProxy 配置: $(haproxy_config_check_text)"
   printf '%s\n' "本地 TLS 探测: $(local_tls_probe_text)"
   printf '%s\n' "路由拦截: $(xray_routing_block_text)"
-  printf '%s\n' "订阅自检: $(subscription_self_check_text)"
   printf '%s\n' "证书到期: $(cert_expiry_text)"
   printf '%s\n' "WARP 出站: $(warp_outbound_text)"
   printf '%s\n' "WARP 规则数: $(warp_rule_count_text)"
@@ -193,7 +191,6 @@ diagnose_cmd() {
   [[ "$(nginx_config_check_state)" == "ok" ]] || config_failures+=("Nginx 配置校验失败")
   [[ "$(haproxy_config_check_state)" == "ok" ]] || config_failures+=("HAProxy 配置校验失败")
   [[ "$(local_tls_probe_state)" == "ok" ]] || tls_failures+=("本地 TLS 探测失败")
-  [[ "$(subscription_self_check_state)" != "fail" ]] || config_failures+=("订阅自检失败")
   if [[ "${run_net_check}" -eq 1 ]]; then
     [[ "$(net_stack_state)" == "ok" ]] || config_failures+=("拥塞控制不是 bbr 系")
   fi
@@ -234,46 +231,6 @@ diagnose_cmd() {
 
   printf '\n'
   printf '%s\n' "诊断摘要: 未发现关键问题"
-}
-
-render_subscription_qr() {
-  local url=""
-
-  if ! command -v qrencode >/dev/null 2>&1; then
-    return
-  fi
-
-  load_existing_state
-  if [[ -f "${XRAY_CONFIG_FILE}" ]]; then
-    load_config_runtime_context
-  fi
-  [[ -n "${SUB_TOKEN}" && -n "${XHTTP_DOMAIN}" ]] || return 0
-
-  url="$(subscription_base_url)/vless.txt"
-  printf '\n订阅地址二维码:\n'
-  qrencode -t ANSIUTF8 "${url}" || true
-  printf '\n'
-}
-
-change_sub_token_cmd() {
-  while [[ $# -gt 0 ]]; do
-    case "${1}" in
-      --help|-h|help)
-        usage
-        exit 0
-        ;;
-      *)
-        die "未知的 change-sub-token 参数：${1}"
-        ;;
-    esac
-  done
-
-  begin_managed_change || return 1
-  SUB_TOKEN="$(random_hex 16)"
-  log_step "轮换订阅地址并重写订阅目录。"
-  write_state_file || return 1
-  write_output_file || return 1
-  finish_managed_change "订阅地址已轮换。" "no"
 }
 
 restart_cmd() {
@@ -463,7 +420,7 @@ uninstall_cmd() {
 show_main_menu() {
   cat <<'EOF'
   1. 安装或重装
-  2. 查看节点链接与订阅地址
+  2. 查看节点链接与二维码
   3. 运行诊断
   4. 刷新状态面板
   5. 重启服务
@@ -477,11 +434,10 @@ show_main_menu() {
  13. 查看 WARP 分流规则
  14. 修改证书模式 / CDN 域名
  15. 续期 / 刷新证书
- 16. 轮换订阅地址
- 17. 重新应用网络优化
- 18. 重新生成托管配置
- 19. 抢修文件权限
- 20. 卸载
+ 16. 重新应用网络优化
+ 17. 重新生成托管配置
+ 18. 抢修文件权限
+ 19. 卸载
   0. 退出
 EOF
 }
@@ -591,9 +547,6 @@ dispatch_cli_command() {
     change-cert-mode)
       change_cert_mode_cmd "$@"
       ;;
-    change-sub-token)
-      change_sub_token_cmd "$@"
-      ;;
     renew-cert)
       renew_cert_cmd "$@"
       ;;
@@ -650,11 +603,10 @@ run_menu_choice() {
     13) run_cli_command change-warp-rules --list ;;
     14) run_cli_command change-cert-mode ;;
     15) run_cli_command renew-cert ;;
-    16) run_cli_command change-sub-token ;;
-    17) run_cli_command apply-net-opt ;;
-    18) run_cli_command apply-config ;;
-    19) run_cli_command repair-perms ;;
-    20) run_cli_command uninstall ;;
+    16) run_cli_command apply-net-opt ;;
+    17) run_cli_command apply-config ;;
+    18) run_cli_command repair-perms ;;
+    19) run_cli_command uninstall ;;
     *)
       warn "未知的菜单项：${1}"
       return 1

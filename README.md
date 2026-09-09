@@ -197,8 +197,7 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 | `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
 | `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
 | `change-cert-mode` / `renew-cert` | 换证书模式 / 续期证书 |
-| `change-sub-token` | 轮换订阅地址 |
-| `show-links [--qr]` | 查看节点链接与订阅地址 |
+| `show-links [--qr]` | 查看节点链接 |
 | `diagnose [--warp-probe] [--net]` | 一次性诊断 / 网络栈体检 |
 | `status [--raw]` | 状态面板 / 原始 systemctl 输出 |
 | `restart` / `repair-perms` | 重启服务 / 抢修文件权限 |
@@ -248,24 +247,6 @@ xtun status --raw
 
 `xtun diagnose` 会报当前拦截状态（`private` / `private+cn`）。
 
-### 订阅地址
-
-订阅经 CDN 域名 HTTPS 托管在 `/sub/<32 位 token>/` 下（`Cache-Control: no-store`），本地不落 `/root/xtun-subscriptions`：
-
-```text
-https://<XHTTP_DOMAIN>/sub/<token>/vless.txt       Base64 订阅
-https://<XHTTP_DOMAIN>/sub/<token>/vless-raw.txt   每行一个 vless://
-https://<XHTTP_DOMAIN>/sub/<token>/mihomo.yaml     mihomo 节点 yaml
-```
-
-安装后自动生成 token，`xtun status` 的输出文件里会列出三个订阅地址。轮换：
-
-```bash
-xtun change-sub-token
-```
-
-轮换后旧 token 目录即刻失效（写入新目录前会清掉所有非当前 token 的目录）。Cloudflare 缓存绕过表达式已包含 `/sub/` 路径。
-
 ### IPv6 双栈
 
 安装时脚本会探测本机全局单播 IPv6（`ip -6 route get 2606:4700:4700::1111`，只认 `2000::/3`），问到「REALITY 直连节点 IPv6」时直接给默认值；留空（或 `--no-ipv6`）跳过。
@@ -273,7 +254,7 @@ xtun change-sub-token
 有 IPv6 时：
 
 - haproxy 监听改为 `bind :::443 v4v6`（无 IPv6 的机器同样合法，IPv4 走 mapped 地址）
-- 追加两条链接：`REALITY-V6`（节点 1 的 IPv6 版）与 `XHTTP-SPLIT-CDN-REALITY-V6`（节点 4 的 IPv6 下行），mihomo yaml 同步追加
+- 追加两条链接：`REALITY-V6`（节点 1 的 IPv6 版）与 `XHTTP-SPLIT-CDN-REALITY-V6`（节点 4 的 IPv6 下行）
 - `xtun status` 面板与 `xtun diagnose` 会显示 IPv6 状态
 
 也可以显式指定：`--server-ip6 2408:8120::xxx`。
@@ -288,14 +269,6 @@ xtun change-sub-token
 任一不满足时整段功能自动关闭，`xtun diagnose` 会给出原因。
 
 启用后：nginx 直接在公网 UDP 443 监听 QUIC（`listen 443 quic reuseport`，有 IPv6 再加 `[::]:443`），TLS 在 nginx 终结，并下发 `Alt-Svc: h3=":443"`。链接追加 `XHTTP-TLS-H3`（H3 直连）与 `XHTTP-SPLIT-CDN-H3`（上行 CDN h2、下行 H3 直连）。防火墙需放行 UDP 443；`xtun diagnose` 会探测 QUIC 监听并在缺失时报出。
-
-### mihomo 导入
-
-订阅里的 `mihomo.yaml` 含 5 条节点（与 `show-links` 一一对应），需要 mihomo >= 1.19.24（xhttp + x-padding + vless encryption 支持）。ECH / xpadding / VLESS Encryption 开关开启时，yaml 会带上 `ech-opts`、`x-padding-*`、`encryption:` 对应键。
-
-```bash
-mihomo -t -f mihomo.yaml   # 导入前校验
-```
 
 ### 一次性诊断
 
@@ -471,7 +444,7 @@ xtun uninstall --purge --yes
 
 ### 凭据来源
 
-安装时加 `--enable-warp` 就够了，脚本会自动向 Cloudflare 注册一台免费 WARP 设备（生成 X25519 密钥对 + 一次 API 调用），私钥写进 `node-meta.env`（`0600`）和 `config.json`（`0640 root:xray`），不会出现在输出文件或订阅里。
+安装时加 `--enable-warp` 就够了，脚本会自动向 Cloudflare 注册一台免费 WARP 设备（生成 X25519 密钥对 + 一次 API 调用），私钥写进 `node-meta.env`（`0600`）和 `config.json`（`0640 root:xray`），不会出现在输出文件里。
 
 ```bash
 xtun change-warp --enable-warp
