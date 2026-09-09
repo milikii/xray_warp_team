@@ -103,6 +103,22 @@ jobs:
             bash xtun.sh diagnose
           '
 
+      - name: TLS debug（diagnose 失败时留现场）
+        if: ${{ always() }}
+        run: |
+          docker exec smoke bash -c '
+            echo "===== s_client ====="
+            echo | timeout 8 openssl s_client -connect 127.0.0.1:443 -servername cdn.example.test 2>&1 | tail -25 || true
+            echo "===== curl ====="
+            curl -kv --max-time 8 --resolve cdn.example.test:443:127.0.0.1 https://cdn.example.test/ 2>&1 | tail -25 || true
+            echo "===== listeners ====="
+            ss -ltnp 2>/dev/null || ss -ltn || true
+            echo "===== haproxy log ====="
+            tail -20 /var/log/haproxy.log 2>/dev/null || journalctl -u haproxy --no-pager -n 20 2>/dev/null || true
+            echo "===== nginx error log ====="
+            tail -20 /var/log/nginx/error.log 2>/dev/null || journalctl -u nginx --no-pager -n 20 2>/dev/null || true
+          '
+
       - name: Stop container
         if: ${{ always() }}
         run: docker rm -f smoke
