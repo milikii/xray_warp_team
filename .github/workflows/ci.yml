@@ -46,3 +46,36 @@ jobs:
       - name: Run Smoke Tests
         if: ${{ !cancelled() }}
         run: bash tests/smoke.sh
+
+  # 真机冒烟：debian:13 systemd 容器里完整跑一遍 install + diagnose。
+  # 沙箱用例永远碰不到 systemd / apt / 真实 haproxy / nginx，这一层只有真机跑得出来。
+  # 网络不可达导致 check-sni 失败时走 --skip-sni-check（容器里预检本来就走不到公网）。
+  install-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run install smoke in debian:13 systemd container
+        run: |
+          set -Eeuo pipefail
+          docker run --rm --privileged --cgroupns=host \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -v "${PWD}:/src:ro" \
+            debian:13 bash -euxc '
+            apt-get update -qq
+            apt-get install -y -qq systemctl curl openssl jq ca-certificates qrencode >/dev/null
+            cp -a /src /root/xtun
+            cd /root/xtun
+            bash xtun.sh install --non-interactive \
+              --server-ip 127.0.0.1 \
+              --reality-sni www.stanford.edu \
+              --xhttp-domain cdn.example.test \
+              --cert-mode self-signed \
+              --disable-warp \
+              --disable-net-opt \
+              --no-manage-nginx-main \
+              --skip-sni-check
+            bash xtun.sh diagnose
+          '

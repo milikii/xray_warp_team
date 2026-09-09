@@ -2,7 +2,7 @@
 
 `xtun` 是一个面向 Debian / Ubuntu VPS 的一键部署与维护脚本。它把 `xray`、`haproxy`、`nginx`、Cloudflare CDN、可选 WARP 出站、证书和网络优化组合成一套可重复安装、可回滚、可维护的代理节点栈。
 
-当前版本：`0.11.14`
+当前版本：`1.0.0`
 
 ## 能安装什么
 
@@ -171,63 +171,40 @@ xtun change-cert-mode --cert-mode existing --cert-pem @/root/cf-origin.pem --key
 
 ## 架构说明
 
-`xtun` 使用混合前置架构：
+`xtun` 在同一台 Debian / Ubuntu VPS 的 `443` 端口导出 5（+IPv6/H3 各 +2）条节点，请求流图、为什么有 haproxy、为什么 Reality 目标不用自己的域名等原理性内容见 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
 
-```text
-公网 :443
-  |
-  v
-haproxy
-  |-- SNI = XHTTP CDN 域名 --> nginx 127.0.0.1:8443 --> xray 127.0.0.1:8001
-  `-- 其它 SNI -------------> xray Reality 127.0.0.1:2443
-                                |-- 鉴权通过 --> VLESS / fallbacks 8001
-                                `-- 鉴权失败 --> dokodemo 127.0.0.1:2444
-                                                  |-- SNI == REALITY_SNI --> 真实目标站
-                                                  `-- 其它 SNI --> blackhole
-```
+### 节点一览
 
-组件职责：
-
-| 组件 | 监听 | 作用 |
+| # | 节点 | 用途 |
 | --- | --- | --- |
-| `haproxy` | `:443` | 按 SNI 做 TCP 分流 |
-| `nginx` | `127.0.0.1:8443` | 给 CDN 域名提供 TLS/HTTP2，并把 XHTTP 路径转发给 Xray |
-| `xray` Reality | `127.0.0.1:2443` | `VLESS + REALITY + Vision` |
-| `xray` XHTTP | `127.0.0.1:8001` | `VLESS + XHTTP`，默认开启 VLESS Encryption |
-| 本地静态站 | `/var/www/xtun-fallback` | nginx 根路径伪装站 |
+| 1 | VLESS + REALITY + Vision（直连） | 主力直连 |
+| 2 | VLESS + XHTTP + REALITY（上下行不分离） | 直连备用 |
+| 3 | VLESS + XHTTP + TLS + CDN | 日常用，走 Cloudflare |
+| 4 | 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + REALITY | 上下行分离，备用 |
+| 5 | 上行 XHTTP + REALITY ｜ 下行 XHTTP + TLS + CDN | 反向分离，备用 |
+| 6 | REALITY-V6（有 IPv6 时） | 节点 1 的 IPv6 版 |
+| 7 | XHTTP-SPLIT-CDN-REALITY-V6（有 IPv6 时） | 节点 4 的 IPv6 下行 |
+| - | XHTTP-TLS-H3 / XHTTP-SPLIT-CDN-H3（H3 可用时） | H3 直连下行 |
 
-Reality、XHTTP CDN、XHTTP split 共享同一个 `443`。split 节点不增加额外服务端入站，而是由客户端 `downloadSettings` 控制上下行链路。
+### 命令表
 
-## Reality 目标域名要求与预检
-
-Reality 的目标必须是用户指定的第三方权威站点（不是自己的域名），安装与改 SNI 前都会跑一次 `check-sni` 预检：
-
-```bash
-xtun check-sni www.stanford.edu                      # 独立检查，不需要 root
-xtun check-sni www.stanford.edu --target 1.2.3.4:443 --timeout 8
-xtun install ... --reality-sni www.stanford.edu      # 预检自动跑；有 FAIL 就停
-xtun install ... --skip-sni-check                    # 跳过，但输出里留警告
-xtun change-sni --reality-sni www.example.com        # 同样先预检，可用 --skip-sni-check
-```
-
-检查项（一行一项，`PASS` / `WARN` / `FAIL` 三级，有 FAIL 时退出码 2）：
-
-| # | 检查项 | 说明 |
-| --- | --- | --- |
-| 1 | 域名格式 | 合法主机名 |
-| 2 | DNS 解析 | 解析出公网 IPv4；解析到本机（回环）或私网判 FAIL |
-| 3 | TLS 1.3 | 目标必须支持 TLS 1.3 |
-| 4 | X25519 | 握手临时密钥组必须是 X25519 |
-| 5 | HTTP/2 ALPN | 目标必须协商出 h2（Reality + Vision 要求） |
-| 6 | 证书链 | `Verify return code: 0 (ok)` |
-| 7 | 证书 SAN | 证书覆盖 SNI（精确或通配符） |
-| 8 | 证书到期 | ≥30 天 PASS，14–30 天 WARN，<14 天 FAIL |
-| 9 | CDN 前置 | 证书由 CDN 边缘签发时 WARN（可用但不理想） |
-| 10 | HTTP 跳转 | 跨主机 3xx 判 FAIL（如 `stanford.edu` → `www.stanford.edu`，应直接用后者） |
-| 11 | HTTP 版本 | 实际协商出的版本 |
-| 12 | 握手耗时 | ≤0.3s PASS，0.3–1s WARN，>1s FAIL |
-
-防跑流量：Reality 入站的回落不直连目标站，而是经本机 `dokodemo-door`（`127.0.0.1:2444`）过滤 SNI——只有 SNI 等于 `REALITY_SNI` 的回落流量放行到真实目标，其余一律 blackhole。这样扫描者无法把你的服务器当成到目标站（尤其是 CDN 站）的端口转发。回落路径也不配置限速（官方文档明言限速是特征）。
+| 命令 | 作用 |
+| --- | --- |
+| `install [参数]` | 安装或重装 |
+| `update-script` | 更新脚本本体 |
+| `upgrade` | 升级 Xray 核心 |
+| `check-sni [域名]` | Reality 目标域名 12 项预检 |
+| `change-uuid` / `change-sni` / `change-path` | 轮换 UUID / 改 SNI（含预检）/ 改路径 |
+| `change-warp` / `change-warp-rules` | WARP 开关 / 分流规则 |
+| `change-cert-mode` / `renew-cert` | 换证书模式 / 续期证书 |
+| `change-sub-token` | 轮换订阅地址 |
+| `show-links [--qr]` | 查看节点链接与订阅地址 |
+| `diagnose [--warp-probe] [--net]` | 一次性诊断 / 网络栈体检 |
+| `status [--raw]` | 状态面板 / 原始 systemctl 输出 |
+| `restart` / `repair-perms` | 重启服务 / 抢修文件权限 |
+| `apply-config [--manage-nginx-main]` | 按当前状态重渲染托管配置 |
+| `apply-net-opt [--bbr-kernel joey\|none]` | 重新应用网络优化 |
+| `uninstall [--yes] [--purge]` | 卸载 |
 
 ## 安装会写入哪些文件
 
