@@ -295,8 +295,11 @@ restart_services() {
   systemctl enable xray haproxy nginx || return 1
   systemctl restart xray || return 1
   log_success "xray 已启动。"
-  reload_or_restart_service haproxy || return 1
+  # nginx 必须先于 haproxy：haproxy 起跑时对 127.0.0.1:8443 做健康检查，
+  # nginx 还没起来就把 be_xhttp_cdn 判 DOWN（Connection refused），
+  # 要等下一轮 check（默认 2s）才恢复——这个窗口内的 TLS 探测全部撞墙。
   apply_nginx_service_change || return 1
+  reload_or_restart_service haproxy || return 1
 }
 
 # 接管过的节点卸载时把 nginx 主配置还回去：优先用备份目录里最早的一份
@@ -370,10 +373,11 @@ restart_core_services() {
   ensure_xray_user || return 1
   ensure_managed_permissions || return 1
   # xray 没有配置热重载，只能重启。
+  # 同 restart_services：nginx 在前，别让 haproxy 的初始健康检查把后端判死。
   systemctl restart xray || return 1
   log_success "xray 已重启。"
-  reload_or_restart_service haproxy || return 1
   apply_nginx_service_change || return 1
+  reload_or_restart_service haproxy || return 1
 }
 
 restart_xray_service() {
