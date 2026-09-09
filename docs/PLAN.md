@@ -1,812 +1,533 @@
-# xtun 瘦身与推进方案（0.11.14 → 1.0.0）
+# xtun 1.1.0 施工图：去订阅、只出链接与二维码
 
 > 本文是交给实施者（人或 AI）的施工图。它假定读者没有看过本仓库任何一行代码，
 > 所以每一处改动都点到文件、函数、变量名；每个阶段都有可机械核对的验收标准。
 > 文中「必须 / 不得 / 一律」是硬约束；「建议」可由实施者裁量。
 >
-> 基线：`main` 分支 `b6eb98b`，`SCRIPT_VERSION="0.11.14"`。
-> 工作区另有 4 个文件未提交（见 §3 阶段 0）。
+> 基线：`main` 分支 `4cba157`，`SCRIPT_VERSION="1.0.0"`，`STATE_VERSION_CURRENT="2"`。
+> 文中行号以 `4cba157` 为准；其后的 `9772802`（裁 skill）与本文所在的 docs 提交只动了 `skills/` 与 `docs/`，shell 代码行号不变。
+> 基线状态：`shellcheck` 零发现；`bash tests/smoke.sh` 108 条用例全绿（2026-09-09 在本机实测）。
+>
+> 上一版施工图（0.11.14 → 1.0.0）已全部完成，归档在 `docs/archive/PLAN-1.0.0.md`。
+> 它的 §1「决策清单」与 §2「实施者必读：仓库约定与陷阱」继续有效，本文不重复，只写增量。
 
 ---
 
 ## 0. 目标与非目标
 
-### 0.1 面向谁
+### 0.1 这一版做什么
 
-xtun 只服务一个人、一台或几台自建 VPS。不再面向「机场」、多租户、多客户端分发。
-一切为「多人共用一台节点」设计的东西全部剔除。
+1. **删掉订阅托管与 mihomo 输出。** 1.0.0 把节点导出做成了三样东西：`/root/xtun-output.md`
+   里的分享链接、经 CDN 域名 HTTPS 托管的 `/sub/<token>/{vless.txt,vless-raw.txt,mihomo.yaml}`、
+   以及 `show-links --qr` 的终端二维码。单人节点不需要订阅：一台机器、一个人、几部设备，
+   链接和二维码扫一次就进客户端了。订阅托管带来的东西全部删除：`SUB_TOKEN` 状态键、
+   `/var/www/xtun-sub` 目录、nginx 的 `/sub/` location、`change-sub-token` 命令与菜单项、
+   `diagnose` 的「订阅自检」、Cloudflare 缓存绕过表达式里的 `/sub/` 子句、mihomo yaml 生成器。
+2. **节点导出只剩两种形态：链接与二维码。** 链接仍写在 `/root/xtun-output.md`（`show-links` 原样打印）；
+   二维码有两种载体：终端 ANSI 二维码（`show-links --qr`，现有）与 **PNG 图片文件**
+   （新增，每条节点一张，落在 `/root/xtun-qr/`，随链接一起重新生成）。
+3. **补一个 1.0.0 的缺口：H3 两条链接从来没进过输出文件。** `vless_links_text` 会在 H3 可用时
+   追加 `XHTTP-TLS-H3` / `XHTTP-SPLIT-CDN-H3`，但 `output_file_text` 只渲染节点 1–7 的块，
+   H3 链接只出现在订阅文件里。订阅一删它们就没地方看了，所以本版把节点 8 / 9 的块补进输出文件。
+4. **`qrencode` 变成硬依赖。** 1.0.0 的 `install_packages` 不装 `qrencode`，
+   README 却写「`--qr` 需要 `qrencode`」，CI 真机冒烟是手工 `apt-get install qrencode` 才跑通的；
+   本机（生产节点）就没装，`show-links --qr` 目前只会打一行警告。二维码既然成了唯一的「非文本」导出形态，
+   依赖必须由安装器负责。
 
-### 0.2 最终形态（1.0.0）
+### 0.2 最终形态（1.1.0）
 
-同一台 Debian / Ubuntu VPS，`443` 端口，导出以下节点（默认 5 条，IPv6 / H3 阶段各追加 2 条）：
+节点集合不变（5 条默认 + IPv6 两条 + H3 两条），服务端配置不变（xray / haproxy 一字不改，
+nginx 只是少一个 location）。变化全部在「导出层」：
 
-| # | 节点 | 用途 |
-| --- | --- | --- |
-| 1 | VLESS + REALITY + Vision（直连） | 主力直连 |
-| 2 | VLESS + XHTTP + REALITY（上下行不分离） | 直连备用 |
-| 3 | VLESS + XHTTP + TLS + CDN | 日常用，走 Cloudflare |
-| 4 | 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + REALITY | 上下行分离，备用 |
-| 5 | 上行 XHTTP + REALITY ｜ 下行 XHTTP + TLS + CDN | 反向分离，备用 |
-
-Reality 的目标域名是用户指定的第三方权威站点（不是自己的域名），因此安装前必须
-对它做一次合规探测（§5.1–5.6）；鉴权失败的回落流量按 Xray 官方模板经本机 dokodemo-door
-过滤 SNI 后再放行，防止服务器被扫描者当成到目标站的端口转发（§5.7）。
-
-服务器侧：BBR（发行版内核 bbr 或 Joey BBRv3 内核，二选一）、fq、sysctl 全套、
-RPS/XPS、MTU 夹紧、nginx 主配置接管（worker_connections / rlimit）、fd 限额、
-服务崩溃自动重启（systemd 原生，不再自带巡检 timer）。
-
-客户端侧：VLESS 分享链接、mihomo 节点 yaml、经 CDN 域名 HTTPS 分发的订阅地址、
-终端二维码。
+```
+/root/xtun-output.md          人类可读输出：节点 1–9 的参数块 + 链接 + 「## 二维码」段 + 其它段落不变
+/root/xtun-qr/NN-<节点名>.png  每条节点一张 PNG（NN 为固定位次 01–09，见 §5.2），0700 目录 / 0600 文件
+xtun show-links               打印输出文件
+xtun show-links --qr          追加打印每条链接的终端二维码（现在也覆盖 H3 两条）
+```
 
 ### 0.3 明确不做
 
-- 不支持 Debian / Ubuntu 之外的发行版；不支持 openrc。
-- 不做 Hysteria2、不做上下行不同 CDN 域名（双 CDN）。
-- 不做 sing-box 输出（sing-box 不支持 XHTTP 传输，输出一半没意义）。
-- 不做 Reality「自偷」（目标指向本机 nginx）。用户要的是权威第三方域名。
-- 不替换 haproxy（见 §1.3 决策 D）。
+- 不做任何订阅格式（Base64 / raw / Clash / sing-box / mihomo），也不做 HTTP 托管的二维码页面。
+- 不改节点集合，不改 xray / haproxy 配置生成器。
+- 不升 `STATE_VERSION`（去掉一个键不改变其它键语义，未知键在加载时本来就会被跳过，见 §4.2）。
+- 不裁剪 `/root/xtun-output.md` 里 Cloudflare DNS / WARP / ECH / xpadding / 网络优化这些说明段。
+  想裁可以另开一版，本版只删订阅段、加二维码段与 H3 段。
+- 不把 xray 二进制的版本策略从 `releases/latest`（= 最新非 pre-release）改成追 pre-release（§8 有说明）。
+
+### 0.4 驱动本方案的审查结论（2026-09-09）
+
+实施前先知道这些，很多改动的理由都在这里：
+
+| # | 发现 | 位置 | 处理 |
+| --- | --- | --- | --- |
+| 1 | `uninstall` 的 `remove_managed_paths` 清单里没有 `/var/www/xtun-sub`：卸载后 0644 的 `vless.txt`（含 UUID、公钥、路径）留在盘上 | `lib/cli/core.sh:417-440` | §4.7 把它加进 `legacy_managed_paths`，升级 / 卸载 / 重装都会清 |
+| 2 | H3 链接不进输出文件（只进订阅） | `lib/ui/output.sh:1079-1103` 没有 H3 块 | §5.4 |
+| 3 | `qrencode` 不在 `install_packages` 里 | `lib/install.sh:12` | §5.1 |
+| 4 | `subscription_base_url` 在 `lib/ui/core.sh:554` 与 `lib/ui/output.sh:489` 各定义一次 | 后加载的赢，行为一致，纯冗余 | 随订阅一起删 |
+| 5 | `tests/common.sh::prepare_workspace` 还在给七个已删除的 `SUBSCRIPTION_*` 变量赋值；`tests/cases_state_runtime.sh::errexit_guarded_step_names` 还登记着 `write_core_health_*`、`write_subscription_files`、`select_output_client_if_requested` 这些早已不存在的函数名；`tests/cases_output.sh:81-86` 断言「输出文件里没有 Clash Meta / sing-box 片段」——那两段 0.12 就没了 | 死代码，不影响结果 | §4.9 顺手清 |
+| 6 | `update-script` 的「当前已经是最新脚本 bundle」永远不会命中：`bundle_script_signature` 对下载的 bundle 根目录哈希全部文件（含 README、tests、docs、skills），对已安装目录只有 xtun.sh / lib / static，两边永远不等，每次都重装一遍 | `lib/install/self.sh:52-62, 73-81` | §7 顺手修 |
+| 7 | 仓库 `skills/` 目录在 `4cba157` 时 27 MB（746 个文件，151 张图 22 MB），而 `bash xtun.sh` 单文件引导与 `update-script` 下载的是整个分支的 codeload tar.gz：归档从 0.18 MB 涨到 22.6 MB（125 倍）。同时 `skills/` 不是 Claude Code 的技能发现路径（要放 `.claude/skills/`），所以它现在对任何 AI 会话都是不可见的 | 上一次提交 `4cba157`；`9772802` 已删掉 ru / en 镜像与 level-0 教程，目录 3.5 MB、归档 1.15 MB，仍是 1.0.0 前的 6 倍 | §3 |
+| 8 | skill 的手写层有几处与它自己收录的官方文档 / 源码相反（`target`/`dest`、`password`/`publicKey` 方向写反；`allowInsecure` 写成「已移除、填 true 会报错」，文档原文是「已弃用」），且把 pre-release `v26.9.9` 标成 stable | `skills/.../changelog/v26.9.9.md`、`extracted/parameters/reality-settings.yaml`、`sources.yaml` | 附录 E |
 
 ---
 
 ## 1. 决策清单（已定，实施时不要再议）
 
-### 1.1 删除
-
-| 功能 | 现状 | 决策 | 理由 |
-| --- | --- | --- | --- |
-| 多客户端（`add-client` / `list-clients` / `show-links --client` / `NODE_CLIENTS_TEXT`） | `lib/state.sh:433-584`、`lib/cli/core.sh:23-217`、`lib/ui/output.sh:44-96` | **删** | 单人使用，只有 `default` 一个客户端 |
-| 核心巡检 timer（`xtun-core-health.*`、`health-state.env`、`health-history.log`、稳定性信号） | `lib/base/runtime.sh:66-192`、`lib/ui/health.sh` 全文 | **删**，改用 systemd `Restart=` drop-in | 3 分钟轮询 + 历史统计对个人节点是负担；xray 已有 `Restart=always`，haproxy 发行版单元也是 `Restart=always`，只有 nginx 缺（实测 `systemctl show nginx -p Restart` = `no`） |
-| `change-label-prefix` 命令（含 `begin_managed_output_change`、`run_single_value_change_cmd` 的 `output` 模式） | `lib/change/commands.sh:105-116`、`lib/change/workflow.sh:83-91` | **删** | 前缀在安装时定一次即可；要改就 `install` 重装或改状态文件后 `apply-config` |
-| 证书模式 `cf-origin-ca` | `lib/install/certs.sh:15-52`、`normalize_cert_mode` | **合并进 `existing`** | 代码路径完全相同（都走 `write_existing_tls_assets`），只是多一个菜单项和一套死变量 |
-| 死状态键 `CF_ZONE_ID` / `CF_API_TOKEN` / `CF_CERT_VALIDITY` 及 `--cf-zone-id` / `--cf-api-token` / `--cf-cert-validity` | 全仓库只被清空、从未被消费 | **删** | 没有 Origin CA API 签发流程，这些是半成品残骸 |
-| WARP Team 旧版迁移代码（`warp_teardown_legacy`、`legacy_warp_paths`、`warp_legacy_team_detected`、uninstall 里的 `cloudflare-warp` 清理） | `lib/install/warp.sh:190-241` | **删**，路径并入统一的 `legacy_managed_paths`（§4.6） | 迁移期已过 |
-| WARP 规则交互编辑器（`prompt_warp_rules_editor`、`warp_rules_editor_*`、`show_warp_rules_list`） | `lib/install/input.sh:247-393` | **删** | 菜单项改为打印当前规则 + 提示 CLI 用法 |
-| `/root/xtun-subscriptions/` 目录、订阅二维码 PNG | `lib/ui/output.sh:442-502` | **删**，订阅改为 nginx 托管（§6.2） | 本地文件订阅没人拉得到；PNG 二维码被终端二维码覆盖 |
-| `purge` 顶层命令别名 | `lib/cli/core.sh:740-742` | **删**，保留 `uninstall --purge` | 少一个入口 |
-| `status --raw` 菜单项、`help` 菜单项 | 菜单 19、20 | **删**（CLI 保留） | 菜单只留日常动作 |
-
-### 1.2 保留（并瘦身）
-
-| 功能 | 决策 | 说明 |
-| --- | --- | --- |
-| WARP 选择性出站（Xray 原生 wireguard） | **保留** | 本机状态 `ENABLE_WARP=yes`，AI 站点出口是真实个人需求。只删旧版迁移和交互编辑器 |
-| ECH、xpadding、VLESS Encryption 开关 | **保留** | 都是 CDN 节点的抗探测手段，代码量小 |
-| 证书模式 `self-signed` / `existing` / `acme-dns-cf` | **保留** | `existing` 同时接受文件路径和 PEM 粘贴（原 cf-origin-ca 的输入方式） |
-| 安装草稿（`/root/.xtun-install-draft.env`） | **保留** | 交互安装中断续填 |
-| 脚本锁、备份会话、回滚、操作日志、用户自定义块（`xtun-user:*`） | **保留** | 这是 xtun 相对同类项目的核心价值 |
-| bootstrap 单文件拉取、`update-script`、`upgrade`、`repair-perms`、`apply-config`、`apply-net-opt` | **保留** | |
-| Joey BBRv3 内核安装 | **保留，但拆成独立开关** | 见 §7.3 |
-
-### 1.3 关键设计决策
-
-- **A. Reality 目标域名预检是硬门禁。** 安装与 `change-sni` 都跑 `check-sni`；有 FAIL 项时非交互直接失败，交互模式给「重填 / 忽略 / 退出」三选一。可用 `--skip-sni-check` 跳过，但必须在输出里留下警告。
-- **A2. Reality 防跑流量按官方 dokodemo-door 模式无条件开启。** Reality 入站的 `target` 不再直连远端站点，而是指向本机 `dokodemo-door` 入站；由路由只放行 SNI 等于 `REALITY_SNI` 的回落流量，其余 blackhole。不启用 `limitFallbackUpload/Download`（官方文档明言限速是特征，一键脚本若用必须随机化；有了 SNI 过滤，剩余风险只剩「借你转发到目标站本身」，靠 `check-sni` 第 9 项劝阻 CDN 目标即可）。详见 §5.7。
-- **B. 路由卫生不可配置地开启。** `geoip:private` + `geosite:private` 一律 blackhole；`geoip:cn` + `geosite:cn` 由 `--block-cn` 控制，默认关。
-- **C. 订阅走 nginx 托管，路径 `/sub/<32 位 hex token>/`。** 通过 CDN 域名 HTTPS 访问，`Cache-Control: no-store`。
-- **D. 保留 haproxy 做 SNI 分流。** Reality 目标是远端第三方站点，xray 的 reality 入站收到 SNI=CDN 域名的流量会转给远端目标而不是本机 nginx，所以必须有前置 SNI 分流。haproxy 已有 reload、splice、用户块与测试，换 nginx stream 模块收益不抵风险。
-- **E. xtun 接管 `/etc/nginx/nginx.conf`。** `worker_connections`、`worker_rlimit_nofile` 只能写在主配置里；README 早已声明「已有复杂 nginx 站点的机器不适合」。接管受状态键 `NGINX_MAIN_MANAGED` 控制，升级上来的旧节点默认不接管，直到用户显式打开。
-- **F. 状态文件升到 `STATE_VERSION=2`。** 旧键只读不写，加载时给迁移提示。
-- **G. 版本节奏。** 阶段 1–3 合并发 `0.12.0`；阶段 4 发 `0.13.0`；阶段 5、6 可选，各发一个小版本；阶段 7 发 `1.0.0`。每个阶段独立可合并、独立全绿。
+- **A. 订阅相关一律删除，不留开关。** 包括状态键、目录、nginx location、命令、菜单项、诊断项、缓存表达式子句、测试用例、README / ARCHITECTURE 段落。
+- **B. 二维码 = 终端 ANSI + PNG 文件，两者都保留。** 终端二维码给 SSH 现场扫；PNG 给 `scp` 回本地后用大屏扫——
+  上下行分离节点的链接有 1100–1700 字符（附录 D 实测），终端里画出来是 137×137 个字符块，手机对着终端扫成功率很低，PNG 是这几条节点的实际可用路径。
+- **C. `qrencode` 进 `install_packages`，同时进 `managed_package_names`（`--purge` 会卸）。** 已装节点跑 `apply-config` 时缺 `qrencode` 只 `warn` 不失败：PNG 是输出文件的派生物，不该让一次托管变更因它回滚。
+- **D. `/var/www/xtun-sub` 进 `legacy_managed_paths`。** 顺手修掉 §0.4 第 1 项。
+- **E. `SUB_TOKEN` 从 `state_file_key_allowed` 里去掉即可，不进 `state_file_legacy_key`，不加迁移提示，不升 `STATE_VERSION`。** 加载器对未知键是 `continue`（`lib/state.sh:190`），旧状态文件照常加载，下一次 `write_state_file` 自然不再写它。
+- **F. H3 节点以「节点 8 / 节点 9」进输出文件；PNG 文件名用固定位次。** 节点 6/7 是 IPv6，8/9 是 H3，缺席就跳号，文件名和文档编号在不同机器上稳定。
+- **G. 版本 `1.1.0`，tag `v1.1.0`。** 客户端里已添加的订阅地址会失效，需要改用链接 / 二维码重新导入；README 与升级附录都要写明。
+- **H. skill 迁到 `.claude/skills/xray-core-official-knowledge/`，`.gitattributes` 用 `export-ignore` 把它和 tests / docs / .github 排除出源码归档。** 裁掉 ru / en 双语镜像与 level-0 教程这一步已在 `9772802` 完成（27 MB → 3.5 MB）。见 §3。skill 本身对 1.1.0 的改动没有帮助（本版不碰 xray 配置字段），修好它是为了 §8 的后续项。
 
 ---
 
-## 2. 实施者必读：仓库约定与陷阱
+## 2. 实施者必读：本版新增的约定与陷阱
 
-读完这一节再动手。这些都是仓库里已经踩过并写进注释和测试的坑。
+先读 `docs/archive/PLAN-1.0.0.md` 的 §2（目录与加载顺序、errexit 在命令层失效、测试怎么跑、提交约定），这里只列增量：
 
-### 2.1 目录与加载顺序
-
-```
-xtun.sh                      入口：bootstrap、全局默认值、按顺序 source lib/
-lib/base/helpers.sh          日志、die、锁；再 source base/input.sh、base/env.sh
-lib/install.sh               安装副作用；末尾 source install/{input,self,certs,network,warp}.sh
-lib/generators.sh            所有托管文件的文本生成器（xray json / haproxy / nginx / 用户块）
-lib/state.sh                 状态文件读写、config.json 回填
-lib/base/runtime.sh          systemd 单元、校验、重启、回滚编排
-lib/ui.sh → ui/{core,health,output}.sh   面板、探测、链接与输出文件
-lib/commands.sh → change.sh + cli.sh     命令层
-tests/smoke.sh               唯一测试入口；用例函数按 tests/cases_*.sh 分文件
-static/fallback/             nginx 伪装站静态文件
-```
-
-`xtun.sh` 顶部的全局变量是「所有键的总表」，新增状态键要同时改：`xtun.sh` 默认值、
-`lib/state.sh` 的 `state_file_key_allowed` / `reset_loaded_runtime_context` /
-`state_file_text`、`lib/install.sh` 的 `install_draft_file_text`（若需要续填）、
-`tests/common.sh` 的 `sandbox_managed_paths`（若是路径）。少一处，
-`run_dead_global_lint_case` 或 `run_state_context_case` 会红。
-
-### 2.2 errexit 在命令层是失效的
-
-`run_cli_command` 里 `dispatch_cli_command ... || status=$?` 和菜单里的 `|| true`
-把整条动态调用链的 `set -e` 关掉了（`lib/cli/core.sh:672-684` 有完整说明）。因此：
-
-- 每一步可能失败的调用都要显式 `|| return 1`。测试 `run_errexit_guard_lint_case`
-  会扫描指定函数，漏写就红。
-- `die` 是 `exit`。在 `$( )` 里调用的函数若可能 `die`，赋值语句后必须接 `|| exit 1`
-  （见 `lib/install/input.sh:8-18`）。不要写成 `local x="$(...)"`（SC2155 会吞退出码）。
-- 不要在函数里挂 `trap ... RETURN`（`lib/install/certs.sh:374-382` 记录了为什么）。
-- 管道下游提前退出会让上游吃 SIGPIPE，`pipefail` 把 141 抬成整条管道失败
-  （`lib/install/network.sh:16-32`）。读 `/proc/sys` 直接 `cat`，不要 `sysctl -a | grep`。
-
-### 2.3 测试怎么跑、怎么写
-
-```bash
-bash tests/smoke.sh            # 全部用例；需要宿主机有 /usr/local/bin/xray、jq、openssl
-shellcheck xtun.sh $(find lib tests -type f -name '*.sh' | sort)   # 必须零发现
-```
-
-- 所有托管路径在 `tests/common.sh::sandbox_managed_paths` 里被改写到临时沙箱；
-  新增任何落盘路径变量都要加进去，否则用例会写到真机。`tests/smoke.sh` 末尾的
-  `REAL_MANAGED_CANARY` 会在真实文件消失时让整套测试失败。
-- 单跑一个用例：`bash -c '. tests/common.sh; . tests/cases_xxx.sh; load_functions; stub_side_effects; run_xxx_case'`。
-  不先 `load_functions` 会「静默通过」。
-- 用例里的反向断言用 `assert_false` / `assert_absent`，不要写 `! cmd`（SC2251）。
-- 网络探测类函数（本方案新增的 `sni_probe_*`）在用例里用同名函数覆盖成返回固定文本，
-  解析与判定函数必须是纯函数，只吃字符串、只吐字符串。
-- CI（`.github/workflows/ci.yml`）钉死 Xray `v26.3.27` 并校验 sha256；升级要一起改两行。
-
-### 2.4 提交约定
-
-- 一个阶段可以拆多个提交，但每个提交 `shellcheck` 零发现、`smoke ok`。
-- 提交信息沿用仓库风格：中文、`fix:` / `feat:` / `refactor:` / `docs:` / `test:` 前缀、
-  一句话说清「什么坏了 / 什么变了」。
-- 不要在这台生产节点上跑 `install` / `uninstall` / `apply-config` 来「试一下」；
-  只跑 `tests/smoke.sh` 和只读命令（`status` / `diagnose` / `check-sni`）。
-  升级生产节点走附录 D 的步骤，由用户执行。
+- **全局变量总表在 `xtun.sh` 顶部。** 本版删 `SUB_WEB_ROOT`、`SUB_TOKEN`（`xtun.sh:202-203`），新增 `QR_OUTPUT_DIR="/root/xtun-qr"`。
+  每加 / 删一个落盘路径变量，`tests/common.sh::sandbox_managed_paths` 与 `tests/smoke.sh::REAL_MANAGED_CANARY` 要同步，
+  否则用例会写到真机、或者 canary 守卫会因为路径永远不存在而形同虚设。
+- **`write_generated_file_atomically PATH PRODUCER_FN`（`lib/generators.sh:9-26`）只适合往 stdout 吐文本的生成器。**
+  PNG 由 `qrencode -o` 直接写文件，要自己走「临时文件 + `mv -f`」，并在整个目录级别先 `backup_path`（回滚清单要用）。
+- **errexit lint 的规则**（`tests/cases_state_runtime.sh::errexit_returning_step_names`）：函数体里出现字面的 `return 1`–`return 9`，
+  该函数的所有调用点就必须带 `|| return 1` 之类守卫。§5.3 的 `write_link_qr_pngs` 被设计成只 `warn` + `return 0`，
+  所以它的调用点不需要守卫，也不要给它加 `return 1`——加了就得同时给三个调用点补守卫，而失败回滚正是我们不想要的。
+- **`show-links` 是纯查看命令**（不加锁、不读状态文件、只 `cat` 输出文件，`tests/cases_cli_core.sh::run_show_links_without_state_case` 钉着这一点）。
+  终端二维码继续从输出文件里的 `vless://` 行取，不要改成读状态。
+- **测试宿主机可能没有 `qrencode`**（本机就没有）。凡是走 PNG 的用例都通过覆盖 `have_qrencode` 与同名 `qrencode` 函数来跑，不得依赖真实二进制；
+  用例末尾按仓库惯例 `load_functions` 还原被覆盖的函数。
+- **节点名只含 `[A-Z0-9._-]`**（`lib/base/env.sh:195-208 normalize_node_label_prefix` 保证，后缀是固定常量），
+  所以「`序号-节点名.png`」不需要再做文件名转义；TAB 也不可能出现在节点名或链接里，§5.2 用 TAB 分列是安全的。
+- **不要在这台生产节点上跑 `install` / `uninstall` / `apply-config`「试一下」。** 只跑 `tests/smoke.sh`、`shellcheck` 与只读命令。升级生产节点走附录 F，由用户执行。
 
 ---
 
-## 3. 阶段 0：收口现有工作区
+## 3. 阶段 0：仓库卫生（skill 与源码归档体积）
 
-工作区已有一组完成度很高的未提交改动（`git diff --stat`：4 个文件，+210/−27）：
+目标：让 `bash xtun.sh` / `update-script` 的下载量回到 1.0.0 之前的水平；让 skill 真正能被 AI 会话加载；修掉 skill 里会把实施者带偏的错误说法。
+这一阶段不碰任何 shell 代码，可以单独提交、先合并。
 
-- `lib/base/input.sh`：新增 `sanitize_indirect_value`，在 `resolve_value_source` /
-  `prompt_secret` / `prompt_multiline_value` 里剥掉 `\r` 和首尾空白；`prompt_multiline_value`
-  的结束标记比对前先去 `\r`。
-- `lib/install/input.sh`：`verify_cloudflare_token` 改为不带 `-f`、单独取 http_code，
-  新增 `cloudflare_error_message`。
-- `tests/cases_cli_core.sh`、`tests/smoke.sh`：对应用例。
+### 3.1 `.gitattributes`（新文件）
 
-动作：
+```gitattributes
+# GitHub 的源码归档（codeload tar.gz —— bash xtun.sh 单文件引导与 update-script 下载的就是它）
+# 遵守 export-ignore。装进 /usr/local/lib/xtun 的只有 xtun.sh / lib / static，其余目录不进归档。
+.claude/        export-ignore
+skills/         export-ignore
+tests/          export-ignore
+docs/           export-ignore
+.github/        export-ignore
+.gitattributes  export-ignore
+.shellcheckrc   export-ignore
+```
 
-1. `bash tests/smoke.sh` 与 shellcheck 全绿。
-2. 单独提交，信息建议：`fix: 间接来源的密钥值剥掉 \r 与首尾空白；Cloudflare 令牌预检不再把 401 当成网络不通`。
+- `bundle_root_ready`（`xtun.sh:34-40`）只要求 `xtun.sh`、`lib/base/helpers.sh`、`static/fallback/index.html` 三个文件，以上排除项都不影响它。
+- 本地验证：`git archive --worktree-attributes HEAD | tar t | grep -c '^[^/]*/skills/'` 必须是 `0`；
+  `git archive --worktree-attributes HEAD | gzip -9 | wc -c` 应回到 ~100–200 KB（2026-09-09 实测：`4cba157` 不排除是 22 631 774 字节；`9772802` 裁掉镜像与教程后不排除是 1 149 474；只排除 `skills/` 是 182 013，全部排除是 101 051）。
+- 推送后再验证一次线上归档：`curl -fsSL https://codeload.github.com/milikii/xtun/tar.gz/main | tar tz | grep -c skills` 应为 `0`。
 
-不要把阶段 0 的改动混进后面的瘦身提交。
+### 3.2 skill 搬家与瘦身
+
+1. `git mv skills/xray-core-official-knowledge .claude/skills/xray-core-official-knowledge`；删掉空的 `skills/`。
+   Claude Code 只在 `.claude/skills/<name>/SKILL.md`（项目级）与 `~/.claude/skills/`（用户级）发现技能；仓库根下的 `skills/` 是插件布局，但仓库没有 `.claude-plugin/plugin.json`，所以现在两头都不算。
+   给别的 agent（Codex 等）留一句指路：在仓库根新建 `AGENTS.md`，一行「Xray 官方文档 / 源码快照在 `.claude/skills/xray-core-official-knowledge/`，涉及 xray 配置字段时以它的 `docs/stable/config/` 与 `source/` 为准」。
+2. 裁剪——**已完成**（提交 `9772802`，2026-09-09）：删掉了 `docs/stable/ru/`（156 个文件，俄文镜像）、`docs/stable/en/`（156 个文件，英文镜像；中文是 Xray-docs-next 的主语言，字段说明以中文为准）、`docs/stable/document/level-0/`（52 个文件的新手教程，含全部 gif / png 截图）。
+   结果：746 → 382 个文件，27 MB → 3.5 MB，gif 为 0，剩 11 张图共约 0.6 MB。`sources.yaml` 的 `gaps` 里记了一条 `removed`。
+   两点后续：
+   - 剩下的 6 个文档（`about/news.md`、`document/config.md`、`document/index.md`、`level-1/fallbacks-lv1.md`、`level-2/nginx_or_haproxy_tls_tunnel.md`、`level-2/tproxy_ipv4_and_ipv6.md`）里指向 `level-0/` 的链接已悬空，不必修，实施者知道即可。
+   - 可选再删：`docs/stable/public/`（两张 project 图 0.35 MB + 两个 logo svg）、`docs/stable/about/`（news / sponsor）。不强求。
+   保留：`docs/stable/config/`（65 个文件，字段参考）、`docs/stable/document/level-1/`（`fallbacks-with-sni.md`）与 `level-2/`（`nginx_or_haproxy_tls_tunnel.md` 与 xtun 架构直接相关）、`docs/stable/development/protocols/`、`source/`（254 个文件，`infra/conf` 与 `transport/internet` 快照）、`extracted/`、`examples/`、`references/`、`changelog/`、`citations/`。
+3. 按附录 E 逐条修正错误说法与元数据。
+4. `.gitignore` 里 `.health-state.tmp.*` / `.health-history.tmp.*` 是 0.12 删掉的核心巡检残留，顺手删掉这两行。
+
+### 3.3 验收
+
+- `git archive --worktree-attributes HEAD | tar t` 不含 `skills/`、`.claude/`、`tests/`、`docs/`、`.github/`。
+- `.claude/skills/xray-core-official-knowledge/SKILL.md` 存在；`du -sh` 约 3.5 MB（`9772802` 实测，再删 `public/` 与 `about/` 约 3.1 MB）；`find … -name '*.gif' | wc -l` 为 0。
+- 附录 E 的每一条在对应文件里都改掉了（`grep -n '现已由 dest 统一替代' -r .claude/skills` 无结果等）。
+- 单独提交，信息建议：`chore: skill 迁到 .claude/skills；.gitattributes 把非运行文件排除出源码归档（bootstrap 下载 1.15MB→0.1MB）`。
 
 ---
 
-## 4. 阶段 1：瘦身（0.12.0 第一部分）
+## 4. 阶段 1：删订阅托管与 mihomo 输出（1.1.0 第一部分）
 
-目标：删掉 §1.1 列出的全部功能，状态文件升到 v2，行为对单客户端节点零变化。
+目标：删掉 §0.1 第 1 条列出的全部东西，节点链接与终端二维码行为零变化。做完这一阶段单独提交。
 
 ### 4.1 `xtun.sh`
 
-- `SCRIPT_VERSION="0.12.0"`；`STATE_VERSION_CURRENT="2"`。
-- 删除全局：`DEFAULT_CF_CERT_VALIDITY`、`CF_ZONE_ID`、`CF_API_TOKEN`、`CF_CERT_VALIDITY`、
-  `NODE_CLIENTS_TEXT`、`OUTPUT_CLIENT_NAME`、`LINK_CLIENT_NAME`、`LINK_REALITY_UUID`、
-  `LINK_XHTTP_UUID`、`HEALTH_STATE_FILE`、`HEALTH_HISTORY_FILE`、`CORE_HEALTH_HELPER`、
-  `CORE_HEALTH_SERVICE_NAME/FILE`、`CORE_HEALTH_TIMER_NAME/FILE`、
-  `SUBSCRIPTION_DIR_DEFAULT`、`SUBSCRIPTION_DIR`、`SUBSCRIPTION_RAW_FILE`、
-  `SUBSCRIPTION_BASE64_FILE`、`SUBSCRIPTION_MANIFEST_FILE`、`SUBSCRIPTION_QR_DIR`、
-  `SUBSCRIPTION_RAW_QR_FILE`、`SUBSCRIPTION_BASE64_QR_FILE`。
-- 新增全局（本阶段先占位，后续阶段使用）：`REALITY_FALLBACK_PORT="2444"`（阶段 2）、
-  `SUB_WEB_ROOT="/var/www/xtun-sub"`、`SUB_TOKEN=""`、`ROUTE_BLOCK_CN="no"`（阶段 3）、
-  `NGINX_MAIN_MANAGED=""`、`NET_BBR_KERNEL=""`（阶段 4）。
-- `bundle_root_ready` 不变。
+- 删除 `SUB_WEB_ROOT="/var/www/xtun-sub"`、`SUB_TOKEN=""`（第 202–203 行）。
+- 新增 `QR_OUTPUT_DIR="/root/xtun-qr"`（放在 `OUTPUT_FILE` 之后；阶段 2 才用，先占位以便 sandbox 与 canary 一次改齐）。
+- `SCRIPT_VERSION` 留到阶段 3 再改。
 
 ### 4.2 `lib/state.sh`
 
-- `state_file_key_allowed`：
-  - 删除写入键：`CF_ZONE_ID|CF_API_TOKEN|CF_CERT_VALIDITY|NODE_CLIENTS_TEXT|CORE_HEALTH_LAST_CHECK_AT|CORE_HEALTH_LAST_ACTION|CORE_HEALTH_LAST_REASON`。
-  - 新增函数 `state_file_legacy_key()`：只认 `NODE_CLIENTS_TEXT`；`load_shell_kv_file` 对 legacy 键照常赋值（用于迁移提示），`state_file_text` 永不写出。
-  - 新增键：`SUB_TOKEN`、`ROUTE_BLOCK_CN`、`NGINX_MAIN_MANAGED`、`NET_BBR_KERNEL`。
-- `load_existing_state`：在版本比对之后加 `migrate_state_v1_to_v2`：
-  - `CERT_MODE=cf-origin-ca` → `existing`，`log` 一行说明。
-  - `NODE_CLIENTS_TEXT` 非空 → `warn "多客户端功能已移除；以下客户端将在下一次 apply-config 时从 config.json 中移除：a, b"`，随后置空。
-  - 不再加载 `HEALTH_STATE_FILE`。
-- 删除函数：`default_node_client_name`、`ensure_node_client_name_format`、
-  `ensure_new_node_client_name_format`、`node_client_record_line`、`node_extra_clients_text`、
-  `node_clients_text`、`node_client_record_for_name`、`node_client_exists`、`node_client_count`、
-  `node_client_names_text`、`node_client_names_csv`、`append_node_client_record`。
-- 保留并改名：`ensure_node_client_uuid_format` → `ensure_uuid_format LABEL UUID`
-  （`change-uuid --reality-uuid/--xhttp-uuid` 仍需校验）。
-- `reset_loaded_runtime_context`、`state_file_text`、`load_output_runtime_context` 同步删键。
-- `normalize_runtime_defaults`：`CERT_MODE="${CERT_MODE:-existing}"` 不变；补
-  `ROUTE_BLOCK_CN="${ROUTE_BLOCK_CN:-no}"`、`NGINX_MAIN_MANAGED="${NGINX_MAIN_MANAGED:-no}"`
-  （旧节点默认不接管）、`NET_BBR_KERNEL="${NET_BBR_KERNEL:-joey}"`（旧节点保持现状）。
+- `state_file_key_allowed`（第 32 行的大 `case`）去掉 `SUB_TOKEN`。**不要**把它加进 `state_file_legacy_key`（第 43 行）：那张表只给需要迁移提示的键用。
+- `reset_loaded_runtime_context` 删掉 `SUB_TOKEN=""`（第 243 行）。
+- `state_file_text` 删掉 `write_state_kv "SUB_TOKEN" "${SUB_TOKEN}"`（第 519 行）。
+- 其它不动。`load_existing_state`（第 297–306 行）对未知键的处理已经是跳过。
 
-### 4.3 `lib/generators.sh`
+### 4.3 `lib/ui/output.sh`
 
-- `xray_clients_json` 改为不读客户端表：
+删除以下函数（行号按基线）：
 
-```bash
-xray_reality_clients_json() {
-  jq -cn --arg id "${REALITY_UUID}" '[{id: $id, flow: "xtls-rprx-vision", email: "reality-vision"}]'
-}
-xray_xhttp_clients_json() {
-  jq -cn --arg id "${XHTTP_UUID}" '[{id: $id, email: "xhttp-cdn"}]'
-}
-```
+| 函数 | 行 |
+| --- | --- |
+| `yaml_quote` | 480–487 |
+| `subscription_base_url` | 489–491 |
+| `subscription_base64_text` | 493–496 |
+| `mihomo_xpadding_lines` / `mihomo_reuse_settings_lines` / `mihomo_ech_lines` / `mihomo_xhttp_base_lines` | 498–545 |
+| `mihomo_nodes_yaml_text` | 547–781 |
+| `write_subscription_web_files` | 783–799 |
+| `ensure_sub_token` | 1105–1110 |
 
-- 其余生成器本阶段不动（路由与 nginx 订阅 location 在阶段 3，nginx 主配置在阶段 4）。
+改动：
 
-### 4.4 `lib/ui/output.sh`
-
-- 删除：`selected_output_client_name`、`current_link_client_name`、`current_link_reality_uuid`、
-  `current_link_xhttp_uuid`、`client_scoped_node_label`、`output_client_detail_line`、
-  `output_client_summary_block`、`subscription_*`（`subscription_raw_text` 保留并重命名为
-  `vless_links_text`，供阶段 3 的订阅文件使用）、`write_subscription_qr_png`、
-  `write_subscription_files`、`subscription_manifest_text`、`subscription_qr_status_text`。
-- `build_link_context` 去掉 `requested_client_name` 参数与 `node_client_record_for_name`；
-  标签统一用 `prefixed_node_label`。
-- 所有 `$(current_link_reality_uuid)` → `${REALITY_UUID}`，`$(current_link_xhttp_uuid)` → `${XHTTP_UUID}`。
-- `output_runtime_summary_block` 删掉「Raw/Base64 订阅、清单、二维码」五行；阶段 3 会加订阅 URL。
-- `write_output_file` 去掉参数，只写 `OUTPUT_FILE`。
-
-### 4.5 `lib/cli/core.sh`
-
-- 删除：`prompt_node_client_selection`、`list_clients_cmd`、`select_output_client_if_requested`、
-  `add_client_cmd`。
-- `show_links`：只剩 `--qr`；不再重写任何文件；`OUTPUT_FILE` 不存在则 `die`。
-- `xray_managed_service_units` / `restart_service_units`：去掉 `${CORE_HEALTH_TIMER_NAME}`。
-- `diagnose_cmd`：删掉「核心巡检 / 核心自恢复 / 最近恢复记录 / 近 1h / 近 24h / 稳定性信号」六行及其失败判定。
-- `uninstall_cmd`：
-  - 删掉 `warp_teardown_legacy` 调用和 `/var/lib/cloudflare-warp`；
-  - `remove_managed_paths` 清单去掉 health 三个文件、`CORE_HEALTH_*` 三个单元、订阅目录；
-  - 末尾追加 `remove_legacy_managed_paths`（§4.6），保证从 0.11 升上来再卸载也干净；
-  - 交互流程：先问「停止服务并删除托管文件？[y/N]」，再问「是否同时卸载软件包？输入 purge 确认，其它任何输入只删托管文件」。`--purge` / `--yes` 语义不变。
-- `show_main_menu` / `run_menu_choice` 改为附录 A 的编号表。
-- `dispatch_cli_command`：删 `change-label-prefix`、`purge`、`add-client`、`list-clients`；
-  阶段 2、3、4 再加 `check-sni`、`change-sub-token`。
-- `script_lock_command_needs_lock`：去掉 `list-clients` 和 `show-links --client` 分支；
-  `show-links` 一律不加锁。
-
-### 4.6 `lib/base/runtime.sh`
-
-- 删除：`write_core_health_helper`、`write_core_health_service`、`write_core_health_timer`、
-  `write_core_health_monitor`。
-- `restart_services`：删掉 `systemctl enable --now "${CORE_HEALTH_TIMER_NAME}"` 两行。
-- `rollback_managed_runtime_state`：paths 去掉 `WARP_RULES_FILE` 以外的 health / core 三项。
-- 新增（阶段 1 就要有，因为 nginx 缺 `Restart=`）：
+- `cloudflare_xhttp_cache_bypass_expression`（815–819）去掉尾部的 ` or (http.request.uri.path contains "/sub/")`，恢复为两项。
+- `output_runtime_summary_block`（988–1040）删掉「## 订阅地址（经 CDN 域名 HTTPS）」整段（997–1001，含前后空行处理，确保段与段之间仍是一个空行）。
+- `write_output_file`（1112–1118）改为：
 
 ```bash
-# /etc/systemd/system/nginx.service.d/xtun-limits.conf（文件名不变，内容扩展）
-[Service]
-LimitNOFILE=1048576
-Restart=on-failure
-RestartSec=3s
+write_output_file() {
+  write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
+  chmod 0644 "${OUTPUT_FILE}"
+}
 ```
 
-  写入函数仍是 `lib/generators.sh::nginx_limits_dropin_text` / `write_nginx_limits_dropin`。
-  `Restart=` 变化同样只能靠 `daemon-reload + restart` 生效，现有 `NGINX_RESTART_REQUIRED` 逻辑已覆盖。
-  haproxy 不加 drop-in：Debian 单元自带 `Restart=always`（本机实测）。
+  阶段 2 会在这里追加 PNG 生成。
+- `vless_links_text`（464–478）**保留**：阶段 2 的二维码要用它（并会被改成 `node_link_entries | cut -f3`）。
 
-- 新增 `legacy_managed_paths()` 与 `remove_legacy_managed_paths()`（放在 runtime.sh）：
+### 4.4 `lib/ui/core.sh`
 
-```
-/usr/local/sbin/xtun-core-health.sh
-/etc/systemd/system/xtun-core-health.service
-/etc/systemd/system/xtun-core-health.timer
-/usr/local/etc/xray/health-state.env
-/usr/local/etc/xray/health-history.log
-/root/xtun-subscriptions
-/var/lib/cloudflare-warp/mdm.xml
-/usr/share/keyrings/cloudflare-warp-archive-keyring.gpg
-/etc/apt/sources.list.d/cloudflare-client.list
-/usr/local/sbin/xtun-warp-health.sh
-/etc/systemd/system/xtun-warp-health.service
-/etc/systemd/system/xtun-warp-health.timer
-```
+删除 `subscription_base_url`（554–556，重复定义）、`subscription_self_check_state`（558–588）、`subscription_self_check_text`（590–592）。
 
-  `remove_legacy_managed_paths` 先 `stop_and_disable_service_if_present` 三个 timer/service
-  （`xtun-core-health.timer`、`xtun-warp-health.timer`、`warp-svc.service`），再
-  `remove_managed_paths`，再 `systemctl daemon-reload`。存在任一路径时打印一行 `log_step`。
-  调用点：`apply_config_cmd`（`load_current_install_context` 之后）、`install_cmd`
-  （`write_install_managed_files` 之前）、`uninstall_cmd`。全部路径进 `sandbox_managed_paths`
-  （用一个 `LEGACY_PATH_ROOT` 前缀变量实现，测试里指向沙箱）。
+### 4.5 `lib/generators.sh`
 
-### 4.7 `lib/ui/health.sh` → 删除文件
+`nginx_server_config` 里删掉整个 `location ^~ /sub/ { … }` 块（565–574）及其前后多出的空行。
+`nginx_fallback_location_config` 与 `nginx_xhttp_location_config` 不动。
 
-- `show_dashboard_brief` / `show_dashboard` 移到新文件 `lib/ui/dashboard.sh`，删掉
-  「核心巡检 / 自恢复 / 稳定性」相关行；`lib/ui.sh` 改 source。
-- 删除 `health_*` 全部函数与 `stability_signal_text`。
+### 4.6 `lib/cli/core.sh`
 
-### 4.8 WARP 瘦身
+- `show_links`（23–50）删掉第 48 行 `render_subscription_qr`。
+- 删除 `render_subscription_qr`（239–256）、`change_sub_token_cmd`（258–277）。
+- `diagnose_cmd`：删掉第 171 行 `printf '%s\n' "订阅自检: $(subscription_self_check_text)"` 与第 196 行 `[[ "$(subscription_self_check_state)" != "fail" ]] || config_failures+=("订阅自检失败")`。
+- `dispatch_cli_command` 删掉 `change-sub-token)` 分支（594–596）。
+- `show_main_menu`（463–487）与 `run_menu_choice`（636–663）改为附录 A 的表：第 2 项文案改成「查看节点链接与二维码」，删掉第 16 项「轮换订阅地址」，原 17–20 顺次变为 16–19。
+- `uninstall_cmd` 的 `remove_managed_paths` 清单不必加 `/var/www/xtun-sub`：§4.7 的 `remove_legacy_managed_paths` 已经在第 441 行被调用。
 
-- `lib/install/warp.sh`：删除 `legacy_warp_paths`、`warp_legacy_team_detected`、`warp_teardown_legacy`；
-  `ensure_warp_credentials` 里去掉 `warp_legacy_team_detected` 分支。
-- `lib/change/workflow.sh::run_change_warp_action`：删掉两处 `warp_teardown_legacy`。
-- `lib/cli/install.sh::install_optional_components`：只剩 `install_network_optimization`。
-- `lib/install/input.sh`：删除 `show_warp_rules_list`、`warp_rules_editor_normalize`、
-  `warp_rules_editor_delete`、`prompt_warp_rules_editor`。
-- `lib/change/commands.sh::change_warp_rules_cmd`：交互终端且无修改参数时，改为
-  打印当前规则 + 一段用法提示后 `return 0`（不再进编辑器）。
+### 4.7 `lib/base/runtime.sh`
 
-### 4.9 证书模式合并
+- `legacy_managed_paths`（101–117）追加一行 `"${prefix}/var/www/xtun-sub"`（放在 `/root/xtun-subscriptions` 之后）。
+  三个调用点（`install` → `write_install_managed_files`、`apply-config`、`uninstall`）已经存在，不必新增。
+- `remove_legacy_managed_paths` 第 350 行的日志文案改为「旧版本遗留的巡检、WARP Team、本地订阅目录与 nginx 订阅目录文件已清理。」
+- `finalize_installation`（353–369）删掉第 366 行 `ensure_sub_token || return 1`；`apply_managed_files`（401–431）删掉第 428 行同名调用。
 
-- `lib/base/env.sh::normalize_cert_mode`：`3` 与全部 `cf-origin-ca*` 别名 → `existing`；
-  `4`/`acme*` → `acme-dns-cf`；`cert_mode_choice_value` 输出 1/2/3。
-- `lib/install/input.sh::show_cert_mode_menu`：三项（自签名 / 现有证书或 Cloudflare Origin CA / ACME DNS）。
-- `lib/install/certs.sh`：删除 `clear_cf_origin_ca_settings`、`prompt_cf_origin_ca_inputs`；
-  `prompt_cert_mode_inputs` 只剩三个分支；`stage_and_promote_tls_assets` 去掉 `cf-origin-ca` case。
-- `lib/change/requests.sh`：`init_change_cert_mode_request` / `parse_change_cert_mode_args` /
-  `apply_cert_mode_change_request` 去掉 `cf_zone_id` / `cf_api_token` / `cf_cert_validity`。
-- `lib/cli/install.sh::install_value_specs`：去掉 `--cf-zone-id` / `--cf-api-token` / `--cf-cert-validity`。
-- `lib/base/input.sh`：`option_secret_env_name` / `option_requires_indirect_value` 去掉 `--cf-api-token`；
-  `usage` 同步。
-- `lib/ui/core.sh::pretty_cert_mode` 去掉 `cf-origin-ca` 分支。
+### 4.8 `lib/base/input.sh::usage`
 
-### 4.10 `lib/change/*`
+- 第 29 行 `show-links [--qr]` 保留；第 176 行 `--qr` 的说明改为「额外输出每条分享链接的终端二维码（qrencode 由安装器安装）。」
+- `usage` 里本来就没有 `change-sub-token`，无需删。
 
-- 删除 `change_label_prefix_cmd`；`run_single_value_change_cmd` 去掉 `apply_mode` 参数与 `output` 分支
-  （签名变为 7 个固定参数），`begin_managed_output_change` 删除。
-- `handle_change_common_arg`、`require_option_value`、`assign_option_value` 不变。
+### 4.9 测试
 
-### 4.11 `lib/install.sh`
+删除用例（同时从 `tests/smoke.sh` 的 `cases` 数组第 248–251 行移除）：
+`run_subscription_web_files_case`、`run_change_sub_token_case`、`run_nginx_sub_location_case`、`run_mihomo_yaml_case`（`tests/cases_output.sh:631-819`）。
 
-- `install_draft_file_text` 去掉 `CF_ZONE_ID/CF_API_TOKEN/CF_CERT_VALIDITY`。
-- `ensure_managed_permissions` 去掉 `HEALTH_*` 两段。
-- `resolve_install_input_sources` 去掉 `CF_API_TOKEN`。
+改用例：
 
-### 4.12 测试
+- `tests/cases_output.sh::run_output_helper_case`：第 189 行的缓存表达式期望值去掉 `/sub/` 子句；顺手删掉第 81–86 行两个「Clash Meta / sing-box 片段不存在」的死断言。
+- `tests/cases_nginx_net.sh::run_ipv6_links_case`：删掉第 226–230 行与第 235 行的 mihomo 断言；第 22、72、290 行的 `SUB_WEB_ROOT="/var/www/xtun-sub"` 赋值删掉。
+- `tests/cases_state_runtime.sh::run_runtime_context_reset_case`：删掉第 225 行 `SUB_TOKEN="stale-token"` 与第 232 行 `[[ -z "${SUB_TOKEN}" ]]`。
+- `tests/cases_state_runtime.sh::errexit_guarded_step_names`（451–470）：删掉 `write_core_health_monitor write_core_health_helper write_core_health_service write_core_health_timer`、`write_subscription_files`、`select_output_client_if_requested`。
+- `tests/cases_cli_flow.sh::run_dispatch_case`：删掉 `change_sub_token_cmd` 桩（99–101）与断言（136–137）；`run_menu_choice` 的编号按附录 A 改：`20`→`19`（uninstall）、`17`→`16`（apply-net-opt）、`18`→`17`（apply-config），并补一条 `run_menu_choice 18` → `repair-perms`（要像其它命令一样先给 `repair_perms_cmd` 加记录桩）。
+- `tests/common.sh`：`sandbox_managed_paths` 第 100 行 `SUB_WEB_ROOT=` 改为 `QR_OUTPUT_DIR="${root}/root/xtun-qr"`；`prepare_workspace` 删掉第 120–126 行七个 `SUBSCRIPTION_*` 死变量。
+- `tests/smoke.sh::REAL_MANAGED_CANARY`：`/var/www/xtun-sub` 改为 `/root/xtun-qr`（本机升级后才会出现，出现之前 canary 对它是空操作，这是预期行为）。
 
-删除用例（同时从 `tests/smoke.sh` 的 `cases` 数组移除）：
-`run_multi_client_config_output_case`、`run_node_client_state_case`、`run_client_cli_case`、
-`run_show_links_stale_output_case`、`run_health_history_count_without_python_case`、
-`run_warp_rules_editor_case`、`run_warp_legacy_teardown_case`、`run_subscription_qr_success_case`。
+新增用例（放 `tests/cases_output.sh` 或 `tests/cases_state_runtime.sh`，并登记进 `cases` 数组）：
 
-改用例：`run_dispatch_case`（菜单编号）、`run_usage_case`、`run_state_context_case`、
-`run_state_version_case`（v1→v2 迁移：cf-origin-ca 变 existing、NODE_CLIENTS_TEXT 触发 warn）、
-`run_cert_mode_input_case`、`run_nginx_limits_dropin_case`（断言含 `Restart=on-failure`）、
-`run_diagnose_command_case`。
+- `run_nginx_no_sub_location_case`：`write_nginx_config` 后 `assert_absent '/sub/'`、`assert_absent 'xtun-sub'`。
+- `run_state_sub_token_dropped_case`：写一个含 `SUB_TOKEN='abc…'`（32 位 hex）与其它合法键的 v2 状态文件，`load_existing_state` 不报错、不 warn；`write_state_file` 之后 `assert_absent 'SUB_TOKEN' "${STATE_FILE}"`。
+- `tests/cases_cli_core.sh` 现有的遗留清理用例（第 1555–1580 行，放 `/root/xtun-subscriptions` 的那一个）追加：沙箱里放 `var/www/xtun-sub/<token>/vless.txt`，`remove_legacy_managed_paths` 后目录消失。
 
-新增用例：`run_legacy_cleanup_case`（沙箱里放 5 个遗留文件，调 `remove_legacy_managed_paths`，全部消失且 `stop_and_disable_service_if_present` 被调用）。
+### 4.10 README / ARCHITECTURE（本阶段只删，重写留到阶段 3）
 
-`tests/smoke.sh::REAL_MANAGED_CANARY`：去掉 `xtun-core-health.sh`、`/root/xtun-subscriptions`。
+- README：删「### 订阅地址」（251–267）、「### mihomo 导入」（292–298）；命令表删 `change-sub-token` 行（200）；第 276 行去掉「，mihomo yaml 同步追加」；第 474 行「不会出现在输出文件或订阅里」改「不会出现在输出文件里」。
+- `docs/ARCHITECTURE.md`：删「## 订阅为什么要走 nginx 托管」（54–56）。阶段 3 会在同一位置写决策记录。
 
-### 4.13 README
-
-删掉「多客户端」「Cloudflare Origin CA」模式行、「WARP 从旧版本升级」段、
-「订阅文件 / 二维码 PNG」路径行、菜单 17/18 说明；命令表按附录 A 更新。
-
-### 4.14 验收
+### 4.11 验收
 
 - `shellcheck` 零发现；`smoke ok`。
-- `grep -rn 'NODE_CLIENTS_TEXT\|CORE_HEALTH\|cf-origin-ca\|CF_ZONE_ID\|add-client\|list-clients' lib xtun.sh`
-  只剩迁移函数与 `normalize_cert_mode` 别名两处。
-- 用 v1 状态文件（含 `CERT_MODE=cf-origin-ca`、`NODE_CLIENTS_TEXT='phone|u1|u2'`）跑
-  `load_existing_state`：CERT_MODE 变 existing、出现 warn、写回后 `STATE_VERSION=2` 且不含 legacy 键。
-- 单客户端安装态生成的 `config.json` 与 0.11.14 逐字节一致（除 clients 数组顺序）。
+- `grep -rn 'SUB_TOKEN\|SUB_WEB_ROOT\|mihomo\|/sub/\|订阅\|subscription' xtun.sh lib tests` 只剩：`legacy_managed_paths` 里的 `/root/xtun-subscriptions` 与 `/var/www/xtun-sub` 两行、`remove_legacy_managed_paths` 的一句日志、以及测试里对应的遗留清理 / `SUB_TOKEN` 丢弃断言。
+- 用 1.0.0 的状态文件（含 `SUB_TOKEN`）跑 `load_existing_state` 无告警，写回后不含该键。
+- 默认安装态生成的 `config.json`、`haproxy.cfg` 与 1.0.0 逐字节一致；`xtun.conf` 只少了 `/sub/` 那一个 location。
+- 提交信息建议：`refactor: 删除订阅托管与 mihomo 输出——去 /sub/ location、SUB_TOKEN、change-sub-token、订阅自检；/var/www/xtun-sub 进遗留清理（顺手修 uninstall 漏删）`。
 
 ---
 
-## 5. 阶段 2：Reality 加固：目标域名预检 `check-sni` 与防跑流量（0.12.0 第二部分）
+## 5. 阶段 2：二维码 PNG、H3 节点进输出文件、qrencode 硬依赖（1.1.0 第二部分）
 
-### 5.1 用户可见行为
+### 5.1 依赖
 
-```bash
-xtun check-sni www.stanford.edu                 # 独立检查，不需要 root，不加锁
-xtun check-sni www.stanford.edu --target 1.2.3.4:443 --timeout 8
-xtun install ... --reality-sni www.stanford.edu # 预检自动跑；有 FAIL 就停
-xtun install ... --skip-sni-check               # 跳过，但输出里留 warn
-xtun change-sni --reality-sni www.example.com   # 同样先预检
-```
-
-输出（示例，见附录 G）：一行一个检查项，`PASS` / `WARN` / `FAIL` 三级，末尾一行结论。
-退出码：`0` 无 FAIL；`2` 有 FAIL；`1` 参数错误。
-
-### 5.2 检查项定义
-
-所有探测从 VPS 本机发起。`target` 默认 `REALITY_SNI:443`，`--target` 可覆盖
-（对应 `REALITY_TARGET`）。`servername` 永远是 SNI 域名。超时默认 10s，`timeout` 命令包裹。
-
-| # | 名称 | 方法 | PASS | WARN | FAIL |
-| --- | --- | --- | --- | --- | --- |
-| 1 | 域名格式 | `is_valid_hostname` | 合法 | — | 非法 |
-| 2 | DNS 解析 | `getent ahostsv4 <target_host>` | ≥1 个公网 IPv4 | 只解析出 IPv6 | 无记录；或解析到私网；或解析到 `SERVER_IP` 本机（会形成回环） |
-| 3 | TLS 1.3 | `openssl s_client -connect target -servername sni -tls1_3 -groups X25519 -alpn h2 </dev/null` | 输出含 `Protocol  : TLSv1.3` | — | 连接失败或非 1.3 |
-| 4 | X25519 | 同一份输出 | 含 `Peer Temp Key: X25519` 或 `Server Temp Key: X25519` | — | 否 |
-| 5 | HTTP/2 ALPN | 同一份输出 | 含 `ALPN protocol: h2` | — | 否（Reality + Vision 要求目标支持 h2） |
-| 6 | 证书链 | 同一份输出 | `Verify return code: 0 (ok)` | — | 其它 |
-| 7 | 证书 SAN | `openssl x509 -noout -ext subjectAltName` | 精确匹配或通配符匹配 SNI | — | 不含 |
-| 8 | 证书到期 | `-enddate` | ≥ 30 天 | 14–30 天 | < 14 天 |
-| 9 | 目标是否在 CDN 后 | 证书 issuer / `server:` 头含 `cloudflare` 等 | 否 | 是（偷到的是 CF 边缘握手，可用但不理想） | — |
-| 10 | HTTP 跳转 | `curl -sS -o /dev/null --max-time T --http2 -A "<Chrome UA>" -w '%{http_code} %{http_version} %{redirect_url} %{time_appconnect}' https://sni/`（target≠sni 时加 `--resolve sni:443:targetIP`） | 2xx，redirect 为空 | 3xx 且 Location 主机 == sni；或 403/429（反爬）；或 5xx | 3xx 且 Location 主机 ≠ sni（例：`stanford.edu` → `www.stanford.edu`，应改用 www）；或 `000` |
-| 11 | 实际 HTTP 版本 | 同上 `%{http_version}` | `2` | 其它 | — |
-| 12 | 握手耗时 | 同上 `%{time_appconnect}` | ≤ 0.30s | 0.30–1.00s | > 1.00s（每条新连接都要先把这个 RTT 付给远端） |
-
-实测参考（本机 → `www.stanford.edu`）：OpenSSL 3.5 打印 `Peer Temp Key: X25519, 253 bits`
-和 `ALPN protocol: h2`；curl 默认 UA 得 403、Chrome UA 得 200；`https://stanford.edu/` 301 到
-`www.stanford.edu`。判定规则必须覆盖这三种真实情况。
-
-### 5.3 代码结构（新文件 `lib/cli/sni.sh`，由 `lib/cli.sh` source）
-
-探测层（有网络副作用，测试中被覆盖）：
+- `lib/install.sh::install_packages`（第 12 行）的 `apt-get install -y …` 列表加 `qrencode`。
+- `lib/install.sh::managed_package_names`（24–31）加 `"qrencode"`。
+- 新函数（`lib/ui/core.sh`，放在 `quic_port_listening` 附近）：
 
 ```bash
-sni_probe_dns HOST                  # stdout: 每行一个 IPv4；无则空
-sni_probe_tls TARGET SNI TIMEOUT    # stdout: s_client 完整输出（stderr 合并）
-sni_probe_cert TARGET SNI TIMEOUT   # stdout: "SAN=DNS:a,DNS:b\nNOTAFTER=<date>\nISSUER=<line>"
-sni_probe_http SNI TARGET_IP TIMEOUT # stdout: "<code> <httpver> <redirect_url> <time_appconnect> <server_header>"
-```
-
-判定层（纯函数，输入字符串，输出 `LEVEL|名称|说明` 行）：
-
-```bash
-sni_judge_hostname SNI
-sni_judge_dns SNI TARGET_HOST "<dns 输出>" SERVER_IP
-sni_judge_tls "<s_client 输出>"          # 一次吐 3/4/5/6 四行
-sni_judge_cert SNI "<cert 输出>" NOW_EPOCH # 7/8/9 三行
-sni_judge_http SNI "<http 输出>"          # 10/11/12 三行
-```
-
-聚合：
-
-```bash
-run_sni_checks SNI TARGET SERVER_IP TIMEOUT   # 打印表格；有 FAIL 返回 2，否则 0
-sni_check_cmd "$@"                            # CLI 入口，解析 --target/--timeout/--server-ip
-preflight_check_reality_sni                   # 供 install / change-sni 调用（§5.4）
-```
-
-`run_sni_checks` 的表格用 `printf '%-4s %-14s %s\n'`，颜色沿用 `style_text`；
-非 tty 不着色（`C_*` 已按 `-t 1` 处理）。
-
-### 5.4 集成点
-
-- `lib/install/input.sh::run_install_preflight_checks`：在 443 端口检查之后调用
-  `preflight_check_reality_sni`。行为：
-  - `SKIP_SNI_CHECK=1`（新 flag `--skip-sni-check`，进 `install_flag_specs`；不持久化）：
-    只 `warn "已按要求跳过 Reality 目标域名预检"`，返回 0。
-  - 结果无 FAIL：返回 0。
-  - 有 FAIL 且 `NON_INTERACTIVE=1`：`die "预检失败：Reality 目标域名不满足要求；确认无误可加 --skip-sni-check"`。
-  - 有 FAIL 且交互：`read -r -p "重新输入 SNI (r) / 忽略继续 (i) / 退出 (q) [r]: "`；
-    `r` 重新 `prompt_with_default REALITY_SNI` 与 `REALITY_TARGET` 后重跑（最多 3 轮）；`i` warn 后继续；`q` die。
-- `lib/change/commands.sh::change_sni_cmd`：`run_single_value_change_cmd` 的 `post_update_fn`
-  从 `ensure_reality_sni_format` 换成新函数 `ensure_reality_sni_ready`：先格式校验，再
-  `REALITY_TARGET="$(default_reality_target_for_sni "${REALITY_SNI}")"`（改 SNI 时目标跟着换，
-  这是现状里的一个隐性缺陷：0.11 只改 SNI 不改 target），再 `preflight_check_reality_sni`。
-  `change-sni` 同样接受 `--skip-sni-check`。
-- 菜单新增「检查 REALITY SNI 域名」，运行 `check-sni`，域名默认取当前 `REALITY_SNI`。
-- `usage` 增补命令与参数说明。
-
-### 5.5 测试（`tests/cases_sni.sh`，在 `tests/smoke.sh` 加 source 与用例名）
-
-- `run_sni_judge_tls_case`：三段夹具文本（正常 / 无 h2 / `Protocol  : TLSv1.2`），断言三行判定。
-- `run_sni_judge_http_case`：`200 2  0.02` → 全 PASS；`301 2 https://www.x.com/ 0.02`（sni=x.com）→ FAIL；
-  `301 2 https://x.com/path 0.02` → WARN；`403 2  0.02` → WARN；`000 0  0` → FAIL；`200 2  1.4` → 耗时 FAIL。
-- `run_sni_judge_cert_case`：SAN 通配符匹配、到期 10 天 → FAIL、issuer 含 Cloudflare → WARN。
-- `run_sni_judge_dns_case`：解析到 `SERVER_IP` → FAIL；私网 → FAIL；空 → FAIL。
-- `run_sni_check_cmd_case`：覆盖 4 个 `sni_probe_*` 为固定输出，`run_sni_checks` 退出码 0/2 正确；
-  `sni_check_cmd --timeout abc` 退出码 1。
-- `run_install_preflight_sni_case`：`NON_INTERACTIVE=1` + 覆盖 `run_sni_checks` 返回 2 → `preflight_check_reality_sni`
-  以 `die` 结束（用 `assert_false` 包在子 shell）；加 `SKIP_SNI_CHECK=1` → 返回 0 且 stderr 含「跳过」。
-- 现有 `run_install_flow_case` 需要覆盖 `preflight_check_reality_sni() { :; }`。
-
-### 5.6 README
-
-新增「Reality 目标域名要求与预检」一节：列 12 项检查、给 `stanford.edu` 对 `www.stanford.edu`
-的反例、说明 `--skip-sni-check`。
-
-### 5.7 防跑流量：官方 dokodemo-door 模式
-
-**问题**（Xray 官方 REALITY 文档原文）：「Xray 对于鉴权失败（非合法 REALITY 请求）的流量，会直接转发至 target。
-如果 target 网站的 IP 地址特殊（如使用了 Cloudflare CDN 的网站）则相当于你的服务器充当了 Cloudflare 的端口转发，
-可能造成被扫描后偷跑流量的情况。为了杜绝这种情况，可以考虑前置 Nginx 等方法过滤掉不符合要求的 SNI。
-或者也可以考虑配置 `limitFallbackUpload` 和 `limitFallbackDownload`，限制其速率。」
-
-xtun 现状：haproxy 的 `default_backend be_reality_vision` 把所有非 CDN 域名的 SNI（包括无 SNI、随机 SNI、扫描器）
-都送进 Reality 入站，鉴权失败后原样转发到 `REALITY_TARGET`。目标站是普通站点时浪费的是带宽；目标站在 CDN 后时
-就是官方说的端口转发。
-
-**采用方案**：Xray-examples 仓库 `VLESS-TCP-REALITY (without being stolen)` 的官方模板，不依赖 haproxy 改动：
-
-1. Reality 入站的 `realitySettings.target` 固定为 `127.0.0.1:${REALITY_FALLBACK_PORT}`
-   （新全局常量 `REALITY_FALLBACK_PORT="2444"`，写进 `xtun.sh`；与 2443 / 8001 / 8443 不冲突）。
-   `serverNames` 照常填 `REALITY_SNI`。
-2. 新增 `dokodemo-door` 入站（`lib/generators.sh` 新函数 `xray_reality_fallback_inbound_json`）：
-
-```json
-{
-  "tag": "reality-fallback",
-  "listen": "127.0.0.1",
-  "port": 2444,
-  "protocol": "dokodemo-door",
-  "settings": {
-    "address": "<REALITY_TARGET 的 host>",
-    "port": <REALITY_TARGET 的 port>,
-    "network": "tcp"
-  },
-  "sniffing": {
-    "enabled": true,
-    "destOverride": ["tls"],
-    "routeOnly": true
-  }
+have_qrencode() {
+  command -v qrencode >/dev/null 2>&1
 }
 ```
 
-   `sniffing` 是必需的（官方注释「这里的 sniffing 不是多余的，别乱动」）：路由要靠嗅探出的 SNI 做域名匹配；
-   `routeOnly: true` 保证实际连接目标仍是 `settings.address`，嗅探结果只参与路由。
+- `lib/cli/core.sh::render_output_file_qr`（8–21）第 9 行改用 `have_qrencode`；第 10 行的告警文案改为「系统中未找到 qrencode，无法输出二维码；apt-get install -y qrencode 后重试。」
+  顺手在每个二维码前打出节点名：`printf '%s\n' "二维码 (${link##*#}):"`（链接的 `#` 之后就是节点名）。
 
-3. 路由规则（`xray_routing_rules_json`）**最前面**两条，先于 §6.1 的 private / cn 拦截：
+### 5.2 链接清单的单一来源：`node_link_entries`
 
-```json
-{ "type": "field", "inboundTag": ["reality-fallback"], "domain": ["full:<REALITY_SNI>"], "outboundTag": "direct" },
-{ "type": "field", "inboundTag": ["reality-fallback"], "outboundTag": "block" }
+`lib/ui/output.sh` 新增（放在 `build_link_context` 之后，替代原 `vless_links_text` 的主体）：
+
+```bash
+# 每行：位次<TAB>节点名<TAB>链接。位次固定：1–5 默认，6/7 IPv6，8/9 H3，缺席跳号，
+# 这样 PNG 文件名与输出文件里的「节点 N」在任何机器上都对得上。
+node_link_entries() {
+  build_link_context
+  printf '%s\t%s\t%s\n' \
+    1 "$(prefixed_node_label "REALITY")" "${REALITY_URI}" \
+    2 "$(prefixed_node_label "XHTTP-REALITY")" "${XHTTP_REALITY_URI}" \
+    3 "$(prefixed_node_label "XHTTP-CDN")" "${XHTTP_URI}" \
+    4 "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")" "${XHTTP_SPLIT_URI}" \
+    5 "$(prefixed_node_label "XHTTP-SPLIT-REALITY-CDN")" "${XHTTP_REVERSE_SPLIT_URI}"
+  if [[ -n "${SERVER_IP6:-}" ]]; then
+    printf '%s\t%s\t%s\n' \
+      6 "$(prefixed_node_label "REALITY-V6")" "${REALITY_V6_URI}" \
+      7 "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY-V6")" "${XHTTP_SPLIT_CDN_REALITY_V6_URI}"
+  fi
+  if h3_enabled; then
+    printf '%s\t%s\t%s\n' \
+      8 "$(prefixed_node_label "XHTTP-TLS-H3")" "${XHTTP_H3_URI}" \
+      9 "$(prefixed_node_label "XHTTP-SPLIT-CDN-H3")" "${XHTTP_SPLIT_CDN_H3_URI}"
+  fi
+}
+
+vless_links_text() {
+  node_link_entries | cut -f3
+}
 ```
 
-   官方模板用的是不带前缀的 `"speed.cloudflare.com"`（子域匹配）；这里用 `full:` 精确匹配，
-   因为 `serverNames` 本来就只有一个精确值。若将来 `serverNames` 支持多值，这里同步展开成多条 `full:`。
+`build_link_context` 里已经用 `prefixed_node_label` 算过一遍标签；实施者可以把那些标签提升为 `LINK_*_LABEL` 全局变量给两边共用，也可以像上面这样再算一次（纯字符串函数，无副作用）。二选一，不要各写一套字面量。
 
-4. `xray_inbounds_json` 顺序：`[reality_inbound, reality_fallback_inbound, xhttp_inbound]`。
-   Reality 入站的 VLESS `fallbacks`（转 8001 给 XHTTP-over-Reality）不受影响：那是 REALITY 鉴权通过之后的事。
+### 5.3 PNG 生成：`write_link_qr_pngs`
 
-5. 状态与回填：
-   - `REALITY_TARGET` 状态键语义不变，仍是「真实目标 host:port」，只是消费者从 reality 入站换成了 dokodemo 入站。
-   - `lib/state.sh::load_config_runtime_context` 读 `REALITY_TARGET` 改为：
-     `.inbounds[] | select(.tag=="reality-fallback") | "\(.settings.address):\(.settings.port)"`；
-     读不到（v1 生成的 config.json）再退回 `.realitySettings.target`，且该值等于 `127.0.0.1:2444` 时视为无效。
-   - `require_current_install_context` 不变。
-   - 新增 `reality_target_host()` / `reality_target_port()` 两个拆分函数（`lib/install/input.sh`，
-     复用 `validate_hostport_value` 的拆分逻辑），生成器与 `check-sni` 共用。
+`lib/ui/output.sh` 新增，并由 `write_output_file` 在写完 `OUTPUT_FILE` 之后调用（**不加守卫**，见 §2）：
 
-6. `diagnose` / `status` 增加「监听 2444」；`REAL_MANAGED_CANARY` 无需变化。
+```bash
+# 二维码 PNG 是输出文件的派生物：任何一步失败只 warn，不让 install / apply-config 回滚。
+# 目录整体重建：链接变了（换 UUID / SNI / 路径 / 域名、IPv6 或 H3 开关变化）旧图必须消失。
+write_link_qr_pngs() {
+  local idx="" label="" uri="" target="" tmp_file=""
 
-7. `check-sni`（§5.2）第 2 项 DNS 检查中「解析到 SERVER_IP 形成回环」的判定保留：dokodemo 的 address
-   若指回本机，回落流量会打到 haproxy 再进 Reality，形成环。
+  if ! have_qrencode; then
+    warn "未安装 qrencode，跳过二维码 PNG；apt-get install -y qrencode 后运行 xtun apply-config 即可补齐。"
+    return 0
+  fi
+  if ! backup_path "${QR_OUTPUT_DIR}"; then
+    warn "二维码目录备份失败，本次跳过 PNG 生成：${QR_OUTPUT_DIR}"
+    return 0
+  fi
+  rm -rf "${QR_OUTPUT_DIR}"
+  if ! install -d -m 0700 "${QR_OUTPUT_DIR}"; then
+    warn "无法创建二维码目录，已跳过：${QR_OUTPUT_DIR}"
+    return 0
+  fi
 
-8. 不做的事及理由：
-   - 不在 haproxy 层 `tcp-request content reject` 非法 SNI。TCP 层直接 RST 与「真实站点收到陌生 SNI 仍完成握手」
-     的外观不同，官方模板也没有这么做；dokodemo 层的 blackhole 已经足够。
-   - 不配置 `limitFallbackUpload/Download`。官方原文：「回落限速是一种特征，不建议启用，如果您是面板/一键脚本开发者，
-     务必让这些参数随机化。」xtun 不引入这个特征。
+  while IFS=$'\t' read -r idx label uri; do
+    target="${QR_OUTPUT_DIR}/$(printf '%02d-%s.png' "${idx}" "${label}")"
+    tmp_file="$(mktemp "${QR_OUTPUT_DIR}/.qr.XXXXXX")"
+    if qrencode -o "${tmp_file}" -l L -s 6 -m 2 "${uri}" 2>/dev/null; then
+      mv -f "${tmp_file}" "${target}"
+      chmod 0600 "${target}"
+    else
+      rm -f "${tmp_file}"
+      warn "二维码 PNG 生成失败，已跳过：${label}"
+    fi
+  done < <(node_link_entries)
+}
 
-**测试**：`run_reality_fallback_inbound_case`（新增到 `tests/cases_output.sh` 或 `cases_state_runtime.sh`）：
+write_output_file() {
+  write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
+  chmod 0644 "${OUTPUT_FILE}"
+  write_link_qr_pngs
+}
+```
 
-- 生成的 `config.json`：`.inbounds[1].protocol == "dokodemo-door"`、`.settings.address/port` 等于拆分后的 `REALITY_TARGET`、
-  `.sniffing.destOverride == ["tls"]`、`.sniffing.routeOnly == true`；
-  `.inbounds[0].streamSettings.realitySettings.target == "127.0.0.1:2444"`；
-  `.routing.rules[0]` 为 `inboundTag=reality-fallback + domain=full:<sni> → direct`，`.routing.rules[1]` 为 `→ block`。
-- `xray run -test` 通过（并入现有 `run_warp_config_json_valid_case` 的断言）。
-- `load_config_runtime_context` 从新版 config 读回 `REALITY_TARGET`；从 v1 形状的 config（target 为远端 host:port）也能读回。
-- `REALITY_TARGET="203.0.113.10:8443"`（IP 目标、非 443 端口）时 dokodemo 的 address/port 正确。
+参数说明：`-l L` 是容错等级 L，字节模式容量 2953 字节，附录 D 的最长链接 1713 字符在版本 30 就装得下；
+`Q` / `H` 等级容量只有 1663 / 1273，装不下全开时的分离节点，**不得**用。`-s 6` 每个模块 6 像素，`-m 2` 两个模块的静区，
+最大的图约 850×850 像素（(137 + 4) × 6），手机隔着显示器扫没有问题。
 
-**README**：「架构说明」的请求流图补一层：
+### 5.4 输出文件：H3 块与二维码段
+
+`lib/ui/output.sh`：
+
+- 新增 `output_h3_blocks`，格式对齐 `output_ipv6_blocks`（953–986），`XHTTP_H3_URI` 为空时输出空（`build_link_context` 在 H3 不可用时把它置空，用它判断比再调一次 `h3_enabled` 更一致）：
 
 ```
-haproxy :443 --其它 SNI--> xray Reality 127.0.0.1:2443
-                             |-- 鉴权通过 --> VLESS / fallbacks 8001
-                             `-- 鉴权失败 --> dokodemo 127.0.0.1:2444 --SNI==REALITY_SNI--> 真实目标站
-                                                                      `--其它 SNI--> blackhole
+## 节点 8
+- 类型: VLESS + XHTTP + TLS（H3 直连，UDP 443）
+- 地址: ${SERVER_IP}
+- 端口: 443（UDP / QUIC，防火墙需放行）
+- UUID: ${XHTTP_UUID}
+- SNI: ${XHTTP_DOMAIN}
+- 主机名: ${XHTTP_DOMAIN}
+- ALPN: h3
+- 指纹: $(effective_fingerprint)
+$(output_xhttp_shared_details)
+
+链接:
+${XHTTP_H3_URI}
+
+## 节点 9
+- 类型: 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + TLS H3 直连
+- 上行地址: ${XHTTP_DOMAIN}（CDN+TLS）
+- 下行地址: ${SERVER_IP}（H3，UDP 443）
+- UUID: ${XHTTP_UUID}
+$(output_xhttp_shared_details)
+
+链接:
+${XHTTP_SPLIT_CDN_H3_URI}
 ```
+
+- 新增 `output_qr_block`：
+
+```
+## 二维码
+- 终端扫码: xtun show-links --qr
+- PNG 目录: ${QR_OUTPUT_DIR}（每条节点一张，文件名「位次-节点名.png」，随链接一起重新生成）
+- 取回本地: scp root@${SERVER_IP}:${QR_OUTPUT_DIR}/'*.png' .
+```
+
+- `output_file_text`（1079–1103）在 `$(output_ipv6_blocks)` 之后依次加 `$(output_h3_blocks)`、空行、`$(output_qr_block)`；
+  `output_runtime_summary_block` 的「## 本地文件」段加一行 `- 二维码目录: ${QR_OUTPUT_DIR}`。
+- 输出文件里的 `vless://` 行现在包含 H3 两条，`show-links --qr` 自然也会画它们，不需要额外改动。
+
+### 5.5 卸载、回滚、面板
+
+- `lib/cli/core.sh::uninstall_cmd` 的 `remove_managed_paths` 清单在 `"${OUTPUT_FILE}"` 之后加 `"${QR_OUTPUT_DIR}"`。
+- `lib/base/runtime.sh::rollback_xray_only_managed_state`（210–220）的 `paths` 加 `"${QR_OUTPUT_DIR}"`（§5.3 先 `backup_path` 就是为了这里能还原）。
+- `lib/ui/dashboard.sh::show_dashboard` 第 82 行「链接文件」下加 `panel_row "二维码目录" "${QR_OUTPUT_DIR}"`。
+
+### 5.6 测试
+
+`tests/common.sh::sandbox_managed_paths` 与 `REAL_MANAGED_CANARY` 在阶段 1 已改。新增用例（`tests/cases_output.sh`，登记进 `cases`）：
+
+- `run_node_link_entries_case`：默认态 5 行且位次为 `1 2 3 4 5`；`SERVER_IP6` 非空 7 行含 `6`、`7`；覆盖 `h3_enabled() { return 0; }` 后含 `8`、`9`；两者都开 9 行；每行三列（`awk -F'\t' 'NF!=3{exit 1}'`）；`node_link_entries | cut -f3` 与 `vless_links_text` 逐字节相同；第 2 列等于第 3 列 `#` 之后的片段。
+- `run_link_qr_png_case`：
+  - 覆盖 `have_qrencode() { return 0; }` 与
+    `qrencode() { local out=""; while [[ $# -gt 0 ]]; do case "${1}" in -o) out="${2}"; shift ;; esac; shift; done; printf 'PNG' > "${out}"; }`；
+    `write_output_file` 后 `QR_OUTPUT_DIR` 模式 `700`，文件数等于 `node_link_entries` 行数，存在 `01-HKG-REALITY.png` 与 `05-HKG-XHTTP-SPLIT-REALITY-CDN.png`，文件模式 `600`；
+  - 目录里预先放一个 `stale.png`，再次 `write_output_file` 后它消失；
+  - 覆盖 `have_qrencode() { return 1; }`：`write_output_file` 返回 0、`OUTPUT_FILE` 照常写出、目录不被创建、stderr 含 `qrencode`；
+  - 覆盖 `qrencode() { return 1; }`：返回 0，目录存在但为空，stderr 含「生成失败」；
+  - 末尾 `load_functions`。
+- `run_h3_output_blocks_case`：覆盖 `nginx_v3_capable() { return 0; }`、`h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }`、`CERT_MODE="existing"`，`write_output_file` 后 `assert_contains '## 节点 8'`、`'## 节点 9'`、`'alpn=h3'`；`h3_enabled() { return 1; }` 时 `assert_absent '## 节点 8'`。
+- `run_output_qr_block_case`：输出文件含 `## 二维码`、`${QR_OUTPUT_DIR}`、`show-links --qr`。
+- `run_render_output_file_qr_case`（`tests/cases_cli_core.sh`）：输出文件放两条 `vless://…#HKG-A`、`vless://…#HKG-B`，覆盖 `have_qrencode` 与 `qrencode` 为记录参数的桩，`render_output_file_qr` 输出含 `二维码 (HKG-A):`、`二维码 (HKG-B):`，桩被调用两次。
+- 现有 `run_uninstall_*` / `run_managed_rollback_case` 若断言了路径清单，补上 `QR_OUTPUT_DIR`。
+
+### 5.7 CI（`.github/workflows/ci.yml`）
+
+- `install-smoke` 第 91 行的 `apt-get install … qrencode procps` 去掉 `qrencode`——让真机冒烟证明 `install_packages` 自己装上了它。
+- 第 103 行 `bash xtun.sh diagnose` 之后追加：
+
+```bash
+            test -d /root/xtun-qr
+            test "$(ls /root/xtun-qr/*.png | wc -l)" -ge 5
+            test ! -e /var/www/xtun-sub
+            ! grep -q '/sub/' /etc/nginx/conf.d/xtun.conf
+            xtun show-links --qr | grep -q '二维码 ('
+            grep -q '^## 二维码' /root/xtun-output.md
+```
+
+- Xray 的钉版本保持 `v26.3.27`：2026-09-09 核对 GitHub Releases，`v26.4.13` 起到 `v26.9.9` 全部是 pre-release，`v26.3.27` 仍是唯一的正式版，
+  也就是 `xtun install` / `upgrade` 通过 `releases/latest/download` 实际拿到的版本。不要为了 skill 里的 `v26.9.9` 去升它。
+
+### 5.8 验收
+
+- `shellcheck` 零发现；`smoke ok`。
+- 在沙箱里（`bash -c '. tests/common.sh; load_functions; stub_side_effects; …'`）对一组默认参数调 `write_output_file`：输出文件含 `## 节点 1` … `## 节点 5`、`## 二维码`；开 `SERVER_IP6` 与 H3 后含 `## 节点 6` … `## 节点 9`。
+- 提交信息建议：`feat: 节点二维码 PNG（/root/xtun-qr，随链接重建）+ H3 两条节点补进输出文件 + qrencode 进安装依赖`。
 
 ---
 
-## 6. 阶段 3：路由卫生、订阅托管、mihomo 输出（0.12.0 第三部分）
+## 6. 阶段 3：文档与版本
 
-### 6.1 路由卫生
+### 6.1 README
 
-`lib/generators.sh::xray_routing_rules_json` 改为无条件输出前置规则，再拼 WARP 规则
-（§5.7 的两条 dokodemo 规则永远排在最前）：
+按下表逐项改（行号按基线）：
 
-```json
-[
-  // §5.7 的两条 reality-fallback 规则在此之前
-  { "type": "field", "outboundTag": "block", "ip": ["geoip:private"] },
-  { "type": "field", "outboundTag": "block", "domain": ["geosite:private"] },
-  // ROUTE_BLOCK_CN=yes 时追加：
-  { "type": "field", "outboundTag": "block", "ip": ["geoip:cn"] },
-  { "type": "field", "outboundTag": "block", "domain": ["geosite:cn"] },
-  // ENABLE_WARP=yes 时追加现有 direct / WARP 两条
-]
-```
+| 位置 | 改动 |
+| --- | --- |
+| 第 5 行 | `当前版本：1.1.0` |
+| 「命令表」200–201 | 删 `change-sub-token` 行；`show-links [--qr]` 说明改「查看节点链接；`--qr` 追加每条链接的终端二维码」 |
+| 「安装会写入哪些文件」209–227 | 加一行 `/root/xtun-qr/` — 「节点二维码 PNG（每条节点一张，随链接重建）」 |
+| 「订阅地址」251–267、「mihomo 导入」292–298 | 阶段 1 已删；确认无残留 |
+| 「查看和导出节点」317–324 | 重写：链接文件、`show-links --qr` 终端扫码（提示分离节点链接很长，建议用 PNG）、`/root/xtun-qr/` 与 `scp` 取回命令、qrencode 由安装器安装、已装节点缺它时 `apt-get install -y qrencode && xtun apply-config` |
+| 「IPv6 双栈」276 | 阶段 1 已去 mihomo 字样 |
+| 「XHTTP H3 直连下行」290 | 末尾补一句「这两条链接对应输出文件的节点 8 / 9」 |
+| 「一次性诊断」306–315 | 列表与实际输出对齐：现有列表少了 2444 端口、路由拦截、H3 / QUIC 与 IPv6 监听；照改完后的 `diagnose_cmd` 逐行写 |
+| 「nginx 的连接与 fd 限额」421–437 | 这段还在说「`worker_connections` 只能写在 nginx.conf，xtun 够不着它，低于 4096 时提示手工调整」，与 703–711「nginx 主配置接管」矛盾。改成：drop-in 抬 fd 限额；`worker_connections` 由接管的主配置写 65535，未接管的旧节点 `diagnose` 才提示 `apply-config --manage-nginx-main` |
+| WARP「开关」512–516 | 「第一次执行 `change-warp` 会顺手停用并清理 warp-svc …」已不成立（`run_change_warp_action` 没有这个逻辑）；改为「旧版 `warp-svc` / `xtun-warp-health.timer` / APT 源 / keyring 由 `install`、`apply-config`、`uninstall` 的遗留清理统一处理」 |
+| 「分流规则」529 | 「走菜单 12」→「走菜单 13」 |
+| 「卸载」453 | 遗留清理的列举里加「1.0.0 的 `/var/www/xtun-sub` 订阅目录」 |
+| 「升级注意」（新增小节，放「服务维护」之后） | 1.1.0 起不再提供订阅地址与 mihomo yaml；客户端里已添加的 `https://<域名>/sub/<token>/…` 会 404，请删掉订阅、改用链接或二维码重新导入；Cloudflare 缓存绕过规则里的 `/sub/` 子句可以删也可以留 |
 
-- `domainStrategy` 保持 `AsIs`：域名目标由 `geosite:*` 规则命中，IP 目标由 `geoip:*` 命中，
-  不引入服务端 DNS 解析开销。
-- `block` 出站已存在（`xray_block_outbound_json`），原来只是没人引用。
-- 新 flag：`--block-cn` / `--no-block-cn`（`install_flag_specs`：`ROUTE_BLOCK_CN:yes|no`），
-  交互安装问一次「是否拦截回国流量（geoip:cn / geosite:cn）？[y/n]」默认 `n`。
-  改动走 `apply-config`（状态文件手改）即可，不单独加命令。
-- `diagnose` 增加一行「路由拦截: private[+cn]」，从 `config.json` 用 jq 读 `.routing.rules[] | select(.outboundTag=="block")`。
-- 测试：`run_routing_block_rules_case`（无 WARP / 有 WARP / block-cn 三种组合的 rules 数组形状），
-  更新 `run_warp_config_json_valid_case` 的期望。
+### 6.2 `docs/ARCHITECTURE.md`
 
-### 6.2 订阅 HTTPS 托管
+在原「订阅为什么要走 nginx 托管」的位置写「## 为什么 1.1.0 不再提供订阅与 mihomo 输出」，要点：
 
-**状态**：`SUB_TOKEN`（32 位 hex，`random_hex 16`）。安装时生成；`load_existing_state`
-之后若为空（旧节点升级）则在 `apply-config` / `install` 中生成并写回。
+- 单人节点，导入是一次性的动作，链接 + 二维码是所有客户端的公共分母；
+- 订阅是一个匿名可拉取的 HTTPS 路径，token 再长也是一个常驻的攻击面，而它换来的「多设备自动同步」在单人场景里用不上；
+- mihomo 的 xhttp 字段随版本漂移，仓库里没有本地校验器（`mihomo -t` 需要另下二进制），生成器只能靠人肉对照 wiki，维护成本高于收益；
+- 分离节点的链接 1100–1700 字符，终端二维码不实用，所以 PNG 成为唯一的图形化导出，放在 `/root/xtun-qr/`（0700），随链接重建。
 
-**落盘**：
+同文「请求流图」与「本机端口一览」不变（nginx 少一个 location 不影响端口）。
 
-```
-/var/www/xtun-sub/<SUB_TOKEN>/vless.txt        base64 一行（现 subscription_base64_text）
-/var/www/xtun-sub/<SUB_TOKEN>/vless-raw.txt    每行一个 vless://
-/var/www/xtun-sub/<SUB_TOKEN>/mihomo.yaml      §6.3
-```
+### 6.3 版本
 
-目录 `0755 root:root`，文件 `0644`。写入用 `write_generated_file_atomically`。
-生成函数放 `lib/ui/output.sh`：`write_subscription_web_files`，由 `write_output_file` 调用。
-写之前 `find "${SUB_WEB_ROOT}" -mindepth 1 -maxdepth 1 -type d ! -name "${SUB_TOKEN}" -exec rm -rf {} +`
-清掉旧 token 目录（轮换即失效）。
-
-**nginx**（`lib/generators.sh::nginx_server_config`，放在 xhttp location 之前）：
-
-```nginx
-    location ^~ /sub/ {
-        alias /var/www/xtun-sub/;
-        try_files $uri =404;
-        autoindex off;
-        access_log off;
-        types { text/plain txt; application/yaml yaml yml; }
-        default_type text/plain;
-        add_header Cache-Control "no-store, max-age=0" always;
-        add_header X-Robots-Tag "noindex, nofollow" always;
-    }
-```
-
-**命令**：`xtun change-sub-token`：`begin_managed_change` → `SUB_TOKEN="$(random_hex 16)"` →
-`write_state_file` → `write_output_file`（重写 web 目录）→ `finish_managed_change "订阅地址已轮换。"`。
-不需要重启任何服务（nginx 用 alias 到父目录）。进菜单。
-
-**输出**（`output_runtime_summary_block` 新增段）：
-
-```
-## 订阅地址（经 CDN 域名 HTTPS）
-- VLESS Base64: https://<XHTTP_DOMAIN>/sub/<token>/vless.txt
-- VLESS Raw:    https://<XHTTP_DOMAIN>/sub/<token>/vless-raw.txt
-- mihomo:       https://<XHTTP_DOMAIN>/sub/<token>/mihomo.yaml
-- 轮换: xtun change-sub-token
-```
-
-`show-links --qr` 追加打印 Base64 订阅 URL 的二维码（在 5 条链接之后）。
-
-**自检**：`diagnose` 增加「订阅自检」：
-`curl -k -sS --max-time 5 --resolve "${XHTTP_DOMAIN}:443:127.0.0.1" "https://${XHTTP_DOMAIN}/sub/${SUB_TOKEN}/vless.txt"`
-与磁盘文件 `cmp`，不一致计入 `config_failures`。`self-signed` 模式下 `-k` 是必需的。
-
-**Cloudflare 提示**：`cloudflare_xhttp_cache_bypass_expression` 追加
-`or (http.request.uri.path contains "/sub/")`；缓存规则说明段同步。
-
-**测试**：`run_subscription_web_files_case`（三文件存在、权限、旧 token 目录被清、`vless.txt` 解码后 5 行）、
-`run_change_sub_token_case`（token 变化、目录切换、不调用 restart）、
-`run_nginx_sub_location_case`（生成文本含 alias 与 no-store）。
-`sandbox_managed_paths` 加 `SUB_WEB_ROOT`；`REAL_MANAGED_CANARY` 加 `/var/www/xtun-sub`。
-
-### 6.3 mihomo 节点 yaml
-
-- 生成函数 `mihomo_nodes_yaml_text`（`lib/ui/output.sh`），纯 heredoc；标量一律经
-  `yaml_quote()`（双引号包裹，转义 `\` 与 `"`）输出，避免 vlessenc 字串、路径里的字符被 YAML 误读。
-- 模板见附录 E。要求 mihomo ≥ 1.19.24（xhttp + x-padding + vlessenc），在文件头注释与 README 写明。
-- ECH 开启时 CDN 类节点与 `download-settings` 追加 `ech-opts`；xpadding 开启时 `xhttp-opts` 与
-  `download-settings` 追加 `x-padding-*` 五键；VLESS Encryption 开启时 XHTTP 类节点带 `encryption:`。
-- 测试：`run_mihomo_yaml_case`：默认态 5 个 `- name:`；开 ECH/xpadding/关 vlessenc 三种变体的键存在性；
-  若宿主机有 `python3`，用 `python3 -c 'import yaml'` 可用时做一次真实解析（不可用则跳过，不算失败）。
-
-### 6.4 版本与文档
-
-- 阶段 1–3 完成后打 tag `v0.12.0`。
-- README 新增：「路由拦截」、「订阅地址」、「mihomo 导入」三节；Cloudflare 缓存规则表达式更新。
+- `xtun.sh`：`SCRIPT_VERSION="1.1.0"`。
+- `git tag v1.1.0`，与上一版一样打在阶段 3 的提交上。
+- 提交信息建议：`docs: 1.1.0 —— README 去订阅/mihomo、补二维码 PNG 与升级注意、修三处陈旧说明；ARCHITECTURE 记录不做订阅的决策`。
 
 ---
 
-## 7. 阶段 4：服务器调优补全（0.13.0）
+## 7. 顺手清理（可选，各自独立提交，不影响主线）
 
-### 7.1 接管 `/etc/nginx/nginx.conf`
-
-- 状态键 `NGINX_MAIN_MANAGED=yes|no`。新装默认 `yes`（交互安装问一次，默认 y；flag
-  `--manage-nginx-main` / `--no-manage-nginx-main`）。从 v1 升级的节点默认 `no`，
-  `xtun apply-config --manage-nginx-main` 打开并立即生效。
-- 生成器 `nginx_main_config_text`（`lib/generators.sh`），模板见附录 F。要点：
-  - `worker_rlimit_nofile 1048576;` 与 `LimitNOFILE` 对齐；
-  - `events { worker_connections 65535; multi_accept on; }`；
-  - 两个用户块：`nginx-main`（顶层，`http {}` 之前）、`nginx-http`（`http {}` 内末尾）；
-  - 保留 Debian 的 `include /etc/nginx/modules-enabled/*.conf;`、`conf.d/*.conf`、`sites-enabled/*`；
-  - `access_log` 保留主日志，xhttp location 里 `access_log off;`（每个 POST 一行日志，纯噪音）。
-- `write_nginx_main_config`：`NGINX_MAIN_MANAGED=yes` 时经 `write_generated_file_atomically` 写
-  `NGINX_MAIN_CONFIG`（首次接管前 `backup_path` 已由该函数保证）。`write_runtime_managed_files`
-  在 `write_nginx_config` 之后调用它；`rollback_managed_runtime_state` 的 paths 条件性加入
-  `NGINX_MAIN_CONFIG`。
-- `nginx_worker_connections_text`（`lib/ui/core.sh`）：接管后只显示数值；未接管时保留现有提示，
-  并补一句「或运行 xtun apply-config --manage-nginx-main」。
-- `uninstall`：接管过的节点，用备份目录里最早的一份 `nginx.conf` 还原；找不到则写回 Debian 默认模板
-  （把当前 Debian 13 默认内容以 heredoc 存为 `nginx_main_config_debian_default_text`）。
-- `http2` 指令兼容：`nginx -v` 版本 < 1.25.1 时（Ubuntu 24.04 的 1.24），`nginx_server_config`
-  输出 `listen 127.0.0.1:8443 ssl http2;` 而不是 `http2 on;`。新函数 `nginx_version_at_least MAJOR.MINOR.PATCH`。
-  这是现状缺陷（0.11 在 Ubuntu 24.04 上 `nginx -t` 会失败），顺手修。
-- 测试：`run_nginx_main_config_case`（模板含 rlimit / worker_connections / 两个用户块；用户块内容跨重写保留）、
-  `run_nginx_http2_compat_case`（覆盖 `nginx_version_at_least` 两种返回）。
-
-### 7.2 sysctl 增补
-
-`write_net_sysctl_conf` 追加：
-
-```
-# 未发送数据超过 128KB 就不再往 socket 缓冲里塞，h2 多路复用下的小流不用排在大流后面。
-# Cloudflare 边缘用 16KB；跨境高 BDP 链路上给到 128KB 更稳，不会卡住吞吐。
-net.ipv4.tcp_notsent_lowat = 131072
-```
-
-测试 `run_net_sysctl_content_case` 增加断言。
-
-### 7.3 BBR 内核开关拆分
-
-- 状态键 `NET_BBR_KERNEL=joey|none`。flag `--bbr-kernel joey|none`；交互安装在「是否启用网络优化」
-  之后问「是否安装 Joey BBRv3 第三方内核？[y/n]」默认 `y`（用户当前节点即此内核）。
-- `install_network_optimization`：`NET_BBR_KERNEL=none` 时跳过 `install_joey_bbrv3_kernel_if_needed`，
-  其余（sysctl / helper / service）照常；`preferred_congestion_control` 逻辑不变（有 bbr1 用 bbr1，否则 bbr）。
-- `apply-net-opt` 接受 `--bbr-kernel` 覆盖并写回状态。
-- README「网络优化」一节据此改写。
-
-### 7.4 `diagnose --net`
-
-新增子段「网络栈」，纯输出、只在拥塞控制不是 bbr 系时计一次失败：
-
-```
-内核:            7.0.3-joeyblog-bbrv3
-拥塞控制:        bbr1  (可用: reno cubic bbr bbr1)
-tcp_bbr 模块:    version 3
-默认 qdisc:      fq
-出网网卡 qdisc:  fq limit 100000p flow_limit 1000p   (tc qdisc show dev eth0 root)
-MTU:             1500
-tcp_notsent_lowat: 131072
-fs.file-max:     2097152
-nginx worker_connections / worker_rlimit_nofile:  65535 / 1048576
-nginx master LimitNOFILE:  1048576   (/proc/<pid>/limits)
-haproxy maxconn: 20000
-已建立连接拥塞算法分布:  bbr1=37 cubic=0   (ss -tin)
-```
-
-`status` 面板加一行「拥塞控制 / qdisc」。测试：`run_diagnose_net_case` 覆盖读取函数为固定值，断言输出行。
-
-### 7.5 版本
-
-打 tag `v0.13.0`。
+- `lib/install/self.sh::bundle_script_signature`（52–62）只对 `xtun.sh`、`lib`、`static` 三个路径哈希（`find xtun.sh lib static -type f`），
+  否则 `installed_script_matches_bundle` 永远为假、`update-script` 每次都重装并多留一份备份。加用例：把已安装目录与一份带 README 的 bundle 副本喂进去，期望相等。
+- `lib/ui/output.sh::build_link_context` 第 439 行 `split_extra_v6_json=…` 没有 `local`，且在 `SERVER_IP6` 为空时也白算一次 jq；挪进 `if [[ -n "${SERVER_IP6:-}" ]]` 块并声明 `local`。
+- `lib/generators.sh::nginx_server_config` 里 `quic_block=""` 没有 `local`。
+- `.gitignore` 的核心巡检残留两行（§3.2 第 4 条，若阶段 0 没做）。
 
 ---
 
-## 8. 阶段 5（可选）：IPv6 双栈（0.14.0）
+## 8. 后续 backlog（不在 1.1.0；这里才是 skill 派上用场的地方）
 
-- 探测：`guess_server_ip6`（`ip -6 route get 2606:4700:4700::1111` 取 `src`；非全局单播则空）。
-  flag `--server-ip6 VALUE` / `--no-ipv6`；状态键 `SERVER_IP6`。
-- haproxy：`bind :::443 v4v6`（替换 `bind :443`）。xray 两个入站仍监听 `127.0.0.1`，nginx 不动。
-- 链接：`SERVER_IP6` 非空时追加两条：
-  - `REALITY-V6`：与节点 1 相同，地址 `[SERVER_IP6]`；
-  - `XHTTP-SPLIT-CDN-REALITY-V6`：与节点 4 相同，`downloadSettings.address` 为 IPv6。
-- mihomo 同步追加两条。
-- `diagnose`：`监听 [::]:443`。
-- 测试：`run_ipv6_links_case`、`run_haproxy_bind_v4v6_case`。
+按价值排序，每一项都要先在 `.claude/skills/xray-core-official-knowledge/docs/stable/config/` 与 `source/` 里核对字段，再动手：
 
-## 9. 阶段 6（可选）：XHTTP H3 直连下行（0.15.0）
-
-前提：nginx 编译含 `http_v3`（Debian 13 的 1.26.3 自带；Debian 12 / Ubuntu 24.04 需 nginx.org 官方源），
-且证书模式为 `existing` / `acme-dns-cf`（客户端 `allowInsecure=0`，自签名不可用）。
-两者任一不满足则整段功能自动关闭并在 `status` 标明原因。
-
-- haproxy 只占 TCP 443，UDP 443 空着，nginx 直接在公网地址监听：
-  `listen 443 quic reuseport;`（有 IPv6 再加 `listen [::]:443 quic reuseport;`）、
-  `add_header Alt-Svc 'h3=":443"; ma=86400' always;`。TLS 终止在 nginx，`grpc_pass` 不变。
-- 链接：追加 `XHTTP-TLS-H3`（地址 `SERVER_IP`，`sni=XHTTP_DOMAIN`，`alpn=h3`）与
-  `XHTTP-SPLIT-CDN-H3`（上行 CDN h2，`downloadSettings` 走 H3 直连）。
-- 防火墙提示：UDP 443 需放行；`diagnose` 用 `ss -lunH '( sport = :443 )'` 检查。
-- 测试：`run_h3_nginx_listen_case`、`run_h3_links_case`。
+1. **`check-sni` 第 13 项：后量子就绪度。** 官方 `reality.md` 明说可以用 `xray tls ping <target>` 看目标是否支持 `X25519MLKEM768`、以及证书长度；
+   若将来要开 `mldsa65Seed`，目标返回的证书必须大于 3500 字节。加一项 WARN 级检查，为第 2 条铺路。
+2. **Reality 后量子签名（`mldsa65Seed` / `mldsa65Verify`）。** `xray mldsa65` 生成密钥对，服务端写 `realitySettings.mldsa65Seed`，客户端 `downloadSettings.realitySettings.mldsa65Verify`；
+   分享链接里客户端字段的参数名要查各客户端（v2rayN / Happ）实际支持情况，源码在 `source/config/transport_security.go`。
+3. **客户端字段名跟进。** 官方文档已把 Reality 客户端的 `publicKey` 改名为 `password`（旧名仍是别名）。xtun 生成的 `downloadSettings.realitySettings.publicKey` 与链接里的 `pbk=` 都还有效，
+   但下次改这一块时应以 `password` 为主、`publicKey` 为兼容。**不要**反过来改（skill 的 changelog 写反了，附录 E 有说明）。
+4. **Xray 版本策略。** `releases/latest` 半年停在 `v26.3.27`，pre-release 已滚了 13 个版本（`v26.4.13` … `v26.9.9`）。
+   若要跟进 pre-release，`lib/install.sh::xray_release_base_url` 与 CI 钉版本要一起改，并在 README 写明风险；本版不做。
 
 ---
 
-## 10. 阶段 7：1.0.0
-
-- README 重写为「面向自己」的手册：快速开始（3 条命令）、节点一览、Reality 域名要求、
-  Cloudflare 面板步骤、命令表、故障处理、文件清单。原理性内容移到 `docs/ARCHITECTURE.md`
-  （请求流图、为什么有 haproxy、为什么 Reality 目标不用自己的域名）。
-- CI 增加真机冒烟 job：`debian:13` systemd 容器（`docker run --privileged --cgroupns=host -v /sys/fs/cgroup:/sys/fs/cgroup:rw`），
-  执行 `bash xtun.sh install --non-interactive --server-ip 127.0.0.1 --reality-sni www.stanford.edu --xhttp-domain cdn.example.test --cert-mode self-signed --disable-warp --disable-net-opt --no-manage-nginx-main`，
-  然后 `xtun diagnose`（允许「订阅自检」与「本地 TLS 探测」通过，443 由 haproxy 监听）。
-  网络不可达导致 `check-sni` 失败时该 job 加 `--skip-sni-check`。
-- 打 tag `v1.0.0`。
-
----
-
-## 附录 A：0.12.0 之后的命令与菜单
+## 附录 A：1.1.0 的命令与菜单
 
 CLI（`dispatch_cli_command`）：
 
@@ -815,68 +536,49 @@ install [参数]            update-script          upgrade
 check-sni [域名] [--target host:port] [--timeout N]
 change-uuid [参数]        change-sni [参数]      change-path [参数]
 change-warp [参数]        change-warp-rules [参数]
-change-cert-mode [参数]   renew-cert [参数]      change-sub-token
+change-cert-mode [参数]   renew-cert [参数]
 show-links [--qr]         diagnose [--warp-probe] [--net]
 status [--raw]            restart                repair-perms
 apply-config [--manage-nginx-main]   apply-net-opt [--bbr-kernel joey|none]
 uninstall [--yes] [--purge]          version      help
 ```
 
-菜单：
+删除：`change-sub-token`。
+
+菜单（`show_main_menu` / `run_menu_choice`）：
 
 ```
   1. 安装或重装
-  2. 查看节点链接与订阅地址
+  2. 查看节点链接与二维码
   3. 运行诊断
   4. 刷新状态面板
   5. 重启服务
   6. 更新脚本本身
   7. 升级 Xray 核心
   8. 轮换节点 UUID
-  9. 修改 REALITY SNI（含预检）
+  9. 修改 REALITY SNI
  10. 检查 REALITY SNI 域名
  11. 修改 XHTTP 路径
  12. 开关 WARP 分流
  13. 查看 WARP 分流规则
  14. 修改证书模式 / CDN 域名
  15. 续期 / 刷新证书
- 16. 轮换订阅地址
- 17. 重新应用网络优化
- 18. 重新生成托管配置
- 19. 抢修文件权限
- 20. 卸载
+ 16. 重新应用网络优化
+ 17. 重新生成托管配置
+ 18. 抢修文件权限
+ 19. 卸载
   0. 退出
 ```
 
-新增 install flag：`--skip-sni-check`、`--block-cn` / `--no-block-cn`、
-`--manage-nginx-main` / `--no-manage-nginx-main`、`--bbr-kernel joey|none`。
-删除 install 选项：`--cf-zone-id`、`--cf-api-token`、`--cf-cert-validity`。
+## 附录 B：状态文件 v2 键表（1.1.0）
 
-## 附录 B：状态文件 v2 键表（`/usr/local/etc/xray/node-meta.env`）
+与 `docs/archive/PLAN-1.0.0.md` 附录 B 相同，去掉 `SUB_TOKEN`。旧文件里的 `SUB_TOKEN` 加载时按未知键跳过，写回时消失。
 
-```
-STATE_VERSION=2
-SERVER_IP  NODE_LABEL_PREFIX
-REALITY_UUID  REALITY_SNI  REALITY_TARGET  REALITY_SHORT_ID  REALITY_PRIVATE_KEY  REALITY_PUBLIC_KEY
-XHTTP_UUID  XHTTP_DOMAIN  XHTTP_PATH
-XHTTP_VLESS_ENCRYPTION_ENABLED  XHTTP_VLESS_DECRYPTION  XHTTP_VLESS_ENCRYPTION
-TLS_ALPN  FINGERPRINT
-ENABLE_WARP  WARP_PRIVATE_KEY  WARP_ADDRESS_V4  WARP_ADDRESS_V6  WARP_PEER_PUBLIC_KEY  WARP_ENDPOINT  WARP_RESERVED  WARP_MTU  WARP_RULES_TEXT
-ENABLE_NET_OPT  NET_BBR_KERNEL
-CERT_MODE(self-signed|existing|acme-dns-cf)  ACME_EMAIL  ACME_CA  CF_DNS_ACCOUNT_ID  CF_DNS_ZONE_ID
-XHTTP_ECH_CONFIG_LIST  XHTTP_ECH_FORCE_QUERY
-XHTTP_XPADDING_ENABLED  XHTTP_XPADDING_KEY  XHTTP_XPADDING_HEADER  XHTTP_XPADDING_PLACEMENT  XHTTP_XPADDING_METHOD
-ROUTE_BLOCK_CN  SUB_TOKEN  NGINX_MAIN_MANAGED
-SERVER_IP6（阶段 5）
-```
-
-只读的 v1 遗留键：`NODE_CLIENTS_TEXT`（触发迁移提示后丢弃）。
-
-## 附录 C：托管文件清单（1.0.0）
+## 附录 C：托管文件清单（1.1.0）
 
 ```
 /usr/local/sbin/xtun                          管理命令 wrapper
-/usr/local/lib/xtun/                          脚本 bundle
+/usr/local/lib/xtun/                          脚本 bundle（xtun.sh / lib / static）
 /usr/local/bin/xray  /usr/local/share/xray/   核心与 geo 资源
 /usr/local/etc/xray/config.json               0640 root:xray
     本机端口：2443 Reality 入站 / 2444 dokodemo 回落过滤 / 8001 XHTTP 入站 / 8443 nginx TLS
@@ -886,217 +588,74 @@ SERVER_IP6（阶段 5）
 /etc/systemd/system/nginx.service.d/xtun-limits.conf   LimitNOFILE + Restart
 /etc/haproxy/haproxy.cfg
 /etc/nginx/nginx.conf                         仅 NGINX_MAIN_MANAGED=yes
-/etc/nginx/conf.d/xtun.conf
+/etc/nginx/conf.d/xtun.conf                   （不再有 /sub/ location）
 /etc/ssl/xtun/{cert,key}.pem
 /etc/sysctl.d/98-xtun-net.conf
 /usr/local/sbin/xtun-net-optimize.sh  +  xtun-net-optimize.service
 /usr/local/sbin/xtun-cert-reload.sh           acme 模式
 /etc/logrotate.d/xtun
 /var/www/xtun-fallback/                       伪装站
-/var/www/xtun-sub/<token>/                    订阅
-/root/xtun-output.md                          人类可读输出
+/root/xtun-output.md                          人类可读输出（节点 1–9 + 二维码段）
+/root/xtun-qr/NN-<节点名>.png                  节点二维码 PNG，0700 / 0600
 /root/xtun-backups/                           变更备份
 /var/log/xtun/operations.log
 ```
 
-## 附录 D：把现有节点（本机）升到 0.12 / 0.13 的操作
+删除：`/var/www/xtun-sub/`（进 `legacy_managed_paths`）。
 
-本机现状：`ENABLE_WARP=yes`、`CERT_MODE=cf-origin-ca`、`NODE_CLIENTS_TEXT` 空、
-`/etc/nginx/nginx.conf` 手工调过（`worker_rlimit_nofile 131072`、`worker_connections 65535`、`worker_cpu_affinity auto`）。
+## 附录 D：分享链接长度实测与二维码容量
+
+2026-09-09 用本仓库生成器实测（前缀 `HKG`，路径 `/assets/v3`，VLESS Encryption 开，字符数）：
+
+| 节点 | 默认（ECH 关、xpadding 关） | 全开（ECH + xpadding） |
+| --- | --- | --- |
+| 1 REALITY | 264 | 264 |
+| 2 XHTTP-REALITY | 531 | 728 |
+| 3 XHTTP-CDN | 554 | 812 |
+| 4 XHTTP-SPLIT-CDN-REALITY | 1238 | 1693 |
+| 5 XHTTP-SPLIT-REALITY-CDN | 1156 | 1637 |
+| 6 REALITY-V6 | 272 | 272 |
+| 7 XHTTP-SPLIT-CDN-REALITY-V6 | 1258 | 1713 |
+| 8 XHTTP-TLS-H3 | 355 | 355 |
+| 9 XHTTP-SPLIT-CDN-H3 | 985 | 1243 |
+
+QR 码字节模式最大容量（版本 40）：L 2953、M 2331、Q 1663、H 1273。最长的 1713 字符在 L 级落在版本 30（137×137 模块）；
+Q / H 级装不下节点 4 / 5 / 7 的全开形态，所以 §5.3 钉死 `-l L`。链接长度若将来超过 2953，`qrencode` 会失败，`write_link_qr_pngs` 只 warn 该条并继续。
+
+## 附录 E：skill 修正清单（`.claude/skills/xray-core-official-knowledge/`）
+
+先说结论：**skill 的两个「原材料层」是真的、也是新的**——`docs/stable/` 与 `source/` 分别是 `XTLS/Xray-docs-next` 与 `XTLS/Xray-core` 的 `main` 快照，
+2026-09-09 抽查 `infra/conf/transport_security.go`、`transport/internet/splithttp/config.go`、`docs/config/transports/reality.md` 三个文件与上游逐字节一致，
+记录的提交 `52a412d9…` 就是当天 Xray-core `main` 的 HEAD。**手写的「加工层」不可靠**：`changelog/`、`extracted/` 里有几处结论与它自己收录的文档 / 源码相反。
+实施者用 skill 时：**只信 `docs/stable/config/` 与 `source/`，`changelog/` 与 `extracted/` 的每一句话都要回到前两者核对。** 下面逐条修：
+
+| # | 文件 | 现状 | 错在哪 / 证据 | 改法 |
+| --- | --- | --- | --- | --- |
+| 1 | `changelog/v26.9.9.md`「Known Field Changes」表 `target` 行 | 「`target` (REALITY server) Renamed → Use `dest` instead. `target` is still accepted as alias」 | 方向反了。`docs/stable/config/transports/reality.md:74-78`：「`target` … **旧称 dest**, 当前版本两个字段互为alias」；`source/config/transport_security.go:30-31` 同时有 `Target` 与 `Dest` | 改为「`dest` 是旧名，`target` 是现名，互为别名」 |
+| 2 | 同表 `password` 行 | 「`password` (REALITY client) Renamed → Use `publicKey` instead」 | 方向反了。`reality.md:195-197`：「`password` … **旧称 publicKey**, 为防止误解更名」 | 改为「`publicKey` 是旧名，`password` 是现名，互为别名」 |
+| 3 | 同表 `allowInsecure` 行 + 「Security: TLS」段 + 「Deprecations」表 | 「Removed v25.x+ — Setting to `true` now errors」 | 过度断言。`tls.md:91-100`：「该选项**已被弃用**，使用 `pinnedPeerCertSha256`」；`transport_security.go:301` 仍有 `AllowInsecure bool` 字段。文档没有说填 true 会报错 | 改为「已弃用（deprecated），仍可解析；官方建议改用 `pinnedPeerCertSha256` / `verifyPeerCertByName`」 |
+| 4 | 同文件「Highlights」 | 「Latest stable release covered by this knowledge base」 | `v26.9.9` 是 pre-release（GitHub Releases `prerelease=true`，2026-09-08 发布）；`v26.4.13` 到 `v26.9.9` 全是 pre-release，最新正式版是 `v26.3.27` | 改为「最新 pre-release；最新 stable 为 v26.3.27」 |
+| 5 | 同文件其余行（`spiderX` 默认值、`.ru/.ir/.cn/apple/icloud/microsoft` 域名告警、`xPaddingBytes` 不可关闭等） | 无出处 | 未逐条核对，也没有引用 | 每行补 `source/` 或 `docs/` 的文件:行号；补不出来的删掉 |
+| 6 | `extracted/parameters/reality-settings.yaml` `dest / target` 字段 | 「旧字段名为 target，现已由 dest 统一替代」 | 与第 1 条同一错误 | 改为「旧名 dest，现名 target，互为别名」 |
+| 7 | `extracted/parameters/splithttp-xhttp.yaml` | `version_introduced: v1.8.0 (SplitHTTP…)` | REALITY 在 1.8.0，SplitHTTP 是 2024 年中（1.8.16 附近）才加入，`v1.8.0` 是错把两者混了 | 查 `source/releases` 之外的 GitHub Releases 后填准确版本，查不到就写 `unknown` |
+| 8 | `sources.yaml` | `last_sync` 与所有 `*_snapshot_date` 是 `2025-09-09` | 年份错一年（Xray 版本号 `v26.x` 即 2026 年） | 改 `2026-09-09T14:40:00Z` |
+| 9 | `sources.yaml::covered_versions.stable` | `v26.9.9` | 见第 4 条 | `stable: v26.3.27`（commit 按 tag 填），`beta: v26.9.9` |
+| 10 | `SKILL.md` frontmatter `metadata` | `current_stable` / `current_beta` / `last_sync` 全空 | 与 `sources.yaml` 不一致，agent 会先看这里 | 填 `v26.3.27` / `v26.9.9` / `2026-09-09` |
+| 11 | `SKILL.md`「Knowledge Base Architecture」与「Quick Reference」 | 把 `changelog/`、`extracted/`、`citations/` 与 `docs/`、`source/` 并列为可信来源 | `citations/` 只有模板；`extracted/` 与 `changelog/` 有上述错误 | 加一段「置信度说明」：`docs/` 与 `source/` 为一手来源；`extracted/` 与 `changelog/` 是人工摘要，引用前必须回到一手来源核对 |
+| 12 | `source/releases/*.md` | 10 个 pre-release 的正文基本只有赞助商与「See …」指向 | 内容量极低，且都不是 stable | 保留即可，但 `SKILL.md` 不要再声称它能回答「When was X added」 |
+| 13 | `scripts/extract-config.sh` | 全是注释掉的示例命令，运行后什么都不产出 | 名不副实 | 要么写成真的（`git clone` + 复制 `infra/conf` / `transport/internet` + 更新 `sources.yaml`），要么改名 `extract-config.example.sh` |
+
+## 附录 F：把本机（生产节点）升到 1.1.0 的操作
+
+本机现状：`xtun 1.0.0`、`ENABLE_WARP=yes`、H3 未启用（证书模式决定）、没有安装 `qrencode`、`/var/www/xtun-sub/<token>/` 存在。
 
 1. `xtun update-script`。
-2. `xtun status`：应看到迁移提示「证书模式 cf-origin-ca 已并入 existing」。
-3. `xtun apply-config`：会移除 core-health timer 与历史文件、删 `/root/xtun-subscriptions`、
-   把 Reality 回落切到 dokodemo-door 过滤（新增 2444 监听）、写入路由拦截规则、生成 `SUB_TOKEN` 与订阅目录、
-   nginx drop-in 加 `Restart=`（这一次 nginx 会重启）。`config.json` 中 WARP 出站与规则保持不变。
-   之后 `xtun diagnose` 应看到 2444 在监听。
-4. `xtun check-sni`（用当前 `REALITY_SNI`），确认现用域名过检。
-5. 阶段 4 后：`xtun apply-config --manage-nginx-main`。接管模板的 `worker_connections 65535`
-   与手工值相同，`worker_rlimit_nofile` 从 131072 抬到 1048576；`worker_cpu_affinity auto` 在模板里保留。
-   手工 nginx.conf 会进当次备份目录。
-6. `xtun diagnose --net` 核对 `bbr1 / fq / notsent_lowat`。
-
-## 附录 E：mihomo 节点模板（`mihomo_nodes_yaml_text`）
-
-`Q()` 表示 `yaml_quote`。`[ECH]` / `[XPAD]` / `[ENC]` 段按开关条件输出。
-`PFX` = `prefixed_node_label` 的前缀。
-
-```yaml
-# 由 xtun 生成；需要 mihomo >= 1.19.24
-proxies:
-  - name: Q(PFX-REALITY)
-    type: vless
-    server: Q(SERVER_IP)
-    port: 443
-    uuid: Q(REALITY_UUID)
-    udp: true
-    tls: true
-    network: tcp
-    flow: xtls-rprx-vision
-    servername: Q(REALITY_SNI)
-    client-fingerprint: Q(FINGERPRINT)
-    reality-opts:
-      public-key: Q(REALITY_PUBLIC_KEY)
-      short-id: Q(REALITY_SHORT_ID)
-
-  - name: Q(PFX-XHTTP-REALITY)
-    type: vless
-    server: Q(SERVER_IP)
-    port: 443
-    uuid: Q(XHTTP_UUID)
-    [ENC] encryption: Q(XHTTP_VLESS_ENCRYPTION)
-    udp: true
-    tls: true
-    network: xhttp
-    servername: Q(REALITY_SNI)
-    client-fingerprint: Q(FINGERPRINT)
-    reality-opts:
-      public-key: Q(REALITY_PUBLIC_KEY)
-      short-id: Q(REALITY_SHORT_ID)
-    xhttp-opts:
-      path: Q(XHTTP_PATH)
-      mode: auto
-      [XPAD] x-padding-obfs-mode: true
-      [XPAD] x-padding-key: Q(XHTTP_XPADDING_KEY)
-      [XPAD] x-padding-header: Q(XHTTP_XPADDING_HEADER)
-      [XPAD] x-padding-placement: Q(XHTTP_XPADDING_PLACEMENT)
-      [XPAD] x-padding-method: Q(XHTTP_XPADDING_METHOD)
-      reuse-settings:
-        max-concurrency: "16-32"
-        c-max-reuse-times: "0"
-        h-max-reusable-secs: "1800-3000"
-        h-keep-alive-period: 0
-
-  - name: Q(PFX-XHTTP-CDN)
-    type: vless
-    server: Q(XHTTP_DOMAIN)
-    port: 443
-    uuid: Q(XHTTP_UUID)
-    [ENC] encryption: Q(XHTTP_VLESS_ENCRYPTION)
-    udp: true
-    tls: true
-    network: xhttp
-    alpn: [h2]
-    servername: Q(XHTTP_DOMAIN)
-    client-fingerprint: Q(FINGERPRINT)
-    [ECH] ech-opts:
-    [ECH]   enable: true
-    [ECH]   query-server-name: cloudflare-ech.com
-    xhttp-opts:
-      host: Q(XHTTP_DOMAIN)
-      path: Q(XHTTP_PATH)
-      mode: auto
-      sc-min-posts-interval-ms: 30
-      [XPAD] x-padding-* 五键
-      reuse-settings: （同上）
-
-  - name: Q(PFX-XHTTP-SPLIT-CDN-REALITY)
-    # 外层与 XHTTP-CDN 相同（上行走 CDN），追加：
-    xhttp-opts:
-      ...
-      download-settings:
-        server: Q(SERVER_IP)
-        port: 443
-        tls: true
-        servername: Q(REALITY_SNI)
-        client-fingerprint: Q(FINGERPRINT)
-        reality-opts:
-          public-key: Q(REALITY_PUBLIC_KEY)
-          short-id: Q(REALITY_SHORT_ID)
-        path: Q(XHTTP_PATH)
-        mode: auto
-        [XPAD] x-padding-* 五键
-        reuse-settings: （同上）
-
-  - name: Q(PFX-XHTTP-SPLIT-REALITY-CDN)
-    # 外层与 XHTTP-REALITY 相同（上行走 Reality 直连），追加：
-    xhttp-opts:
-      ...
-      download-settings:
-        server: Q(XHTTP_DOMAIN)
-        port: 443
-        tls: true
-        alpn: [h2]
-        servername: Q(XHTTP_DOMAIN)
-        client-fingerprint: Q(FINGERPRINT)
-        [ECH] ech-opts: {enable: true, query-server-name: cloudflare-ech.com}
-        host: Q(XHTTP_DOMAIN)
-        path: Q(XHTTP_PATH)
-        mode: auto
-        [XPAD] x-padding-* 五键
-        reuse-settings: （同上）
-```
-
-字段名以 mihomo wiki 为准：<https://wiki.metacubex.one/config/proxies/vless/>、
-<https://wiki.metacubex.one/config/proxies/transport/>。实施前用 `mihomo -t -f mihomo.yaml`
-（本地下载一份 mihomo 二进制）跑一次真实校验，把校验命令写进 README 的「验证」一节。
-
-## 附录 F：`/etc/nginx/nginx.conf` 接管模板（`nginx_main_config_text`）
-
-```nginx
-# Generated by xtun.sh —— 这份文件由 xtun 整体重写，手工改动只在 xtun-user 标记之间保留。
-user www-data;
-worker_processes auto;
-worker_cpu_affinity auto;
-worker_rlimit_nofile 1048576;
-pid /run/nginx.pid;
-error_log /var/log/nginx/error.log;
-include /etc/nginx/modules-enabled/*.conf;
-
-events {
-    worker_connections 65535;
-    multi_accept on;
-}
-
-$(render_user_block nginx-main "${NGINX_MAIN_CONFIG}")
-
-http {
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    types_hash_max_size 2048;
-    server_tokens off;
-    keepalive_timeout 65;
-
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_prefer_server_ciphers off;
-    ssl_session_cache shared:xtun_ssl:16m;
-    ssl_session_timeout 1h;
-
-    access_log /var/log/nginx/access.log;
-    gzip on;
-
-    include /etc/nginx/conf.d/*.conf;
-    include /etc/nginx/sites-enabled/*;
-
-$(render_user_block nginx-http "${NGINX_MAIN_CONFIG}" "    ")
-}
-```
-
-## 附录 G：`check-sni` 输出示例
-
-```
-$ xtun check-sni www.stanford.edu
-Reality 目标域名预检: www.stanford.edu  (target www.stanford.edu:443)
-PASS  域名格式        www.stanford.edu
-PASS  DNS 解析        171.67.215.200
-PASS  TLS 1.3         Protocol TLSv1.3, TLS_AES_128_GCM_SHA256
-PASS  X25519          Peer Temp Key: X25519
-PASS  HTTP/2 ALPN     h2
-PASS  证书链          Verify return code: 0 (ok)
-PASS  证书 SAN        DNS:www.stanford.edu
-PASS  证书到期        76 天
-PASS  CDN 前置        否
-PASS  HTTP 跳转       200，无跳转
-PASS  HTTP 版本       2
-PASS  握手耗时        0.021s
-结论: 通过（0 FAIL, 0 WARN）
-
-$ xtun check-sni stanford.edu
-...
-FAIL  HTTP 跳转       301 -> https://www.stanford.edu/（跨主机跳转，请直接使用 www.stanford.edu）
-结论: 不通过（1 FAIL, 0 WARN）；安装时可用 --skip-sni-check 强行跳过
-```
+2. `apt-get install -y qrencode`（`apply-config` 不跑 `install_packages`，缺它 PNG 会被跳过并告警）。
+3. `xtun apply-config`：
+   - 「清理旧版本遗留的托管文件」一步会删掉 `/var/www/xtun-sub`；
+   - `xtun.conf` 重新生成（少了 `/sub/` location），nginx 走 reload；xray 照常重启一次（会掐断在跑的连接，选个空闲时段）；
+   - 输出文件重写，`/root/xtun-qr/` 出现 5 张 PNG（`01-…` 到 `05-…`；本机无 IPv6 直连、H3 未启用）。
+4. `xtun show-links --qr` 看一眼；`ls -l /root/xtun-qr`。
+5. 把 PNG 拿回本地：`scp root@<本机 IP>:/root/xtun-qr/'*.png' .`，客户端删掉旧订阅、按需扫码重导。
+6. `xtun diagnose` 应不再出现「订阅自检」行；`xtun status` 面板多一行「二维码目录」。
+7. Cloudflare 缓存绕过规则里的 `/sub/` 子句可以留着，不影响任何东西。

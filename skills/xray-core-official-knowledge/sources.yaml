@@ -58,6 +58,15 @@ gaps:
   - area: Full protobuf defaults
     status: partial
     note: Only infra/conf Go structs are captured; protobuf-generated defaults in *.pb.go files not yet fully mapped.
+  - area: docs/stable language mirrors and level-0 tutorial
+    status: removed
+    note: >
+      docs/stable/ru/ and docs/stable/en/ (156 files each, translations of the Chinese primary docs)
+      and docs/stable/document/level-0/ (52 files, beginner tutorial with gif/png screenshots) were
+      removed on 2026-09-09 to cut the skill from 27 MB to 3.5 MB. Chinese docs under docs/stable/config/
+      and docs/stable/document/level-{1,2}/ are the authoritative snapshot. Links to level-0/ from
+      about/news.md, document/config.md, document/index.md, level-1/fallbacks-lv1.md,
+      level-2/nginx_or_haproxy_tls_tunnel.md and level-2/tproxy_ipv4_and_ipv6.md are now dangling.
 
 # File-to-source mapping for major sections.
 provenance:
