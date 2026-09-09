@@ -375,6 +375,264 @@ vless_links_text() {
     "${XHTTP_REVERSE_SPLIT_URI}"
 }
 
+# YAML 标量一律双引号包裹，转义反斜杠与双引号，避免 vlessenc 字串里的字符被误读。
+yaml_quote() {
+  local value="${1:-}"
+
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "${value}"
+}
+
+subscription_base_url() {
+  printf 'https://%s/sub/%s' "${XHTTP_DOMAIN}" "${SUB_TOKEN}"
+}
+
+subscription_base64_text() {
+  vless_links_text | base64 | tr -d '\n'
+  printf '\n'
+}
+
+mihomo_xpadding_lines() {
+  # $1 = 缩进
+  cat <<EOF
+${1}x-padding-obfs-mode: true
+${1}x-padding-key: $(yaml_quote "${XHTTP_XPADDING_KEY:-${DEFAULT_XHTTP_XPADDING_KEY}}")
+${1}x-padding-header: $(yaml_quote "${XHTTP_XPADDING_HEADER:-${DEFAULT_XHTTP_XPADDING_HEADER}}")
+${1}x-padding-placement: $(yaml_quote "${XHTTP_XPADDING_PLACEMENT:-${DEFAULT_XHTTP_XPADDING_PLACEMENT}}")
+${1}x-padding-method: $(yaml_quote "${XHTTP_XPADDING_METHOD:-${DEFAULT_XHTTP_XPADDING_METHOD}}")
+EOF
+}
+
+mihomo_reuse_settings_lines() {
+  local indent="${1}"
+
+  cat <<EOF
+${indent}reuse-settings:
+${indent}  max-concurrency: $(yaml_quote "${DEFAULT_XHTTP_XMUX_MAX_CONCURRENCY}")
+${indent}  c-max-reuse-times: $(yaml_quote "${DEFAULT_XHTTP_XMUX_C_MAX_REUSE_TIMES}")
+${indent}  h-max-reusable-secs: $(yaml_quote "${DEFAULT_XHTTP_XMUX_H_MAX_REUSABLE_SECS}")
+${indent}  h-keep-alive-period: $(yaml_quote "${DEFAULT_XHTTP_XMUX_H_KEEP_ALIVE_PERIOD}")
+EOF
+}
+
+mihomo_ech_lines() {
+  local indent="${1}"
+
+  cat <<EOF
+${indent}ech-opts:
+${indent}  enable: true
+${indent}  query-server-name: cloudflare-ech.com
+EOF
+}
+
+mihomo_xhttp_base_lines() {
+  local indent="${1}"
+  local sc_indent="${1}  "
+
+  cat <<EOF
+${indent}mode: auto
+EOF
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    mihomo_xpadding_lines "${sc_indent}"
+  fi
+  cat <<EOF
+${indent}sc-min-posts-interval-ms: ${DEFAULT_XHTTP_SC_MIN_POSTS_INTERVAL_MS}
+EOF
+  mihomo_reuse_settings_lines "${indent}"
+}
+
+# 附录 E 模板。5 条节点与分享链接一一对应。
+mihomo_nodes_yaml_text() {
+  local pfx=""
+  local enc_line=""
+  local enc_line2=""
+
+  pfx="$(prefixed_node_label "REALITY")"
+
+  cat <<EOF
+# 由 xtun 生成；需要 mihomo >= 1.19.24（xhttp + x-padding + vless encryption）
+proxies:
+  - name: $(yaml_quote "${pfx}")
+    type: vless
+    server: $(yaml_quote "${SERVER_IP}")
+    port: 443
+    uuid: $(yaml_quote "${REALITY_UUID}")
+    udp: true
+    tls: true
+    network: tcp
+    flow: xtls-rprx-vision
+    servername: $(yaml_quote "${REALITY_SNI}")
+    client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+    reality-opts:
+      public-key: $(yaml_quote "${REALITY_PUBLIC_KEY}")
+      short-id: $(yaml_quote "${REALITY_SHORT_ID}")
+
+  - name: $(yaml_quote "$(prefixed_node_label "XHTTP-REALITY")")
+    type: vless
+    server: $(yaml_quote "${SERVER_IP}")
+    port: 443
+    uuid: $(yaml_quote "${XHTTP_UUID}")
+EOF
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    printf '    encryption: %s
+' "$(yaml_quote "${XHTTP_VLESS_ENCRYPTION}")"
+  fi
+  cat <<EOF
+    udp: true
+    tls: true
+    network: xhttp
+    servername: $(yaml_quote "${REALITY_SNI}")
+    client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+    reality-opts:
+      public-key: $(yaml_quote "${REALITY_PUBLIC_KEY}")
+      short-id: $(yaml_quote "${REALITY_SHORT_ID}")
+    xhttp-opts:
+      path: $(yaml_quote "${XHTTP_PATH}")
+EOF
+  mihomo_xhttp_base_lines "    "
+
+  cat <<EOF
+
+  - name: $(yaml_quote "$(prefixed_node_label "XHTTP-CDN")")
+    type: vless
+    server: $(yaml_quote "${XHTTP_DOMAIN}")
+    port: 443
+    uuid: $(yaml_quote "${XHTTP_UUID}")
+EOF
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    printf '    encryption: %s
+' "$(yaml_quote "${XHTTP_VLESS_ENCRYPTION}")"
+  fi
+  cat <<EOF
+    udp: true
+    tls: true
+    network: xhttp
+    alpn: [h2]
+    servername: $(yaml_quote "${XHTTP_DOMAIN}")
+    client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+EOF
+  if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
+    mihomo_ech_lines "    "
+  fi
+  cat <<EOF
+    xhttp-opts:
+      host: $(yaml_quote "${XHTTP_DOMAIN}")
+      path: $(yaml_quote "${XHTTP_PATH}")
+EOF
+  mihomo_xhttp_base_lines "    "
+
+  cat <<EOF
+
+  - name: $(yaml_quote "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")")
+    type: vless
+    server: $(yaml_quote "${XHTTP_DOMAIN}")
+    port: 443
+    uuid: $(yaml_quote "${XHTTP_UUID}")
+EOF
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    printf '    encryption: %s
+' "$(yaml_quote "${XHTTP_VLESS_ENCRYPTION}")"
+  fi
+  cat <<EOF
+    udp: true
+    tls: true
+    network: xhttp
+    alpn: [h2]
+    servername: $(yaml_quote "${XHTTP_DOMAIN}")
+    client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+EOF
+  if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
+    mihomo_ech_lines "    "
+  fi
+  cat <<EOF
+    xhttp-opts:
+      host: $(yaml_quote "${XHTTP_DOMAIN}")
+      path: $(yaml_quote "${XHTTP_PATH}")
+EOF
+  mihomo_xhttp_base_lines "    "
+  cat <<EOF
+      download-settings:
+        server: $(yaml_quote "${SERVER_IP}")
+        port: 443
+        tls: true
+        servername: $(yaml_quote "${REALITY_SNI}")
+        client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+        reality-opts:
+          public-key: $(yaml_quote "${REALITY_PUBLIC_KEY}")
+          short-id: $(yaml_quote "${REALITY_SHORT_ID}")
+        path: $(yaml_quote "${XHTTP_PATH}")
+        mode: auto
+EOF
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    mihomo_xpadding_lines "        "
+  fi
+  mihomo_reuse_settings_lines "      "
+
+  cat <<EOF
+
+  - name: $(yaml_quote "$(prefixed_node_label "XHTTP-SPLIT-REALITY-CDN")")
+    type: vless
+    server: $(yaml_quote "${SERVER_IP}")
+    port: 443
+    uuid: $(yaml_quote "${XHTTP_UUID}")
+EOF
+  if [[ "${XHTTP_VLESS_ENCRYPTION_ENABLED}" == "yes" && -n "${XHTTP_VLESS_ENCRYPTION}" ]]; then
+    printf '    encryption: %s
+' "$(yaml_quote "${XHTTP_VLESS_ENCRYPTION}")"
+  fi
+  cat <<EOF
+    udp: true
+    tls: true
+    network: xhttp
+    servername: $(yaml_quote "${REALITY_SNI}")
+    client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+    reality-opts:
+      public-key: $(yaml_quote "${REALITY_PUBLIC_KEY}")
+      short-id: $(yaml_quote "${REALITY_SHORT_ID}")
+    xhttp-opts:
+      path: $(yaml_quote "${XHTTP_PATH}")
+EOF
+  mihomo_xhttp_base_lines "    "
+  cat <<EOF
+      download-settings:
+        server: $(yaml_quote "${XHTTP_DOMAIN}")
+        port: 443
+        tls: true
+        alpn: [h2]
+        servername: $(yaml_quote "${XHTTP_DOMAIN}")
+        client-fingerprint: $(yaml_quote "$(effective_fingerprint)")
+        host: $(yaml_quote "${XHTTP_DOMAIN}")
+        path: $(yaml_quote "${XHTTP_PATH}")
+        mode: auto
+EOF
+  if [[ "${XHTTP_XPADDING_ENABLED:-no}" == "yes" ]]; then
+    mihomo_xpadding_lines "        "
+  fi
+  if [[ -n "${XHTTP_ECH_CONFIG_LIST}" ]]; then
+    mihomo_ech_lines "        "
+  fi
+  mihomo_reuse_settings_lines "      "
+}
+
+# 旧 token 目录在轮换后立刻失效：写新目录前先清掉所有非当前 token 的目录。
+write_subscription_web_files() {
+  local web_dir=""
+
+  ensure_sub_token || return 1
+  web_dir="${SUB_WEB_ROOT}/${SUB_TOKEN}"
+  mkdir -p "${web_dir}" || return 1
+  chmod 0755 "${SUB_WEB_ROOT}" "${web_dir}" 2>/dev/null || true
+  find "${SUB_WEB_ROOT}" -mindepth 1 -maxdepth 1 -type d ! -name "${SUB_TOKEN}" -exec rm -rf {} + 2>/dev/null || true
+
+  write_generated_file_atomically "${web_dir}/vless.txt" subscription_base64_text || return 1
+  chmod 0644 "${web_dir}/vless.txt"
+  write_generated_file_atomically "${web_dir}/vless-raw.txt" vless_links_text || return 1
+  chmod 0644 "${web_dir}/vless-raw.txt"
+  write_generated_file_atomically "${web_dir}/mihomo.yaml" mihomo_nodes_yaml_text || return 1
+  chmod 0644 "${web_dir}/mihomo.yaml"
+}
+
 prefixed_node_label() {
   local suffix="${1}"
   printf '%s-%s' "$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")" "${suffix}"
@@ -390,7 +648,7 @@ cloudflare_ssl_mode_text() {
 }
 
 cloudflare_xhttp_cache_bypass_expression() {
-  printf '(http.host eq "%s") or (http.request.uri.path contains "%s")' \
+  printf '(http.host eq "%s") or (http.request.uri.path contains "%s") or (http.request.uri.path contains "/sub/")' \
     "${XHTTP_DOMAIN}" \
     "${XHTTP_PATH}"
 }
@@ -534,6 +792,12 @@ output_runtime_summary_block() {
 - 请为 ${XHTTP_DOMAIN} 打开橙云代理。
 - 请将 Cloudflare SSL/TLS 模式设置为 ${cf_ssl_mode}。
 
+## 订阅地址（经 CDN 域名 HTTPS）
+- VLESS Base64: $(subscription_base_url)/vless.txt
+- VLESS Raw: $(subscription_base_url)/vless-raw.txt
+- mihomo: $(subscription_base_url)/mihomo.yaml
+- 轮换: xtun change-sub-token
+
 ## 本地文件
 - Xray 配置: ${XRAY_CONFIG_FILE}
 - Nginx 配置: ${NGINX_CONFIG_FILE}
@@ -635,7 +899,17 @@ $(output_xhttp_cache_rules_block)
 EOF
 }
 
+# SUB_TOKEN 只在这里（以及 change-sub-token）生成：apply/install 都会走
+# write_state_file -> write_output_file，所以生成后能立刻落盘。
+ensure_sub_token() {
+  [[ -n "${SUB_TOKEN}" ]] || SUB_TOKEN="$(random_hex 16)"
+  [[ -n "${SUB_TOKEN}" ]]
+}
+
 write_output_file() {
+  # 先把 token 定下来：输出文件里的订阅地址段要用它。
+  ensure_sub_token || return 1
   write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
   chmod 0644 "${OUTPUT_FILE}"
+  write_subscription_web_files || return 1
 }

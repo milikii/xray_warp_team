@@ -264,6 +264,38 @@ xtun status
 xtun status --raw
 ```
 
+### 路由拦截
+
+出站路由固定带两条卫生规则：`geoip:private` 与 `geosite:private` 一律 blackhole，防止来自代理的流量访问内网/回环地址。回国流量（`geoip:cn` / `geosite:cn`）默认不拦截，安装时加 `--block-cn` 或交互里选择开启即可；已装节点改状态文件里的 `ROUTE_BLOCK_CN` 后跑 `xtun apply-config` 生效。
+
+`xtun diagnose` 会报当前拦截状态（`private` / `private+cn`）。
+
+### 订阅地址
+
+订阅经 CDN 域名 HTTPS 托管在 `/sub/<32 位 token>/` 下（`Cache-Control: no-store`），本地不落 `/root/xtun-subscriptions`：
+
+```text
+https://<XHTTP_DOMAIN>/sub/<token>/vless.txt       Base64 订阅
+https://<XHTTP_DOMAIN>/sub/<token>/vless-raw.txt   每行一个 vless://
+https://<XHTTP_DOMAIN>/sub/<token>/mihomo.yaml     mihomo 节点 yaml
+```
+
+安装后自动生成 token，`xtun status` 的输出文件里会列出三个订阅地址。轮换：
+
+```bash
+xtun change-sub-token
+```
+
+轮换后旧 token 目录即刻失效（写入新目录前会清掉所有非当前 token 的目录）。Cloudflare 缓存绕过表达式已包含 `/sub/` 路径。
+
+### mihomo 导入
+
+订阅里的 `mihomo.yaml` 含 5 条节点（与 `show-links` 一一对应），需要 mihomo >= 1.19.24（xhttp + x-padding + vless encryption 支持）。ECH / xpadding / VLESS Encryption 开关开启时，yaml 会带上 `ech-opts`、`x-padding-*`、`encryption:` 对应键。
+
+```bash
+mihomo -t -f mihomo.yaml   # 导入前校验
+```
+
 ### 一次性诊断
 
 ```bash

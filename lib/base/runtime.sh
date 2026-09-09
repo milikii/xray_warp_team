@@ -336,6 +336,7 @@ finalize_installation() {
     return 1
   fi
 
+  ensure_sub_token || return 1
   write_state_file || return 1
   write_output_file
 }
@@ -395,6 +396,7 @@ apply_managed_files() {
     return 1
   fi
 
+  ensure_sub_token || return 1
   write_state_file || return 1
   write_output_file
 }

@@ -97,6 +97,7 @@ sandbox_managed_paths() {
   INSTALL_DRAFT_FILE="${root}/root/.xtun-install-draft.env"
   SCRIPT_LOCK_FILE="${root}/run/xtun.lock"
   LEGACY_PATH_ROOT="${root}"
+  SUB_WEB_ROOT="${root}/var/www/xtun-sub"
 }
 
 load_functions() {

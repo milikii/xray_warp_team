@@ -48,6 +48,9 @@ prepare_install_inputs() {
 
   NODE_LABEL_PREFIX="$(normalize_node_label_prefix "${NODE_LABEL_PREFIX}")"
 
+  prompt_yes_no ROUTE_BLOCK_CN "是否拦截回国流量（geoip:cn / geosite:cn）？ [y/n]" "n"
+  ROUTE_BLOCK_CN="$(normalize_yes_no_value "ROUTE_BLOCK_CN" "${ROUTE_BLOCK_CN}")" || exit 1
+
   prompt_yes_no ENABLE_WARP "是否启用选择性 WARP 出站？ [y/n]" "y"
   ENABLE_WARP="$(normalize_yes_no_value "ENABLE_WARP" "${ENABLE_WARP}")" || exit 1
   if [[ "${ENABLE_WARP}" == "yes" ]]; then

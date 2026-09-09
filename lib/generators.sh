@@ -298,6 +298,26 @@ xray_reality_fallback_rules_json() {
     ]'
 }
 
+# 路由卫生不可配置地开启：private 一律 blackhole（决策 B）。
+xray_private_block_rules_json() {
+  jq -cn '[
+    { type: "field", outboundTag: "block", ip: ["geoip:private"] },
+    { type: "field", outboundTag: "block", domain: ["geosite:private"] }
+  ]'
+}
+
+xray_cn_block_rules_json() {
+  if [[ "${ROUTE_BLOCK_CN:-no}" != "yes" ]]; then
+    jq -cn '[]'
+    return
+  fi
+
+  jq -cn '[
+    { type: "field", outboundTag: "block", ip: ["geoip:cn"] },
+    { type: "field", outboundTag: "block", domain: ["geosite:cn"] }
+  ]'
+}
+
 xray_warp_rules_json() {
   if [[ "${ENABLE_WARP}" != "yes" ]]; then
     jq -cn '[]'
@@ -324,8 +344,10 @@ xray_warp_rules_json() {
 xray_routing_rules_json() {
   jq -cn \
     --argjson fallback_rules "$(xray_reality_fallback_rules_json)" \
+    --argjson private_rules "$(xray_private_block_rules_json)" \
+    --argjson cn_rules "$(xray_cn_block_rules_json)" \
     --argjson warp_rules "$(xray_warp_rules_json)" \
-    '[$fallback_rules + $warp_rules][]'
+    '[$fallback_rules + $private_rules + $cn_rules + $warp_rules][]'
 }
 
 xray_direct_outbound_json() {
@@ -521,6 +543,17 @@ server {
     index index.html;
 
 ${fallback_location}
+
+    location ^~ /sub/ {
+        alias ${SUB_WEB_ROOT}/;
+        try_files \$uri =404;
+        autoindex off;
+        access_log off;
+        types { text/plain txt; application/yaml yaml yml; }
+        default_type text/plain;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header X-Robots-Tag "noindex, nofollow" always;
+    }
 
 ${xhttp_location}
 

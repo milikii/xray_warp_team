@@ -1248,11 +1248,6 @@ run_dead_global_lint_case() {
 
   while IFS= read -r name; do
     [[ -n "${name}" ]] || continue
-    # 后续阶段的占位常量（docs/PLAN.md §4.1）：阶段 2 用 REALITY_FALLBACK_PORT，
-    # 阶段 3 用 SUB_WEB_ROOT。等对应阶段落地后从这份名单里摘掉。
-    case "${name}" in
-      REALITY_FALLBACK_PORT|SUB_WEB_ROOT) continue ;;
-    esac
     printf '[fail] %s 在 xtun.sh 里赋了值，但全仓库没有任何读取点——要么是拼错了名字，要么该删\n' \
       "${name}" >&2
     violations=$((violations + 1))

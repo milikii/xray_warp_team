@@ -43,8 +43,9 @@ run_warp_enabled_case() {
   write_state_file
   write_output_file
 
-  jq -e '.routing.rules | length == 4' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.routing.rules | length == 6' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.routing.rules[0].inboundTag == ["reality-fallback"]' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.routing.rules[2].ip == ["geoip:private"]' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .protocol == "wireguard"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.secretKey == "'"${TEST_WARP_PRIVATE_KEY}"'"' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.address == ["172.16.0.2/32", "2606:4700:110:8a1b:cafe:1:2:3/128"]' "${XRAY_CONFIG_FILE}" >/dev/null
@@ -124,7 +125,7 @@ run_warp_disabled_case() {
   write_xray_config
   write_output_file
 
-  jq -e '.routing.rules | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
+  jq -e '.routing.rules | length == 4' "${XRAY_CONFIG_FILE}" >/dev/null
   jq -e '.outbounds | length == 2' "${XRAY_CONFIG_FILE}" >/dev/null
   if jq -e '.inbounds[] | select(.tag == "xhttp-cdn") | .streamSettings.xhttpSettings.xPaddingObfsMode' "${XRAY_CONFIG_FILE}" >/dev/null; then
     return 1
@@ -185,7 +186,7 @@ run_output_helper_case() {
   [[ "$(cloudflare_ssl_mode_text)" == "Full (strict)" ]]
   XHTTP_DOMAIN="cdn.example.com"
   XHTTP_PATH="/assets/v3"
-  [[ "$(cloudflare_xhttp_cache_bypass_expression)" == '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' ]]
+  [[ "$(cloudflare_xhttp_cache_bypass_expression)" == '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3") or (http.request.uri.path contains "/sub/")' ]]
 
   [[ "$(build_reality_uri "HKG-REALITY")" == *"vless://${REALITY_UUID}@${SERVER_IP}:443"* ]]
   [[ "$(build_reality_uri "HKG-REALITY")" == *"#HKG-REALITY" ]]
@@ -573,7 +574,246 @@ run_warp_config_json_valid_case() {
 
   config_text="$(xray_config_text)"
   jq -e '.outbounds | map(.tag) == ["direct", "WARP", "block"]' <<<"${config_text}" >/dev/null
-  jq -e '.routing.rules | map(.outboundTag) == ["direct", "block", "direct", "WARP"]' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules | map(.outboundTag) == ["direct", "block", "block", "block", "direct", "WARP"]' <<<"${config_text}" >/dev/null
   jq -e '[.routing.rules[] | select(.outboundTag == "WARP") | .domain[]] | length > 0' <<<"${config_text}" >/dev/null
   jq -e '.outbounds[] | select(.tag == "WARP") | .settings.peers[0].endpoint | test(":[0-9]+$")' <<<"${config_text}" >/dev/null
+}
+
+run_routing_block_rules_case() {
+  local workdir=""
+  local config_text=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.10"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PRIVATE_KEY="private-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  ROUTE_BLOCK_CN="no"
+
+  # 无 WARP、无 cn：private 两条 + dokodemo 两条
+  config_text="$(xray_config_text)"
+  jq -e '.routing.rules | length == 4' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules[2].ip == ["geoip:private"] and .routing.rules[2].outboundTag == "block"' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules[3].domain == ["geosite:private"]' <<<"${config_text}" >/dev/null
+
+  # block-cn
+  ROUTE_BLOCK_CN="yes"
+  config_text="$(xray_config_text)"
+  jq -e '.routing.rules | length == 6' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules[4].ip == ["geoip:cn"]' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules[5].domain == ["geosite:cn"]' <<<"${config_text}" >/dev/null
+
+  # 有 WARP：WARP 两条在最后
+  ROUTE_BLOCK_CN="no"
+  ENABLE_WARP="yes"
+  set_test_warp_credentials
+  WARP_RULES_TEXT="geosite:openai"
+  config_text="$(xray_config_text)"
+  jq -e '.routing.rules | length == 6' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules[4].outboundTag == "direct"' <<<"${config_text}" >/dev/null
+  jq -e '.routing.rules[5].outboundTag == "WARP"' <<<"${config_text}" >/dev/null
+  WARP_RULES_TEXT=""
+  clear_test_warp_credentials
+  ENABLE_WARP="no"
+}
+
+run_subscription_web_files_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION=""
+  XHTTP_VLESS_DECRYPTION="none"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  SUB_TOKEN=""
+
+  write_output_file
+
+  [[ "${SUB_TOKEN}" =~ ^[0-9a-f]{32}$ ]]
+  [[ -f "${SUB_WEB_ROOT}/${SUB_TOKEN}/vless.txt" ]]
+  [[ -f "${SUB_WEB_ROOT}/${SUB_TOKEN}/vless-raw.txt" ]]
+  [[ -f "${SUB_WEB_ROOT}/${SUB_TOKEN}/mihomo.yaml" ]]
+  [[ "$(stat -c '%a' "${SUB_WEB_ROOT}/${SUB_TOKEN}")" == "755" ]]
+  [[ "$(stat -c '%a' "${SUB_WEB_ROOT}/${SUB_TOKEN}/vless.txt")" == "644" ]]
+  # base64 订阅 5 行
+  [[ "$(base64 -d "${SUB_WEB_ROOT}/${SUB_TOKEN}/vless.txt" | grep -c '^vless://')" -eq 5 ]]
+  # 输出文件里有订阅地址段
+  assert_contains "https://cdn.example.com/sub/${SUB_TOKEN}/vless.txt" "${OUTPUT_FILE}"
+  assert_contains '轮换: xtun change-sub-token' "${OUTPUT_FILE}"
+  # 缓存绕过表达式带 /sub/
+  assert_contains '(http.request.uri.path contains "/sub/")' "${OUTPUT_FILE}"
+
+  # 轮换后旧目录被清掉
+  local old_token="${SUB_TOKEN}"
+  SUB_TOKEN="$(random_hex 16)"
+  write_output_file
+  [[ ! -d "${SUB_WEB_ROOT}/${old_token}" ]]
+  [[ -f "${SUB_WEB_ROOT}/${SUB_TOKEN}/vless.txt" ]]
+}
+
+run_change_sub_token_case() {
+  local calls=""
+  local old_token=""
+  local new_token=""
+
+  need_root() { :; }
+  start_backup_session() { BACKUP_DIR="/tmp/sub-token-backup"; }
+  load_current_install_context() {
+    REALITY_UUID="11111111-1111-1111-1111-111111111111"
+    REALITY_SNI="www.stanford.edu"
+    REALITY_TARGET="www.stanford.edu:443"
+    REALITY_SHORT_ID="abcd1234"
+    REALITY_PUBLIC_KEY="public-key-value"
+    XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+    XHTTP_DOMAIN="cdn.example.com"
+    XHTTP_PATH="/assets/v3"
+    SERVER_IP="203.0.113.30"
+    NODE_LABEL_PREFIX="HKG"
+    CERT_MODE="existing"
+    ENABLE_WARP="no"
+    ENABLE_NET_OPT="no"
+    SUB_TOKEN="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+  ensure_xray_user() { :; }
+  write_state_file() { :; }
+  finish_managed_change() {
+    calls+="finish:${2:-yes}"
+  }
+  log() { :; }
+  log_step() { :; }
+  log_success() { :; }
+  show_links() { :; }
+
+  OLD_SUB_TOKEN="${SUB_TOKEN}"
+  random_hex() { printf 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'; }
+  write_output_file() {
+    calls+="output"
+  }
+  validate_xray_config() { :; }
+  nginx_config_check_state() { printf 'ok'; }
+  haproxy_config_check_state() { printf 'ok'; }
+  xray_config_check_state() { printf 'ok'; }
+
+  change_sub_token_cmd
+
+  [[ "${SUB_TOKEN}" == "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ]]
+  [[ "${calls}" == *"output"* ]]
+  [[ "${calls}" != *"finish:yes"* ]]
+
+  load_functions
+}
+
+run_nginx_sub_location_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  NGINX_CONF_DIR="${workdir}/nginx"
+  NGINX_CONFIG_FILE="${NGINX_CONF_DIR}/xtun.conf"
+  reset_feature_defaults
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_LOCAL_PORT="8001"
+  NGINX_TLS_PORT="8443"
+  TLS_CERT_FILE="/etc/ssl/xtun/cert.pem"
+  TLS_KEY_FILE="/etc/ssl/xtun/key.pem"
+
+  write_nginx_config
+
+  assert_contains 'location ^~ /sub/' "${NGINX_CONFIG_FILE}"
+  assert_contains "alias ${SUB_WEB_ROOT}/;" "${NGINX_CONFIG_FILE}"
+  assert_contains 'try_files $uri =404;' "${NGINX_CONFIG_FILE}"
+  assert_contains 'no-store, max-age=0' "${NGINX_CONFIG_FILE}"
+  assert_contains 'X-Robots-Tag "noindex, nofollow"' "${NGINX_CONFIG_FILE}"
+  assert_contains 'default_type text/plain;' "${NGINX_CONFIG_FILE}"
+}
+
+run_mihomo_yaml_case() {
+  local workdir=""
+  local yaml_text=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="yes"
+  XHTTP_VLESS_ENCRYPTION='enc"value-+=?&'
+  XHTTP_VLESS_DECRYPTION='enc"value-+=?&'
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+
+  # 默认态：5 个节点
+  yaml_text="$(mihomo_nodes_yaml_text)"
+  [[ "$(grep -c '^  - name:' <<<"${yaml_text}")" -eq 5 ]]
+  grep -q '需要 mihomo >= 1.19.24' <<<"${yaml_text}"
+  # vlessenc 开启 + 特殊字符被引号包裹
+  grep -q 'encryption: "enc\\"value-+=?&"' <<<"${yaml_text}"
+  # 无 ECH / 无 xpadding 键
+  assert_false grep -q 'ech-opts' <<<"${yaml_text}"
+  assert_false grep -q 'x-padding-obfs-mode' <<<"${yaml_text}"
+  # split 节点的 download-settings
+  grep -q 'download-settings:' <<<"${yaml_text}"
+  grep -q 'public-key: "public-key-value"' <<<"${yaml_text}"
+
+  # ECH 开启
+  XHTTP_ECH_CONFIG_LIST="cloudflare-ech.com+https://223.5.5.5/dns-query"
+  yaml_text="$(mihomo_nodes_yaml_text)"
+  [[ "$(grep -c 'ech-opts:' <<<"${yaml_text}")" -eq 3 ]]
+
+  # xpadding 开启
+  XHTTP_ECH_CONFIG_LIST=""
+  XHTTP_XPADDING_ENABLED="yes"
+  yaml_text="$(mihomo_nodes_yaml_text)"
+  [[ "$(grep -c "x-padding-obfs-mode: true" <<<"${yaml_text}")" -eq 6 ]]
+
+  # 关 vlessenc
+  XHTTP_XPADDING_ENABLED="no"
+  XHTTP_VLESS_ENCRYPTION_ENABLED="no"
+  XHTTP_VLESS_DECRYPTION="none"
+  yaml_text="$(mihomo_nodes_yaml_text)"
+  assert_false grep -q 'encryption:' <<<"${yaml_text}"
+
+  # 宿主机有 python3 + yaml 就做一次真实解析
+  if command -v python3 >/dev/null 2>&1 && python3 -c 'import yaml' >/dev/null 2>&1; then
+    printf '%s' "${yaml_text}" > "${workdir}/mihomo.yaml"
+    python3 -c 'import yaml,sys; d=yaml.safe_load(open(sys.argv[1])); assert len(d["proxies"])==5' "${workdir}/mihomo.yaml"
+  fi
+
+  rm -rf "${workdir}"
 }

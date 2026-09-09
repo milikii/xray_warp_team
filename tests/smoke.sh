@@ -76,6 +76,7 @@ REAL_MANAGED_CANARY=(
   /etc/ssl/xtun
   /etc/logrotate.d/xtun
   /var/www/xtun-fallback
+  /var/www/xtun-sub
   /var/log/xtun
   /root/xtun-output.md
 )
@@ -242,6 +243,11 @@ main() {
     run_sni_check_cmd_case
     run_install_preflight_sni_case
     run_reality_fallback_inbound_case
+    run_routing_block_rules_case
+    run_subscription_web_files_case
+    run_change_sub_token_case
+    run_nginx_sub_location_case
+    run_mihomo_yaml_case
   )
 
   load_functions
