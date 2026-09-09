@@ -88,7 +88,7 @@ jobs:
           docker exec smoke bash -euxc '
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
-            apt-get install -y -qq systemctl curl openssl jq ca-certificates qrencode procps >/dev/null
+            apt-get install -y -qq curl openssl jq ca-certificates qrencode procps >/dev/null
             cp -a /src /root/xtun
             cd /root/xtun
             bash xtun.sh install --non-interactive \
