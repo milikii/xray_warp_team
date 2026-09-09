@@ -49,7 +49,8 @@ jobs:
 
   # 真机冒烟：debian:13 systemd 容器里完整跑一遍 install + diagnose。
   # 沙箱用例永远碰不到 systemd / apt / 真实 haproxy / nginx，这一层只有真机跑得出来。
-  # 网络不可达导致 check-sni 失败时走 --skip-sni-check（容器里预检本来就走不到公网）。
+  # 容器必须以 /sbin/init 起（systemd 才是 PID 1），install 再通过 docker exec 进去跑；
+  # 网络不可达导致 check-sni 失败时走 --skip-sni-check。
   install-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -57,15 +58,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run install smoke in debian:13 systemd container
+      - name: Start debian:13 systemd container
         run: |
-          set -Eeuo pipefail
-          docker run --rm --privileged --cgroupns=host \
+          docker run -d --name smoke --privileged --cgroupns=host \
             -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
             -v "${PWD}:/src:ro" \
-            debian:13 bash -euxc '
+            debian:13 /sbin/init
+
+      - name: Run install smoke
+        run: |
+          docker exec smoke bash -euxc '
+            export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
-            apt-get install -y -qq systemctl curl openssl jq ca-certificates qrencode >/dev/null
+            apt-get install -y -qq systemctl curl openssl jq ca-certificates qrencode procps >/dev/null
             cp -a /src /root/xtun
             cd /root/xtun
             bash xtun.sh install --non-interactive \
@@ -79,3 +84,7 @@ jobs:
               --skip-sni-check
             bash xtun.sh diagnose
           '
+
+      - name: Stop container
+        if: ${{ always() }}
+        run: docker rm -f smoke

@@ -9,6 +9,8 @@ install_flag_specs() {
   cat <<'EOF'
 --non-interactive:NON_INTERACTIVE:1
 --skip-sni-check:SKIP_SNI_CHECK:1
+--manage-nginx-main:NGINX_MAIN_MANAGED:yes
+--no-manage-nginx-main:NGINX_MAIN_MANAGED:no
 --block-cn:ROUTE_BLOCK_CN:yes
 --no-block-cn:ROUTE_BLOCK_CN:no
 --enable-xhttp-vless-encryption:XHTTP_VLESS_ENCRYPTION_ENABLED:yes
