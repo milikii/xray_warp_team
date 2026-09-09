@@ -9,7 +9,7 @@
 install_packages() {
   log_step "安装依赖包。"
   apt-get update || return 1
-  apt-get install -y ca-certificates curl gnupg haproxy nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin || return 1
+  apt-get install -y ca-certificates curl gnupg haproxy nginx iproute2 jq kmod openssl unzip uuid-runtime libcap2-bin qrencode || return 1
   log_success "依赖包安装完成。"
 }
 
@@ -27,7 +27,8 @@ managed_package_names() {
     "nginx" \
     "nginx-common" \
     "jq" \
-    "uuid-runtime"
+    "uuid-runtime" \
+    "qrencode"
 }
 
 xray_archive_name() {

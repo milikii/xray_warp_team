@@ -213,6 +213,7 @@ rollback_xray_only_managed_state() {
     "${XRAY_CONFIG_FILE}"
     "${STATE_FILE}"
     "${OUTPUT_FILE}"
+    "${QR_OUTPUT_DIR}"
   )
 
   warn "检测到 Xray-only 变更应用失败，正在回滚最近一次变更。"

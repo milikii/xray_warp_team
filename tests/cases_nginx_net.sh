@@ -209,11 +209,11 @@ run_ipv6_links_case() {
   [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 7 ]]
   vless_links_text > "${workdir}/links.txt"
   grep -qF "vless://${REALITY_UUID}@[2408:8120::1234]:443" "${workdir}/links.txt"
-  vless_links_text | grep -q "HKG-REALITY-V6"
-  vless_links_text | grep -q "vless://${XHTTP_UUID}@\[2408:8120::1234\]:443"
+  grep -q "HKG-REALITY-V6" "${workdir}/links.txt"
+  grep -q "vless://${XHTTP_UUID}@\[2408:8120::1234\]:443" "${workdir}/links.txt"
   # 节点 7 的 downloadSettings.address 是 IPv6（URL 编码后是 %22%5B...%5D%22）
   grep -qF 'address%22%3A%22%5B2408%3A8120%3A%3A1234%5D%22' "${workdir}/links.txt"
-  vless_links_text | grep -q "HKG-XHTTP-SPLIT-CDN-REALITY-V6"
+  grep -q "HKG-XHTTP-SPLIT-CDN-REALITY-V6" "${workdir}/links.txt"
 
   # 输出文件有节点 6 / 节点 7
   write_output_file

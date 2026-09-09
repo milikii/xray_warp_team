@@ -77,6 +77,7 @@ REAL_MANAGED_CANARY=(
   /etc/ssl/xtun
   /etc/logrotate.d/xtun
   /var/www/xtun-fallback
+  /root/xtun-qr
   /var/log/xtun
   /root/xtun-output.md
 )
@@ -165,6 +166,7 @@ main() {
     run_begin_managed_change_resolves_xray_user_case
     run_usage_case
     run_show_links_without_state_case
+    run_render_output_file_qr_case
     run_single_file_bootstrap_case
     run_bootstrap_archive_resolve_case
     run_install_self_command_case
@@ -247,6 +249,10 @@ main() {
     run_nginx_no_sub_location_case
     run_state_sub_token_dropped_case
     run_output_no_subscription_block_case
+    run_node_link_entries_case
+    run_link_qr_png_case
+    run_h3_output_blocks_case
+    run_output_qr_block_case
     run_nginx_main_config_case
     run_nginx_http2_compat_case
     run_diagnose_net_case

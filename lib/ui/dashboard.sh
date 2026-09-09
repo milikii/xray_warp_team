@@ -80,6 +80,7 @@ show_dashboard() {
     panel_row "XHTTP UUID" "$(short_value "${XHTTP_UUID:-未知}")"
     panel_row "REALITY 公钥" "$(short_value "${REALITY_PUBLIC_KEY:-未知}" 10 8)"
     panel_row "链接文件" "${OUTPUT_FILE}"
+    panel_row "二维码目录" "${QR_OUTPUT_DIR}"
   else
     panel_row "安装状态" "$(style_text "${C_YELLOW}" "未安装")"
   fi

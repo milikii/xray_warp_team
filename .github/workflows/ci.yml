@@ -88,7 +88,7 @@ jobs:
           docker exec smoke bash -euxc '
             export DEBIAN_FRONTEND=noninteractive
             apt-get update -qq
-            apt-get install -y -qq curl openssl jq ca-certificates qrencode procps >/dev/null
+            apt-get install -y -qq curl openssl jq ca-certificates procps >/dev/null
             cp -a /src /root/xtun
             cd /root/xtun
             bash xtun.sh install --non-interactive \
@@ -101,6 +101,12 @@ jobs:
               --no-manage-nginx-main \
               --skip-sni-check
             bash xtun.sh diagnose
+            test -d /root/xtun-qr
+            test "$(ls /root/xtun-qr/*.png | wc -l)" -ge 5
+            test ! -e /var/www/xtun-sub
+            ! grep -q '/sub/' /etc/nginx/conf.d/xtun.conf
+            xtun show-links --qr | grep -q '二维码 ('
+            grep -q '^## 二维码' /root/xtun-output.md
           '
 
       - name: TLS debug（diagnose 失败时留现场）

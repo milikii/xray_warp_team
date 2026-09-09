@@ -97,6 +97,7 @@ sandbox_managed_paths() {
   INSTALL_DRAFT_FILE="${root}/root/.xtun-install-draft.env"
   SCRIPT_LOCK_FILE="${root}/run/xtun.lock"
   LEGACY_PATH_ROOT="${root}"
+  QR_OUTPUT_DIR="${root}/root/xtun-qr"
 }
 
 load_functions() {

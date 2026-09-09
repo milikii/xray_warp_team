@@ -79,7 +79,8 @@ run_warp_enabled_case() {
   assert_contains '推荐操作步骤：' "${OUTPUT_FILE}"
   assert_contains 'Cache eligibility' "${OUTPUT_FILE}"
   [[ "$(grep -c '^vless://' <(vless_links_text))" -eq 5 ]]
-  vless_links_text | base64 | base64 -d | grep -q '^vless://'
+  vless_links_text | base64 | base64 -d > "${workdir}/links-b64-check.txt"
+  grep -q '^vless://' "${workdir}/links-b64-check.txt"
 }
 
 run_warp_disabled_case() {
@@ -720,4 +721,245 @@ run_output_no_subscription_block_case() {
   assert_absent 'change-sub-token' "${OUTPUT_FILE}"
   assert_absent '/sub/' "${OUTPUT_FILE}"
   assert_contains '(http.host eq "cdn.example.com") or (http.request.uri.path contains "/assets/v3")' "${OUTPUT_FILE}"
+}
+
+run_node_link_entries_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+
+  # 默认态：5 行且位次 1..5
+  [[ "$(node_link_entries | wc -l)" -eq 5 ]]
+  [[ "$(node_link_entries | cut -f1 | tr -d '\n')" == "12345" ]]
+  # 每行三列；第 2 列 == 第 3 列 # 之后片段
+  local awk_bad=""
+  awk_bad="$(node_link_entries | awk -F'\t' 'NF!=3{print "bad"; exit}')"
+  [[ -z "${awk_bad}" ]]
+  awk_bad="$(node_link_entries | awk -F'\t' '{l=$3; sub(/.*#/,"",l); if (l!=$2) {print "bad"; exit}}')"
+  [[ -z "${awk_bad}" ]]
+  # 与 vless_links_text 逐字节一致
+  [[ "$(node_link_entries | cut -f3)" == "$(vless_links_text)" ]]
+
+  # IPv6 开：7 行含 6、7
+  SERVER_IP6="2408:8120::1234"
+  [[ "$(node_link_entries | wc -l)" -eq 7 ]]
+  [[ "$(node_link_entries | cut -f1 | tr -d '\n')" == "1234567" ]]
+
+  # H3 开：9 行含 8、9
+  h3_enabled() { return 0; }
+  [[ "$(node_link_entries | wc -l)" -eq 9 ]]
+  [[ "$(node_link_entries | cut -f1 | tr -d '\n')" == "123456789" ]]
+
+  # 只有 H3：8 行，位次 8、9 追加在 1-5 之后（6/7 跳号）
+  SERVER_IP6=""
+  [[ "$(node_link_entries | wc -l)" -eq 7 ]]
+  [[ "$(node_link_entries | cut -f1 | tr -d '\n')" == "1234589" ]]
+
+  load_functions
+}
+
+run_link_qr_png_case() {
+  local workdir=""
+  local png_dir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+
+  have_qrencode() { return 0; }
+  qrencode() {
+    local out=""
+    while [[ $# -gt 0 ]]; do
+      case "${1}" in
+        -o) out="${2}"; shift ;;
+      esac
+      shift
+    done
+    printf 'PNG' > "${out}"
+  }
+
+  # 目录里预放一个过期文件：重建后必须消失
+  QR_OUTPUT_DIR="${workdir}/root/xtun-qr"
+  mkdir -p "${QR_OUTPUT_DIR}"
+  printf 'stale' > "${QR_OUTPUT_DIR}/stale.png"
+
+  write_output_file
+
+  [[ "$(stat -c '%a' "${QR_OUTPUT_DIR}")" == "700" ]]
+  [[ "$(ls "${QR_OUTPUT_DIR}"/*.png | wc -l)" -eq 5 ]]
+  [[ -f "${QR_OUTPUT_DIR}/01-HKG-REALITY.png" ]]
+  [[ -f "${QR_OUTPUT_DIR}/05-HKG-XHTTP-SPLIT-REALITY-CDN.png" ]]
+  [[ "$(stat -c '%a' "${QR_OUTPUT_DIR}/01-HKG-REALITY.png")" == "600" ]]
+  [[ ! -e "${QR_OUTPUT_DIR}/stale.png" ]]
+  [[ -f "${OUTPUT_FILE}" ]]
+
+  # qrencode 缺失：不建目录、不失败，stderr 提示 qrencode
+  load_functions
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  have_qrencode() { return 1; }
+
+  local err=""
+  err="$(write_output_file 2>&1 >/dev/null)"
+  [[ -f "${OUTPUT_FILE}" ]]
+  [[ ! -e "${QR_OUTPUT_DIR}" ]]
+  printf '%s' "${err}" | grep -q 'qrencode'
+
+  # qrencode 单条失败：目录在但为空，stderr 提示生成失败
+  load_functions
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  have_qrencode() { return 0; }
+  qrencode() { return 1; }
+
+  err="$(write_output_file 2>&1 >/dev/null)"
+  [[ -f "${OUTPUT_FILE}" ]]
+  [[ -d "${QR_OUTPUT_DIR}" ]]
+  [[ -z "$(ls -A "${QR_OUTPUT_DIR}")" ]]
+  printf '%s' "${err}" | grep -q '生成失败'
+
+  load_functions
+}
+
+run_h3_output_blocks_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  nginx_v3_capable() { return 0; }
+  h3_enabled() { [[ -z "$(h3_disabled_reason)" ]]; }
+
+  write_output_file
+
+  assert_contains '## 节点 8' "${OUTPUT_FILE}"
+  assert_contains '## 节点 9' "${OUTPUT_FILE}"
+  assert_contains 'alpn=h3' "${OUTPUT_FILE}"
+  assert_contains 'UDP / QUIC' "${OUTPUT_FILE}"
+  [[ "$(grep -c '^vless://' "${OUTPUT_FILE}")" -eq 7 ]]
+
+  # H3 关：节点 8 / 9 消失
+  load_functions
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+  h3_enabled() { return 1; }
+  build_link_context
+  [[ -z "${XHTTP_H3_URI}" ]]
+
+  load_functions
+}
+
+run_output_qr_block_case() {
+  local workdir=""
+
+  workdir="$(mktemp -d)"
+  prepare_workspace "${workdir}"
+  reset_feature_defaults
+
+  SERVER_IP="203.0.113.30"
+  NODE_LABEL_PREFIX="HKG"
+  REALITY_UUID="11111111-1111-1111-1111-111111111111"
+  REALITY_SNI="www.stanford.edu"
+  REALITY_TARGET="www.stanford.edu:443"
+  REALITY_SHORT_ID="abcd1234"
+  REALITY_PUBLIC_KEY="public-key-value"
+  XHTTP_UUID="22222222-2222-2222-2222-222222222222"
+  XHTTP_DOMAIN="cdn.example.com"
+  XHTTP_PATH="/assets/v3"
+  ENABLE_WARP="no"
+  ENABLE_NET_OPT="no"
+  CERT_MODE="existing"
+
+  write_output_file
+
+  assert_contains '## 二维码' "${OUTPUT_FILE}"
+  assert_contains 'xtun show-links --qr' "${OUTPUT_FILE}"
+  assert_contains "${QR_OUTPUT_DIR}" "${OUTPUT_FILE}"
+  assert_contains 'scp root@203.0.113.30' "${OUTPUT_FILE}"
 }

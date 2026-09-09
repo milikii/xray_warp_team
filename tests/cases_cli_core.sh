@@ -1662,3 +1662,39 @@ run_warp_legacy_teardown_case() {
   [[ -z "${logged}" ]]
   load_functions
 }
+
+run_render_output_file_qr_case() {
+  local workdir=""
+  local output=""
+  local call_log=""
+
+  workdir="$(mktemp -d)"
+  OUTPUT_FILE="${workdir}/output.md"
+  cat > "${OUTPUT_FILE}" <<'EOF'
+vless://11111111-1111-1111-1111-111111111111@203.0.113.30:443?security=reality#HKG-A
+vless://22222222-2222-2222-2222-222222222222@203.0.113.30:443?security=reality#HKG-B
+其他文本行
+EOF
+
+  call_log="${workdir}/qr-calls.log"
+  have_qrencode() { return 0; }
+  qrencode() {
+    printf 'qrencode:%s\n' "${2}" >> "${call_log}"
+    printf 'ANSI-QR'
+  }
+
+  output="$(render_output_file_qr 2>&1)"
+
+  printf '%s' "${output}" | grep -q '二维码 (HKG-A):'
+  printf '%s' "${output}" | grep -q '二维码 (HKG-B):'
+  [[ "$(grep -c 'qrencode:' "${call_log}")" -eq 2 ]]
+
+  # 缺 qrencode：只告警，不画
+  load_functions
+  OUTPUT_FILE="${workdir}/output.md"
+  have_qrencode() { return 1; }
+  output="$(render_output_file_qr 2>&1)"
+  printf '%s' "${output}" | grep -q 'qrencode'
+
+  load_functions
+}

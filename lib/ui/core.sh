@@ -545,6 +545,10 @@ h3_enabled() {
   [[ -z "$(h3_disabled_reason)" ]]
 }
 
+have_qrencode() {
+  command -v qrencode >/dev/null 2>&1
+}
+
 # UDP 443（QUIC）监听探测
 quic_port_listening() {
   command -v ss >/dev/null 2>&1 || return 1

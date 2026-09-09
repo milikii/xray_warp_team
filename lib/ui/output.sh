@@ -461,20 +461,30 @@ build_link_context() {
   fi
 }
 
-vless_links_text() {
+# 每行：位次<TAB>节点名<TAB>链接。位次固定：1–5 默认，6/7 IPv6，8/9 H3，缺席跳号，
+# 这样 PNG 文件名与输出文件里的「节点 N」在任何机器上都对得上。
+node_link_entries() {
   build_link_context
-  printf '%s\n%s\n%s\n%s\n%s\n' \
-    "${REALITY_URI}" \
-    "${XHTTP_REALITY_URI}" \
-    "${XHTTP_URI}" \
-    "${XHTTP_SPLIT_URI}" \
-    "${XHTTP_REVERSE_SPLIT_URI}"
+  printf '%s\t%s\t%s\n' \
+    1 "$(prefixed_node_label "REALITY")" "${REALITY_URI}" \
+    2 "$(prefixed_node_label "XHTTP-REALITY")" "${XHTTP_REALITY_URI}" \
+    3 "$(prefixed_node_label "XHTTP-CDN")" "${XHTTP_URI}" \
+    4 "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY")" "${XHTTP_SPLIT_URI}" \
+    5 "$(prefixed_node_label "XHTTP-SPLIT-REALITY-CDN")" "${XHTTP_REVERSE_SPLIT_URI}"
   if [[ -n "${SERVER_IP6:-}" ]]; then
-    printf '%s\n%s\n' "${REALITY_V6_URI}" "${XHTTP_SPLIT_CDN_REALITY_V6_URI}"
+    printf '%s\t%s\t%s\n' \
+      6 "$(prefixed_node_label "REALITY-V6")" "${REALITY_V6_URI}" \
+      7 "$(prefixed_node_label "XHTTP-SPLIT-CDN-REALITY-V6")" "${XHTTP_SPLIT_CDN_REALITY_V6_URI}"
   fi
   if h3_enabled; then
-    printf '%s\n%s\n' "${XHTTP_H3_URI}" "${XHTTP_SPLIT_CDN_H3_URI}"
+    printf '%s\t%s\t%s\n' \
+      8 "$(prefixed_node_label "XHTTP-TLS-H3")" "${XHTTP_H3_URI}" \
+      9 "$(prefixed_node_label "XHTTP-SPLIT-CDN-H3")" "${XHTTP_SPLIT_CDN_H3_URI}"
   fi
+}
+
+vless_links_text() {
+  node_link_entries | cut -f3
 }
 
 prefixed_node_label() {
@@ -664,6 +674,47 @@ ${XHTTP_SPLIT_CDN_REALITY_V6_URI}
 EOF
 }
 
+output_h3_blocks() {
+  if [[ -z "${XHTTP_H3_URI}" ]]; then
+    return 0
+  fi
+
+  cat <<EOF
+## 节点 8
+- 类型: VLESS + XHTTP + TLS（H3 直连，UDP 443）
+- 地址: ${SERVER_IP}
+- 端口: 443（UDP / QUIC，防火墙需放行）
+- UUID: ${XHTTP_UUID}
+- SNI: ${XHTTP_DOMAIN}
+- 主机名: ${XHTTP_DOMAIN}
+- ALPN: h3
+- 指纹: $(effective_fingerprint)
+$(output_xhttp_shared_details)
+
+链接:
+${XHTTP_H3_URI}
+
+## 节点 9
+- 类型: 上行 XHTTP + TLS + CDN ｜ 下行 XHTTP + TLS H3 直连
+- 上行地址: ${XHTTP_DOMAIN}（CDN+TLS）
+- 下行地址: ${SERVER_IP}（H3，UDP 443）
+- UUID: ${XHTTP_UUID}
+$(output_xhttp_shared_details)
+
+链接:
+${XHTTP_SPLIT_CDN_H3_URI}
+EOF
+}
+
+output_qr_block() {
+  cat <<EOF
+## 二维码
+- 终端扫码: xtun show-links --qr
+- PNG 目录: ${QR_OUTPUT_DIR}（每条节点一张，文件名「位次-节点名.png」，随链接一起重新生成）
+- 取回本地: scp root@${SERVER_IP}:${QR_OUTPUT_DIR}/'*.png' .
+EOF
+}
+
 output_runtime_summary_block() {
   local cf_ssl_mode="${1}"
 
@@ -678,6 +729,7 @@ output_runtime_summary_block() {
 - Nginx 配置: ${NGINX_CONFIG_FILE}
 - 安装状态文件: ${STATE_FILE}
 - 链接输出文件: ${OUTPUT_FILE}
+- 二维码目录: ${QR_OUTPUT_DIR}
 
 ## WARP
 - 已启用: ${ENABLE_WARP}
@@ -768,6 +820,9 @@ $(output_xhttp_split_block "${XHTTP_SPLIT_URI}")
 
 $(output_xhttp_reverse_split_block "${XHTTP_REVERSE_SPLIT_URI}")
 $(output_ipv6_blocks)
+$(output_h3_blocks)
+
+$(output_qr_block)
 
 $(output_runtime_summary_block "${cf_ssl_mode}")
 
@@ -778,4 +833,37 @@ EOF
 write_output_file() {
   write_generated_file_atomically "${OUTPUT_FILE}" output_file_text || return 1
   chmod 0644 "${OUTPUT_FILE}"
+  write_link_qr_pngs
+}
+
+# 二维码 PNG 是输出文件的派生物：任何一步失败只 warn，不让 install / apply-config 回滚。
+# 目录整体重建：链接变了（换 UUID / SNI / 路径 / 域名、IPv6 或 H3 开关变化）旧图必须消失。
+write_link_qr_pngs() {
+  local idx="" label="" uri="" target="" tmp_file=""
+
+  if ! have_qrencode; then
+    warn "未安装 qrencode，跳过二维码 PNG；apt-get install -y qrencode 后运行 xtun apply-config 即可补齐。"
+    return 0
+  fi
+  if ! backup_path "${QR_OUTPUT_DIR}"; then
+    warn "二维码目录备份失败，本次跳过 PNG 生成：${QR_OUTPUT_DIR}"
+    return 0
+  fi
+  rm -rf "${QR_OUTPUT_DIR}"
+  if ! install -d -m 0700 "${QR_OUTPUT_DIR}"; then
+    warn "无法创建二维码目录，已跳过：${QR_OUTPUT_DIR}"
+    return 0
+  fi
+
+  while IFS=$'\t' read -r idx label uri; do
+    target="${QR_OUTPUT_DIR}/$(printf '%02d-%s.png' "${idx}" "${label}")"
+    tmp_file="$(mktemp "${QR_OUTPUT_DIR}/.qr.XXXXXX")"
+    if qrencode -o "${tmp_file}" -l L -s 6 -m 2 "${uri}" 2>/dev/null; then
+      mv -f "${tmp_file}" "${target}"
+      chmod 0600 "${target}"
+    else
+      rm -f "${tmp_file}"
+      warn "二维码 PNG 生成失败，已跳过：${label}"
+    fi
+  done < <(node_link_entries)
 }

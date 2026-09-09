@@ -6,15 +6,15 @@
 # ------------------------------
 
 render_output_file_qr() {
-  if ! command -v qrencode >/dev/null 2>&1; then
-    warn "系统中未找到 qrencode，无法输出二维码。"
+  if ! have_qrencode; then
+    warn "系统中未找到 qrencode，无法输出二维码；apt-get install -y qrencode 后重试。"
     return
   fi
 
   printf '\n'
   while IFS= read -r link; do
     [[ "${link}" == vless://* ]] || continue
-    printf '%s\n' "二维码:"
+    printf '%s\n' "二维码 (${link##*#}):"
     qrencode -t ANSIUTF8 "${link}" || true
     printf '\n'
   done < "${OUTPUT_FILE}"
@@ -391,6 +391,7 @@ uninstall_cmd() {
     "${ACME_RELOAD_HELPER}" \
     "${ACME_HOME}" \
     "${OUTPUT_FILE}" \
+    "${QR_OUTPUT_DIR}" \
     "/var/log/xray" \
     "/var/lib/xray" \
     "${OP_LOG_DIR}" \
